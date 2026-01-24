@@ -1,137 +1,124 @@
-# JARVIS - Local Multimodal AI Agent 🤖
+# 👁️ ARGOS: Autonomous Multimodal AI Agent for Linux
 
-![Python Version](https://img.shields.io/badge/python-3.10%2B-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
-![Status](https://img.shields.io/badge/status-active-success)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python)
+![AI Framework](https://img.shields.io/badge/Logic-ReAct--Pattern-red?style=for-the-badge)
+![Vision](https://img.shields.io/badge/Vision-Llama--3.2--Vision-violet?style=for-the-badge)
+![OS](https://img.shields.io/badge/Platform-Linux--Xorg-orange?style=for-the-badge&logo=linux)
 
-**A fully autonomous, multimodal AI agent capable of interacting with the OS, seeing the screen, and speaking.**
-
-> **Author's Note:** This project was built to demonstrate proficiency in LLM Agentic Workflows, Tool Use (Function Calling), and System Automation using Python.
-
----
-
-## 📸 Demo
-
-*(Inserisci qui una GIF o uno screenshot del terminale mentre Jarvis esegue un comando, es. crea un file o analizza lo schermo)*
-`![Jarvis Demo](assets/demo_placeholder.gif)`
+**ARGOS** (Autonomous Remote Grid Operating System) is a high-performance, multimodal AI agent capable of perceiving the desktop environment and executing complex workflows autonomously. By bridging the gap between Vision-Language Models (VLM) and low-level system automation, ARGOS can "see" the screen and "act" on any GUI application just like a human operator.
 
 ---
 
-## ✨ Key Features
+## 🚀 Full Feature Set
 
-*   **🧠 Chain of Reaction:** Implements a recursive reasoning loop. Jarvis executes tools, reads the output, and decides the next step autonomously.
-*   **👁️ Visual Grounding:** Can "see" the screen to answer questions or **click** specific UI elements using Vision Models (Llama 3.2 Vision / LLaVA).
-*   **🔌 Hybrid Backend:**
-    *   **Cloud Mode (Groq):** Ultra-fast inference (Llama 3 70B) for complex reasoning.
-    *   **Local Mode (Ollama):** 100% private, offline capability using local models.
-*   **🗣️ Voice Interface:** Integrated Speech-to-Text and Text-to-Speech for hands-free interaction.
-*   **🛡️ Human-in-the-Loop:** Safety gates prevent critical actions (file deletion, typing) without explicit user confirmation.
-*   **📂 OS Automation:** Full control over file system (Read/Write/Modify), application launching, and keyboard automation.
+### 1. 👁️ Advanced Computer Vision
+*   **Visual Grounding:** Identifies UI elements (buttons, search bars, icons) from raw pixels.
+*   **Dynamic Grid Overlay:** A custom pre-processing pipeline that draws a high-contrast coordinate grid over screenshots, eliminating LLM spatial hallucinations and ensuring **pixel-perfect clicking**.
+*   **Screen Description:** Provides semantic analysis of the current workspace, identifying open windows and active tasks.
+
+### 2. 🖱️ OS & GUI Automation
+*   **Intelligent Click Engine:** Supports single, double, and right-clicks with human-like mouse easing.
+*   **Precision Typing:** Types text into specific UI fields. It automatically handles window focus using `xdotool` to ensure input reaches the correct application.
+*   **Window Management:** Detects, launches, and brings specific applications (Firefox, Chrome, VS Code, etc.) to the foreground.
+*   **System Telemetry:** Real-time monitoring of CPU and RAM usage.
+
+### 3. 📂 File System Intelligence
+*   **Full CRUD Operations:** Create, read, modify, rename, and delete files.
+*   **Directory Management:** Automated creation and recursive deletion of directories.
+*   **Context-Aware Navigation:** Resolves paths dynamically between Linux home and desktop environments.
+
+### 4. 🌐 Web & Information Retrieval
+*   **Autonomous Web Search:** Uses DuckDuckGo to browse the internet, synthesize information, and answer complex queries.
+*   **Real-time Crypto Tracking:** Live price fetching for any cryptocurrency via API.
+
+### 5. 🗣️ Multimodal Interface
+*   **Voice Command Support:** Integrated Speech-to-Text (STT) for hands-free operation.
+*   **Neural Speech Synthesis:** Text-to-Speech (TTS) output via gTTS for natural feedback.
+
+### 6. 🛡️ Security & Safety
+*   **Human-in-the-Loop (HITL):** A robust "Security Gate" that intercepts dangerous operations (file deletions, automated typing, app launching) and requires manual user approval.
+*   **Chain of Thought Transparency:** Logs the agent's reasoning process in the terminal.
 
 ---
 
-## 🛠️ Architecture
+---
 
-The agent follows a **ReAct (Reasoning + Acting)** pattern:
+## 🖥️ System Interface
 
-1.  **Perception:** Captures User Input (Voice/Text) + Environment State (Screen/Files).
-2.  **Reasoning:** The LLM (Llama 3) analyzes the context and decides if a tool is needed, returning a structured **JSON**.
-3.  **Execution:** The `Tool Manager` parses the JSON and executes the Python function (e.g., `subprocess`, `pyautogui`, `os`).
-4.  **Feedback:** The tool output (stdout or error) is fed back into the conversation history.
-5.  **Iteration:** The LLM decides the next move based on the new observation.
+When initialized, **Argos** performs a full system diagnostic and protocol check. The interface is designed to provide clear feedback on the active LLM backend, model status, and environmental context.
+
+![Argos Startup Screen](assets/Argos.png)
+*Figure 1: Argos Initialization Sequence featuring the Arc Reactor ASCII banner and system diagnostic logs.*
 
 ---
 
-## 🚀 Installation
+## 🧠 Technical Architecture
 
-### 1. Clone the Repository
+The agent operates on a **ReAct (Reasoning + Acting)** loop:
+
+1.  **Observe:** Captures the environment state (Screenshot + File Context).
+2.  **Reason:** The LLM (Llama 3/4 via Groq or Ollama) processes the history and visual grid to determine the next step.
+3.  **Act:** The agent selects a tool (JSON format) and executes the corresponding Python logic.
+4.  **Observe:** The output of the tool (success/error) is fed back to the LLM for the next iteration.
+
+---
+
+## 🧩 The "Grid-Mapping" Innovation
+
+The biggest challenge with VLMs is **spatial inaccuracy**. To solve this, ARGOS implements a **Visual Grid Overlay**:
+*   Instead of asking the AI to guess coordinates, the system draws a **Bright Green Grid** with numerical labels on the image.
+*   The AI reads these labels to pinpoint targets.
+*   The system then mathematically maps these relative points back to the absolute screen resolution.
+*   **Result:** A massive increase in UI interaction reliability.
+
+---
+
+## 🛠️ Tech Stack
+
+*   **Language:** Python 3.10+
+*   **Models:** Meta Llama 3 (Reasoning), Llama 3.2 Vision / Llava (Vision)
+*   **Inference:** Groq API (Cloud) & Ollama (Local)
+*   **Automation:** PyAutoGUI, Xdotool, Subprocess
+*   **Image Processing:** Pillow (PIL)
+*   **Audio:** gTTS, SpeechRecognition, mpg123
+
+---
+
+## 📦 Installation & Setup
+
+### 1. Install System Dependencies (Debian/Ubuntu)
 ```bash
-git clone https://github.com/YOUR_USERNAME/jarvis-agent.git
-cd jarvis-agent
+sudo apt-get update
+sudo apt-get install mpg123 scrot xdotool wmctrl python3-tk fonts-dejavu-core
 ```
 
-### 2. Set up Virtual Environment
+### 2. Setup Environment
 ```bash
+git clone https://github.com/yourusername/argos-ai-agent.git
+cd argos-ai-agent
 python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-### 3. Install Dependencies
-```bash
+source venv/bin/activate
 pip install -r requirements.txt
 ```
-*Linux Users:* You may need system libraries for audio and screenshots:
-```bash
-sudo apt-get install mpg123 scrot python3-tk
-```
 
-### 4. Configuration (.env)
-Create a `.env` file based on the example:
-```bash
-cp .env.example .env
-```
-Open `.env` and configure your preferences:
-```ini
-LLM_BACKEND=groq             # 'groq' or 'ollama'
-GROQ_API_KEY=gsk_...         # Your key here (free tier available)
-ENABLE_VOICE=False           # Set to True to enable Mic/Speaker
+### 3. Configure API Keys
+Create a `.env` file:
+```env
+GROQ_API_KEY=your_groq_api_key_here
+LLM_BACKEND=groq
+ENABLE_VOICE=True
 ```
 
 ---
 
-## 💻 Usage
+## 🤝 Contact & Networking
 
-Run the main entry point:
+I am a **Software Engineer** specializing in **AI Agents, Automation, and Python Development**.
 
-```bash
-python main.py
-```
-
-### Example Commands:
-*   *"Create a python script named 'calc.py' on my Desktop that adds two numbers."*
-*   *"Open Firefox and search for 'Python developer jobs in Italy'."*
-*   *"Look at the screen and tell me where the 'Submit' button is, then click it."*
-*   *"Read the file 'notes.txt' and summarize it."*
-
----
-
-## 📁 Project Structure
-
-```text
-jarvis-agent/
-├── src/
-│   ├── agent.py       # Main Logic (LLM Context Management)
-│   ├── tools.py       # Function Calling Implementation (OS, Web, App)
-│   ├── vision.py      # Screenshot & Visual Analysis Logic
-│   └── voice.py       # STT and TTS Modules
-├── main.py            # Entry Point & Orchestrator
-├── requirements.txt   # Python Dependencies
-└── .env.example       # Config Template
-```
-
----
-
-## ⚠️ Disclaimer & Safety
-
-This agent has permissions to execute commands and modify files.
-*   **Safety Gate:** Dangerous tools (File Deletion, Keyboard Typing) will ask for `[y/N]` confirmation in the terminal.
-*   **Sandboxing:** Do not run this on a production server with root privileges.
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the Project
-2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the Branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
+*   **LinkedIn:** [[Your LinkedIn Profile Link](https://www.linkedin.com/in/alessandro-catania-3b35a83a6/)]
+*   **GitHub:** [[Your GitHub Profile Link](https://github.com/AlexThunder01)]
 
 ---
 
 ## 📄 License
-
-Distributed under the MIT License. See `LICENSE` for more information.
-```
+This project is licensed under the MIT License.

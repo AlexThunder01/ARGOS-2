@@ -66,7 +66,7 @@ def print_banner():
         "         \   \_/ /      \ \_/   /",
         "          \____          ____/",
         "               \________/",
-        f"{BLUE}      --- JARVIS PROTOCOL ONLINE ---",
+        f"{BLUE}      --- ARGOS PROTOCOL ONLINE ---",
         f"          System Status: ACTIVE{RESET}"
     ]
 

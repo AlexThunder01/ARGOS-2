@@ -19,7 +19,7 @@ class JarvisAgent:
         
         # PROMPT "GUINZAGLIO CORTO"
         self.system_prompt = """
-        sei JARVIS, un assistente virtuale colto e raffinato. Rispondi in Italiano.
+        sei ARGOS, un assistente virtuale colto e raffinato. Rispondi in Italiano.
 
         - Sei su: {os_system}
         - Utente: {user}

@@ -20,10 +20,10 @@ def main():
     try:
         jarvis = JarvisAgent()
     except Exception as e:
-        print(f"❌ Errore avvio Jarvis: {e}")
+        print(f"❌ Errore avvio Argos: {e}")
         return
 
-    print(f"\n🤖 JARVIS ONLINE [Backend: {jarvis.backend}] [Model: {jarvis.model}]")
+    print(f"\n🤖 Argos ONLINE [Backend: {jarvis.backend}] [Model: {jarvis.model}]")
     if ENABLE_VOICE: speak("Sistemi online.")
 
     while True:
