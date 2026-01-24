@@ -1,0 +1,22 @@
+# --- Core Network & Environment ---
+requests==2.31.0
+python-dotenv==1.0.1
+
+# --- Image Processing & Vision ---
+Pillow==10.2.0
+
+# --- System & GUI Automation ---
+pyautogui==0.9.54
+psutil==5.9.8
+python3-xlib==0.15; sys_platform == 'linux'
+
+# --- AI & Search Tools ---
+ddgs==9.10.0
+
+# --- Voice & Audio ---
+gTTS==2.5.1
+SpeechRecognition==3.10.1
+PyAudio==0.2.14
+
+# --- Setup Utilities ---
+setuptools==69.0.3
