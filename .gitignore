@@ -4,4 +4,3 @@ venv/
 .env
 .DS_Store
 *.mp3
-*.png
