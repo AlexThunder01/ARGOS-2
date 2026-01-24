@@ -5,8 +5,9 @@ import sys
 import shutil
 import contextlib
 import requests
-# Import relativo corretto
+import time
 from .config import ENABLE_VOICE, LLM_BACKEND, OLLAMA_URL, GROQ_API_KEY
+
 
 def check_system_deps():
     if ENABLE_VOICE and not shutil.which("mpg123"):
@@ -49,3 +50,27 @@ def detect_backend():
         if requests.get(OLLAMA_URL, timeout=0.5).ok: return "ollama"
     except: pass
     return "ollama"
+
+def print_banner():
+    CYAN = "\033[96m"
+    BLUE = "\033[94m"
+    BOLD = "\033[1m"
+    RESET = "\033[0m"
+
+    banner = [
+        f"{CYAN}{BOLD}                .--------.",
+        "           ____/          \____",
+        "          /     _        _     \\",
+        "         /   / \ \      / / \   \\",
+        "        |   |   | |    | |   |   |",
+        "         \   \_/ /      \ \_/   /",
+        "          \____          ____/",
+        "               \________/",
+        f"{BLUE}      --- JARVIS PROTOCOL ONLINE ---",
+        f"          System Status: ACTIVE{RESET}"
+    ]
+
+    for line in banner:
+        print(line)
+        time.sleep(0.05) # Effetto caricamento riga per riga
+    print("\n")

@@ -11,9 +11,12 @@ from src.agent import JarvisAgent
 from src.tools import TOOLS
 from src.voice import speak, listen
 from src.config import ENABLE_VOICE
-from src.utils import extract_json
+from src.utils import extract_json, print_banner
 
 def main():
+
+    print_banner() 
+
     try:
         jarvis = JarvisAgent()
     except Exception as e:
