@@ -75,7 +75,7 @@ cp .env.example .env
 ```
 Populate the `.env` file with your minimum base credentials:
 *   `TELEGRAM_BOT_TOKEN="your_telegram_token"`
-*   `OPENAI_API_KEY="sk-yourkey"` (or GROQ_API_KEY if utilizing Llama/Qwen frameworks)
+*   `GROQ_API_KEY="gsk_yourkey"` (Required for high-speed Llama/Qwen frameworks)
 
 ### 2. Container Initialization
 Start the Docker orchestrator to execute the entire architecture in detached mode. The required n8n and Python images will initialize dynamically.
