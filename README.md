@@ -93,6 +93,15 @@ python3 inject_n8n.py
 
 ---
 
+## 🧩 Custom n8n Workflows Integration
+
+ARGOS-2 is designed for maximum extensibility. While the repository includes two pre-built Gmail HITL workflows to showcase the architecture, you can easily build your own visual automations in n8n (e.g., Slack, Trello, Google Sheets) and delegate the AI reasoning to the FastAPI backend.
+
+Read the full guide on how to interface custom n8n nodes with the ARGOS brain:
+👉 [Guide: Creating Custom n8n Workflows for ARGOS-2](docs/n8n_custom_workflows.md)
+
+---
+
 ## 🔮 Future Architecture (v2.0)
 
 While ARGOS currently operates over secure Ngrok tunnels for optimal webhook latency, further production-grade upgrades could include:
