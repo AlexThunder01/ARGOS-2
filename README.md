@@ -95,10 +95,20 @@ python3 clear_n8n.py
 python3 inject_n8n.py
 ```
 
-### 4. OAuth2 Configuration (Gmail)
-1. Access n8n (`http://localhost:5678`), and navigate to `Credentials`.
-2. Authorize a new **Gmail OAuth2 API** credential set.
-3. Bind the credential to the `New Email Received`, `Gmail: Mark As Read` and `Gmail: Reply` nodes within the newly imported workflows to grant inbox read/write permissions.
+### 4. OAuth2 Configuration & Workflow Activation
+To allow ARGOS to autonomously read and reply to your emails, you must authorize your Google and Telegram accounts within the n8n UI, and toggle the workflows to Active.
+
+1. **Create the Credentials**: Access n8n at `http://localhost:5678`. On the left sidebar, click on **Credentials** > **Add Credential**. Create your **Gmail OAuth2 API** (connecting your Google Account) and your **Telegram API** (pasting your bot token).
+2. **Configure Workflow 03**: Open the *ARGOS - 📧 Gmail Analyzer* workflow.
+   - Double-click the **New Email Received** trigger node and select your Gmail credential.
+   - Double-click the **Notifica Telegram** node and select your Telegram credential.
+   - Toggle the switch in the top-right corner from *Inactive* to **Active** so it listens continuously.
+3. **Configure Workflow 04**: Open the *04 - Gmail: Webhook Approvazione Reale* workflow.
+   - Double-click the **Rispondi Gmail** node and select your Gmail credential.
+   - Double-click the two **Conferma** Telegram nodes and select your Telegram credential.
+   - Toggle the switch in the top-right corner to **Active**.
+
+*💡 Pro Tip: Once both workflows are Active, do NOT click the yellow "Execute Workflow" button (n8n cannot share Webhook testing and production ports simultaneously for Telegram). Simply send an email to yourself and watch the Magic happen on your phone!*
 
 ---
 
