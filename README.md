@@ -5,16 +5,25 @@
 [![n8n](https://img.shields.io/badge/n8n-Workflow_Automation-FF6B6B.svg?logo=n8n)](https://n8n.io/)
 [![Docker](https://img.shields.io/badge/Docker-Enabled-2496ED.svg?logo=docker)](https://www.docker.com/)
 
-**ARGOS** is an autonomous hybrid agentic hub designed for intelligent and robust workflow automation. It combines the orchestration capabilities of the **n8n** visual engine with a high-performance backend developed in **FastAPI** (Python).
+**ARGOS** is an autonomous hybrid agentic hub designed for intelligent and robust workflow automation. It couples the visual orchestration capabilities of the **n8n** visual engine with a high-performance cognitive backend developed in **FastAPI** (Python).
 
 ---
 
-## 🎯 Use Case: Human-In-The-Loop (HITL) Gmail Automation
-This project was developed to streamline Customer Service workloads while maintaining a mandatory standard of human review. ARGOS acts as an intelligent proxy between the email inbox and the team:
+## 🚀 The Core Philosophy: n8n meets Python AI
+ARGOS-2 is **not just an email bot**—it is a completely decoupled overarching framework.
+
+By separating the "Nervous System" (n8n for routing I/O API events) from the "Brain" (FastAPI for LLM reasoning, visual actions, and persistent Queues), ARGOS gives you the ultimate sandbox. You can use n8n's visual builder to catch Shopify orders, listen to Slack channels, or read Google Sheets, and delegate the cognitive heavy-lifting to the ARGOS Python API.
+
+👉 [Read the guide: How to build custom n8n Workflows for ARGOS](docs/n8n_custom_workflows.md)
+
+---
+
+## 🎯 Reference Implementation: Human-In-The-Loop (HITL) Gmail Automation
+To demonstrate the sheer power of this decoupled architecture, ARGOS natively ships with a **fully integrated Customer Service proxy showcase**.
 
 1. **Reading and Analysis**: ARGOS monitors the Gmail inbox in real-time. Upon receiving a new email, it extracts the content and queries the LLM (via FastAPI) to generate a categorized Summary (High/Medium/Low priority) and an HTML **Draft Response**.
 2. **Telegram Webhooks**: Utilizing n8n's native Telegram nodes coupled with secure Ngrok tunneling, the draft is instantly pushed to a private chat with **Inline Keyboard Buttons** (`✅ SEND`, `❌ DISCARD`).
-3. **Seamless Zero-Latency Approval**: Interacting with the buttons triggers an immediate Callback Query. n8n intercepts the payload, atomically destructs the context from the FastAPI queue, and autonomously replies to the origin Gmail thread while dynamically updating the Telegram UI to prevent multiple clicks.
+3. **Seamless Zero-Latency Approval**: Interacting with the buttons triggers an immediate Callback Query. n8n intercepts the payload, atomically destructs the context from the FastAPI queue, and autonomously replies to the origin Gmail thread while dynamically updating the Telegram UI to prevent duplicate clicks.
 
 ### 🔥 Engineering Solutions to Technical Constraints
 *   **Absence of Public Webhook/HTTPS:** The HITL module in n8n was re-engineered leveraging Telegram API's long polling technique (`getUpdates`), intercepting `callback_query` events (inline buttons) while resolving subsequent `409 Conflict` errors via synchronous state consumption within the JavaScript nodes.
@@ -90,15 +99,6 @@ python3 inject_n8n.py
 1. Access n8n (`http://localhost:5678`), and navigate to `Credentials`.
 2. Authorize a new **Gmail OAuth2 API** credential set.
 3. Bind the credential to the `New Email Received`, `Gmail: Mark As Read` and `Gmail: Reply` nodes within the newly imported workflows to grant inbox read/write permissions.
-
----
-
-## 🧩 Custom n8n Workflows Integration
-
-ARGOS-2 is designed for maximum extensibility. While the repository includes two pre-built Gmail HITL workflows to showcase the architecture, you can easily build your own visual automations in n8n (e.g., Slack, Trello, Google Sheets) and delegate the AI reasoning to the FastAPI backend.
-
-Read the full guide on how to interface custom n8n nodes with the ARGOS brain:
-👉 [Guide: Creating Custom n8n Workflows for ARGOS-2](docs/n8n_custom_workflows.md)
 
 ---
 
