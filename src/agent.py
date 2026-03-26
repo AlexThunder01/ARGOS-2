@@ -1,3 +1,10 @@
+"""
+ARGOS Core Agent — LLM-driven cognitive loop with multi-backend support (Groq / Ollama).
+
+This module encapsulates the agent's system prompt, conversational memory management,
+and provider-specific API integration logic with automatic key rotation for rate-limit resilience.
+"""
+
 import json
 import time
 import requests
@@ -5,128 +12,145 @@ import platform
 import os
 from .config import (LLM_BACKEND, OLLAMA_URL, MODEL_GROQ, MODEL_OLLAMA, 
                      GROQ_API_KEY, GROQ_CHAT_URL, HISTORY_LIMIT)
+from src.planner.planner import build_system_prompt_suffix
+
 
 class JarvisAgent:
+    """Primary autonomous agent class. Manages the system prompt, conversation
+    history, and LLM backend dispatch for both Groq Cloud and local Ollama inference."""
+
     def __init__(self):
         self.history = []
         self.backend = LLM_BACKEND
         self.model = MODEL_GROQ if self.backend == "groq" else MODEL_OLLAMA
 
-        # --- RILEVAMENTO CONTESTO SISTEMA ---
-        user = os.environ.get("USER", "Utente")
+        # --- System Context Detection ---
+        user = os.environ.get("USER", "user")
         os_system = platform.system()
         home_dir = os.path.expanduser("~")
         
-        # PROMPT "GUINZAGLIO CORTO"
+        # Core System Prompt — Constrains the agent's reasoning and output format
         self.system_prompt = """
-        sei ARGOS, un assistente virtuale colto e raffinato. Rispondi in Italiano.
+        You are ARGOS, an intelligent and precise virtual assistant.
 
-        - Sei su: {os_system}
-        - Utente: {user}
+        - Operating System: {os_system}
+        - Current User: {user}
         - Home Directory: {home_dir}
-        - Quando crei file sul desktop, usa SOLO il percorso relativo o quello corretto per Linux (es. /home/{user}/Scrivania).
-        - NON usare MAI percorsi Windows (C:/...) se sei su Linux.
+        - When creating files on the desktop, use ONLY the correct path for the host OS (e.g., /home/{user}/Desktop on Linux).
+        - NEVER use Windows-style paths (C:/...) when running on Linux.
         
-        STILE DI RISPOSTA:
-        1. Non limitarti a riassumere i risultati del web o a elencare i siti.
-        2. Elabora le informazioni e rispondi in modo discorsivo, come una persona reale.
-        3. Se ti viene chiesto il meteo, non dire "il sito X dice...", ma di' "A Roma oggi il cielo è..."
-        4. Evita elenchi puntati di siti web a meno che l'utente non ti chieda esplicitamente le fonti.
-        5. Sii conciso ma esaustivo.
-        6. Esegui SOLO l'azione richiesta.
-        7. NON spezzare mai le azioni di scrittura: se devi scrivere e premere invio, fallo in UN SOLO tool.
-        8. Usa "press_enter": true nel JSON invece di chiamare il tool due volte.
-        9. Se un'azione visiva fallisce, NON inventare codici tastiera strani. 
-        10. Chiedi all'utente di spostare la finestra o riprovare.
+        RESPONSE STYLE:
+        1. Be EXTREMELY concise and natural. No robotic phrasing.
+        2. After performing an action (e.g., a click), respond only with "Done." or similar. Do NOT repeat verbose mechanical descriptions like "A left click was executed on...".
+        3. Present information conversationally, as a real person would. If asked for news, summarize briefly without formal bullet lists.
+        4. Never append "How can I help you further?" at the end. Stop after your response.
+        5. Execute ONLY the requested action.
+        6. NEVER split write actions: if you need to type text and press Enter, do it in a SINGLE tool call using "press_enter": true.
+        7. If a visual action fails, ask the user to reposition the window or retry.
+
+        FUNDAMENTAL RULES:
+        1. Execute ONLY EXACTLY what the user requests. If the user says "Click on X", click on X and STOP. Do NOT read the file, do NOT open it, do NOT perform any action not explicitly requested.
+        2. Do NOT invent follow-up actions. Your task ends as soon as the tool finishes.
+        3. 🛑 MANDATORY: You may invoke ONLY A SINGLE "tool" PER TURN. Generating multiple actions in the same response is STRICTLY FORBIDDEN.
+        4. After generating ONE JSON action, stop and wait for the result before proceeding.
         
-        REGOLE FONDAMENTALI:
-        1. Esegui SOLO l'azione richiesta dall'utente.
-        2. NON inventare azioni successive.
-        3. Se usi 'visual_click' o 'launch_app', considera il task completato.
+        AVAILABLE TOOLS (the names below must be used in "action" -> "tool" and "input"):
+        --- VISION ---
+        - describe_screen: {{"question": "..."}}
+        - visual_click: {{"description": "element description", "click_type": "left/right/double"}}
         
-        FORMATO RISPOSTA:
-        - Se devi agire: SOLO JSON.
-        - Se hai finito o devi spiegare: TESTO normale.
-        
-        TOOLS DISPONIBILI:
-        --- VISIONE ---
-        - describe_screen: {"tool": "describe_screen", "input": {"question": "..."}}
-        - visual_click: {"tool": "visual_click", "input": {"description": "descrizione elemento", "click_type": "left/right/double"}}
-        
-        --- SISTEMA ---
-        - launch_app: {"tool": "launch_app", "input": {"app_name": "firefox"}}
+        --- SYSTEM ---
+        - launch_app: {{"app_name": "firefox"}}
         - system_stats
-        - keyboard_type: {{"tool": "keyboard_type", "input": {{"text": "testo da scrivere", "at_element": "descrizione visiva (es. barra di ricerca in alto, campo username, ecc.)", "press_enter": true}}}}
+        - keyboard_type: {{"text": "text to type", "at_element": "visual description", "press_enter": true}}
         
         --- FILE SYSTEM ---
-        - list_files: {"tool": "list_files", "input": {"path": "."}}
-        - read_file:  {"tool": "read_file", "input": {"filename": "..."}}
-        - create_file:{"tool": "create_file", "input": {"filename": "...", "content": "..."}}
-        - modify_file:{"tool": "modify_file", "input": {"filename": "...", "content": "...", "mode": "write/append"}}
-        - rename_file:{"tool": "rename_file", "input": {"old_name": "...", "new_name": "..."}} 
-        - delete_file:{"tool": "delete_file", "input": {"filename": "..."}}
-        - create_directory: {"tool": "create_directory", "input": {"name": "nome_cartella"}}
-        - delete_directory: {"tool": "delete_directory", "input": {"name": "nome_cartella"}}
+        - list_files: {{"path": "."}}
+        - read_file: {{"filename": "..."}}
+        - create_file: {{"filename": "...", "content": "..."}}
+        - modify_file: {{"filename": "...", "content": "...", "mode": "write/append"}}
+        - rename_file: {{"old_name": "...", "new_name": "..."}}
+        - delete_file: {{"filename": "..."}}
+        - create_directory: {{"name": "directory_name"}}
+        - delete_directory: {{"name": "directory_name"}}
         
-        --- WEB ---
-        - web_search
-        - crypto_price: {"tool": "crypto_price", "input": {"coin": "bitcoin"}}
-        """
+        --- WEB & FINANCE ---
+        - web_search: {{"query": "search query"}}
+        - crypto_price: {{"coin": "bitcoin"}}
+        - finance_price: {{"asset": "gold"}}
+        """.format(os_system=os_system, user=user, home_dir=home_dir)
+        
+        self.system_prompt += "\n" + build_system_prompt_suffix()
         self._init_history()
 
     def _init_history(self):
+        """Resets the conversation history to the initial system prompt."""
         self.history = [{"role": "system", "content": self.system_prompt}]
 
     def add_message(self, role, content):
+        """Appends a message to the conversation history with automatic truncation."""
         self.history.append({"role": role, "content": content})
         if len(self.history) > HISTORY_LIMIT + 1:
             self.history = [self.history[0]] + self.history[-HISTORY_LIMIT:]
 
     def think(self):
+        """Dispatches the current conversation to the configured LLM backend."""
         try:
             if self.backend == "groq":
                 return self._call_groq()
             else:
                 return self._call_ollama()
         except Exception as e:
-            return f"Error LLM: {e}"
+            return f"LLM Error: {e}"
 
     def _call_groq(self, retries=0):
+        """Executes a Groq Cloud API call with automatic key rotation on rate limits."""
+        from .config import GROQ_API_KEY, GROQ_API_KEY2
+        
+        # Alternate between primary and secondary API keys to mitigate rate limits
+        current_key = GROQ_API_KEY2 if (retries % 2 != 0 and GROQ_API_KEY2) else GROQ_API_KEY
+        
         headers = {
-            "Authorization": f"Bearer {GROQ_API_KEY}", 
+            "Authorization": f"Bearer {current_key}", 
             "Content-Type": "application/json"
         }
         payload = {
             "model": self.model, 
             "messages": self.history, 
-            "temperature": 0.0 # Zero creatività = Meno allucinazioni
+            "temperature": 0.0  # Zero temperature = deterministic output, minimal hallucination
         }
         
         try:
             response = requests.post(GROQ_CHAT_URL, headers=headers, json=payload, timeout=30)
             
             if response.status_code == 429:
-                if retries < 2:
-                    wait_time = 5 * (retries + 1)
-                    print(f"⏳ Rate Limit. Attendo {wait_time}s...")
-                    time.sleep(wait_time)
-                    return self._call_groq(retries + 1)
+                if retries < 3:
+                    # If a secondary key is available, rotate instantly without delay
+                    if retries % 2 == 0 and GROQ_API_KEY2:
+                        print("⏳ Rate Limit (Key 1). Rotating instantly to Key 2...")
+                        return self._call_groq(retries + 1)
+                    else:
+                        wait_time = 5 * (retries + 1)
+                        print(f"⏳ Global Rate Limit reached. Waiting {wait_time}s...")
+                        time.sleep(wait_time)
+                        return self._call_groq(retries + 1)
                 else:
-                    return "Errore: Rate Limit Groq."
+                    return "Error: Groq Rate Limit exceeded."
 
             if response.status_code != 200:
                 print(f"❌ GROQ ERROR: {response.text}")
-                return "Errore API."
+                return "API Error."
                 
             return response.json()["choices"][0]["message"]["content"]
             
         except Exception as e:
-            return f"Errore Connessione: {e}"
+            return f"Connection Error: {e}"
 
     def _call_ollama(self):
+        """Executes a local Ollama inference call."""
         payload = {"model": self.model, "messages": self.history, "stream": False}
         try:
             r = requests.post(OLLAMA_URL, json=payload, timeout=60)
             return r.json()["message"]["content"]
         except Exception as e:
-            return f"Errore Ollama: {e}"
+            return f"Ollama Error: {e}"

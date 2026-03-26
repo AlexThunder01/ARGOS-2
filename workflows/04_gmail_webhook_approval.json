@@ -1,0 +1,276 @@
+{
+  "name": "04 - Gmail: Webhook Approvazione Reale",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "callback_query"
+        ]
+      },
+      "id": "e36eab3c-4e8c-4f1e-9d2a-7e6d5e4f3c2b",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [
+        200,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const query = $input.first().json.callback_query;\n\nif (!query || !query.data) {\n  return [];\n}\n\nreturn [\n  {\n    json: {\n      data: query.data\n    }\n  }\n];"
+      },
+      "id": "a1b2c3d4-e5f6-g7h8-i9j0-k1l2m3n4o5p6",
+      "name": "Extract Callback Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\n\nlet action = \"\";\nlet queue_id = \"\";\n\n// The previous workflow creates inline buttons with callback data: \"approve|MSG_ID\" and \"reject|MSG_ID\"\nif (item.data.startsWith(\"approve|\")) {\n  action = \"APPROVA\";\n  queue_id = item.data.split(\"approve|\")[1];\n} else if (item.data.startsWith(\"reject|\")) {\n  action = \"SCARTA\";\n  queue_id = item.data.split(\"reject|\")[1];\n}\n\nif (!queue_id) return [];\n\nreturn [\n  {\n    json: {\n      action: action,\n      queue_id: queue_id\n    }\n  }\n];"
+      },
+      "id": "76eef5b3-3a17-48de-8a62-fa225d3fa965",
+      "name": "Elabora Azione",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        640,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.action }}",
+              "value2": "APPROVA"
+            }
+          ]
+        }
+      },
+      "id": "ad60fb51-51dd-4d7a-ac35-654cb2bed6cd",
+      "name": "Approvato?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        860,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=http://argos-api:8000/pending_email?message_id={{ $json.queue_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "188a10ed-d533-4a1d-8a69-42b7a952d7e0",
+      "name": "Recupera Email Da API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1080,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "=http://argos-api:8000/pending_email?message_id={{ $json.queue_id }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e939f37c-d678-4384-954a-5f804561b3de",
+      "name": "Scarta Email Da API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1080,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "reply",
+        "messageId": "={{ $('Recupera Email Da API').item.json.messageId }}",
+        "message": "={{ $('Recupera Email Da API').item.json.draftHtml || $('Recupera Email Da API').item.json.draft }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "d0e12dcf-4340-4fa7-ae78-9e1ed637ff08",
+      "name": "Rispondi Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1320,
+        180
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $('Telegram Trigger').item.json.callback_query.message.chat.id }}",
+        "messageId": "={{ $('Telegram Trigger').item.json.callback_query.message.message_id }}",
+        "text": "={{ $('Telegram Trigger').item.json.callback_query.message.text.substring(0, $('Telegram Trigger').item.json.callback_query.message.text.lastIndexOf('Please select')) }}\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\u2705 **RISPOSTA APPROVATA ED INVIATA!**",
+        "replyMarkup": "none",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-answer-approve",
+      "name": "Conferma (Approvata)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1560,
+        180
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "editMessageText",
+        "chatId": "={{ $('Telegram Trigger').item.json.callback_query.message.chat.id }}",
+        "messageId": "={{ $('Telegram Trigger').item.json.callback_query.message.message_id }}",
+        "text": "={{ $('Telegram Trigger').item.json.callback_query.message.text.substring(0, $('Telegram Trigger').item.json.callback_query.message.text.lastIndexOf('Please select')) }}\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\n\u274c **EMAIL SCARTATA DALLA CODA!**",
+        "replyMarkup": "none",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "telegram-answer-reject",
+      "name": "Conferma (Scartata)",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1320,
+        420
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Callback Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Callback Data": {
+      "main": [
+        [
+          {
+            "node": "Elabora Azione",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Elabora Azione": {
+      "main": [
+        [
+          {
+            "node": "Approvato?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Approvato?": {
+      "main": [
+        [
+          {
+            "node": "Recupera Email Da API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Scarta Email Da API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Recupera Email Da API": {
+      "main": [
+        [
+          {
+            "node": "Rispondi Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rispondi Gmail": {
+      "main": [
+        [
+          {
+            "node": "Conferma (Approvata)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scarta Email Da API": {
+      "main": [
+        [
+          {
+            "node": "Conferma (Scartata)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

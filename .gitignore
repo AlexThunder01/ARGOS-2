@@ -4,3 +4,13 @@ venv/
 .env
 .DS_Store
 *.mp3
+
+# Temporary ARGOS runtime files
+/tmp/
+logs/
+*.json
+!workflows/*.json
+
+# Large local TTS models (excluded from repository)
+Qwen3-TTS-12Hz-1.7B-VoiceDesign/
+Qwen3-TTS-local/

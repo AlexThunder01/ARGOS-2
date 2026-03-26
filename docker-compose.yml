@@ -1,0 +1,63 @@
+services:
+  # --------------------------------------------------
+  # ARGOS API — FastAPI backend with LLM integrations
+  # --------------------------------------------------
+  argos-api:
+    build: .
+    container_name: argos-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+    networks:
+      - argos-network
+
+  # --------------------------------------------------
+  # n8n — Automation Engine (HITL & Workflow Orchestration)
+  # --------------------------------------------------
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: argos-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=0.0.0.0
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - WEBHOOK_URL=https://${NGROK_DOMAIN:-localhost:5678}/
+      - GENERIC_TIMEZONE=Europe/Rome
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      - argos-api
+    networks:
+      - argos-network
+
+  # --------------------------------------------------
+  # Ngrok — Secure Webhook Tunneling
+  # --------------------------------------------------
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: argos-ngrok
+    restart: unless-stopped
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN:-}
+    command: >
+      http n8n:5678 --domain=${NGROK_DOMAIN:-""}
+    depends_on:
+      - n8n
+    networks:
+      - argos-network
+
+volumes:
+  n8n_data:
+
+
+networks:
+  argos-network:
+    driver: bridge

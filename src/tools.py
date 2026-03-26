@@ -20,7 +20,7 @@ except Exception:
 
 def _get_desktop_path():
     home = os.path.expanduser("~")
-    # Prova config XDG
+    # Try XDG user-dirs config
     xdg_config = os.path.join(home, ".config", "user-dirs.dirs")
     if os.path.exists(xdg_config):
         try:
@@ -34,7 +34,7 @@ def _get_desktop_path():
                             if os.path.isdir(path): return path
         except: pass
     
-    # Fallback comuni
+    # Common fallback directory names
     for c in ["Scrivania", "Desktop", "Escritorio"]:
         path = os.path.join(home, c)
         if os.path.isdir(path): return path
@@ -44,27 +44,26 @@ def _normalize_path(path_str):
     if not path_str: return _get_desktop_path()
     path_str = str(path_str).strip()
     
-    # FIX: Se l'LLM impazzisce e manda un path Windows (C:/Users/...) su Linux
+    # FIX: Handle Windows-style paths (C:/Users/...) hallucinated by the LLM on Linux
     if ":" in path_str and not path_str.startswith("/"):
-        # Prende solo il nome del file finale (es. ciao_mondo.py)
-        # e lo mette sul desktop corretto
+        # Extract only the final filename and redirect to the correct desktop path
         base_name = os.path.basename(path_str.replace("\\", "/"))
         return os.path.join(_get_desktop_path(), base_name)
 
-    # Espande ~
+    # Expand home directory shorthand
     if "~" in path_str:
         path_str = os.path.expanduser(path_str)
 
-    # Se è assoluto, ritorna così com'è
+    # Return absolute paths unchanged
     if os.path.isabs(path_str):
         return path_str
         
-    # Altrimenti unisce al Desktop
+    # Relative paths are resolved against the desktop directory
     return os.path.join(_get_desktop_path(), path_str)
 
 
 def _get_arg(inp, keys, default=None):
-    """Estrae un argomento cercando tra varie chiavi possibili."""
+    """Extracts an argument by searching across multiple possible key names."""
     if isinstance(inp, str): return inp
     if isinstance(inp, dict):
         for k in keys:
@@ -75,28 +74,94 @@ def _get_arg(inp, keys, default=None):
 
 def crypto_price_tool(coin_id):
     coin_id = _get_arg(coin_id, ["coin", "id", "name"])
-    if not coin_id: return "Errore: Specifica una moneta."
+    if not coin_id: return "Error: Please specify a coin identifier."
     try:
         url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id.lower()}&vs_currencies=eur"
         r = requests.get(url, timeout=5)
         val = r.json().get(coin_id.lower(), {}).get('eur')
-        return f"€{val:,.2f}" if val else "Moneta non trovata."
-    except Exception as e: return f"Errore API: {e}"
+        return f"€{val:,.2f}" if val else "Coin not found."
+    except Exception as e: return f"API Error: {e}"
+
+def finance_price_tool(asset):
+    asset_name = _get_arg(asset, ["asset", "symbol", "name", "ticker"])
+    if not asset_name: return "Error: Please specify an asset (e.g., 'gold', 'AAPL')."
+    
+    # Convenience mapping for the LLM (which may not always know exact YF ticker symbols)
+    common_symbols = {
+        "oro": "GC=F", "gold": "GC=F",
+        "argento": "SI=F", "silver": "SI=F",
+        "platino": "PL=F", "platinum": "PL=F",
+        "petrolio": "CL=F", "oil": "CL=F",
+        "gas": "NG=F",
+        "sp500": "^GSPC", "s&p500": "^GSPC",
+        "nasdaq": "^IXIC", "dow": "^DJI"
+    }
+    
+    # Sanitize LLM-generated input artifacts like "gold in euro" or "GOLD_EUR"
+    clean_asset = asset_name.lower().strip().replace(' in euro', '').replace('_euro','').replace(' euro', '')
+    ticker = common_symbols.get(clean_asset, asset_name.upper())
+    
+    try:
+        import yfinance as yf
+        t = yf.Ticker(ticker)
+        # Some assets use 'currentPrice', others 'regularMarketPrice'
+        info = t.fast_info
+        if hasattr(info, 'last_price') and info.last_price is not None:
+            price = info.last_price
+            # Attempt to extract currency denomination if available
+            currency = t.info.get('currency', 'USD') if hasattr(t, 'info') else 'USD'
+            
+            # Append unit of measure where applicable (precious metals are priced per troy ounce)
+            unit_str = ""
+            if "oro" in clean_asset or "gold" in clean_asset or "argento" in clean_asset or "silver" in clean_asset:
+                unit_str = " per troy ounce (oz)"
+                
+            # Base output string
+            output = f"{asset_name.capitalize()} (Ticker: {ticker}): {price:,.2f} {currency}{unit_str}"
+            
+            # Supplementary calculations (EUR conversion and per-gram pricing)
+            if currency == 'USD':
+                try:
+                    eur_usd = yf.Ticker("EURUSD=X").fast_info.last_price
+                    if eur_usd:
+                        price_eur = price / eur_usd
+                        output += f" (Equivalente calcolato: {price_eur:,.2f} EUR{unit_str})"
+                        
+                        # For precious metals, also compute per-gram price
+                        if unit_str:
+                            price_gram_eur = price_eur / 31.1034768
+                            output += f" -> Circa {price_gram_eur:,.2f} EUR al grammo"
+                except Exception:
+                    pass
+            
+            return output
+        
+        return f"Price not found for '{ticker}'. Please verify the asset name or ticker symbol."
+    except Exception as e:
+        return f"Finance API Error: {e}"
 
 def web_search_tool(query):
-    q = _get_arg(query, ["query", "q", "search"])
+    q = _get_arg(query, ["query", "q", "search", "text", "search_query", "keywords"])
+    # Fallback: if dict has no recognized key, extract the first string value
+    if not q and isinstance(query, dict):
+        values = [v for v in query.values() if isinstance(v, str) and v.strip()]
+        q = values[0] if values else None
+    # Final fallback: raw string input
+    if not q and isinstance(query, str):
+        q = query
+    if not q:
+        return "Error: No search query specified."
     try:
         from ddgs import DDGS
         results = DDGS().text(query=q, max_results=5, region="it-it")
-        if not results: return "Nessun risultato trovato."
+        if not results: return "No results found. DO NOT fabricate data under any circumstances. Inform the user that the search returned no results."
         
         output = []
         for r in results:
-            # Usiamo un formato più pulito senza etichette pesanti
             output.append(f"--- {r['title']} ---\n{r['body']}\n")
         return "\n".join(output)
     except Exception as e:
-        return f"Errore Ricerca: {e}"
+        return f"Search Error: {e}. The search servers are unreachable or the API has changed. DO NOT fabricate any information. Inform the user that a technical error occurred."
 
 def system_stats_tool(_):
     return f"CPU: {psutil.cpu_percent()}%, RAM: {psutil.virtual_memory().percent}%"
@@ -108,77 +173,77 @@ def list_files_tool(inp):
     if raw_path in [".", "DESKTOP", None]: target = _get_desktop_path()
     else: target = _normalize_path(raw_path)
 
-    if not os.path.exists(target): return f"Errore: '{target}' non esiste."
+    if not os.path.exists(target): return f"Error: '{target}' does not exist."
     try:
         items = [f for f in os.listdir(target) if not f.startswith('.')]
         items.sort()
         return f"📂 '{os.path.basename(target)}': {', '.join(items[:50])}"
-    except Exception as e: return f"Errore: {e}"
+    except Exception as e: return f"Error: {e}"
 
 def read_file_tool(inp):
     fname = _get_arg(inp, ["filename", "path", "file"])
     path = _normalize_path(fname)
-    if not os.path.exists(path): return "File non trovato."
-    if os.path.isdir(path): return "È una cartella, usa list_files."
+    if not os.path.exists(path): return "File not found."
+    if os.path.isdir(path): return "Target is a directory, use list_files instead."
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
-            return f"📄 CONTENUTO:\n{f.read(3000)}"
-    except Exception as e: return f"Errore: {e}"
+            return f"📄 CONTENT:\n{f.read(3000)}"
+    except Exception as e: return f"Error: {e}"
 
 def create_file_tool(inp):
-    fname = _get_arg(inp, ["filename", "path", "name"], "senza_nome.txt")
+    fname = _get_arg(inp, ["filename", "path", "name"], "untitled.txt")
     if "." not in fname: fname += ".txt"
     path = _normalize_path(fname)
     
     content = inp.get("content", "") if isinstance(inp, dict) else ""
 
-    if os.path.exists(path): return f"⚠️ Il file '{os.path.basename(path)}' esiste già."
+    if os.path.exists(path): return f"⚠️ File '{os.path.basename(path)}' already exists."
     try:
         with open(path, "w", encoding="utf-8") as f: f.write(content)
-        return f"✅ Creato: {path}"
-    except Exception as e: return f"Errore: {e}"
+        return f"✅ Created: {path}"
+    except Exception as e: return f"Error: {e}"
 
 def create_directory_tool(inp):
     name = _get_arg(inp, ["name", "path", "directory", "dirname"])
-    if not name: return "Errore: Specifica il nome della cartella."
+    if not name: return "Error: Please specify a directory name."
     
     path = _normalize_path(name)
     
     if os.path.exists(path):
-        return f"⚠️ La cartella o il file '{os.path.basename(path)}' esiste già."
+        return f"⚠️ Directory or file '{os.path.basename(path)}' already exists."
     
     try:
         os.makedirs(path, exist_ok=True)
-        return f"✅ Cartella creata: {path}"
+        return f"✅ Directory created: {path}"
     except Exception as e:
-        return f"Errore creazione cartella: {e}"
+        return f"Directory creation error: {e}"
     
 def delete_directory_tool(inp):
     name = _get_arg(inp, ["name", "path", "directory", "dirname"])
-    if not name: return "Errore: Specifica il nome della cartella da eliminare."
+    if not name: return "Error: Please specify the directory name to delete."
     
     path = _normalize_path(name)
     
     if not os.path.exists(path):
-        return f"Errore: La cartella '{path}' non esiste."
+        return f"Error: Directory '{path}' does not exist."
     if not os.path.isdir(path):
-        return f"Errore: '{path}' non è una cartella (forse è un file)."
+        return f"Error: '{path}' is not a directory (possibly a file)."
     
     try:
         import shutil
-        shutil.rmtree(path) # Cancella cartella e tutto il contenuto
-        return f"🗑️ Cartella eliminata con successo: {path}"
+        shutil.rmtree(path)  # Recursively delete directory and all contents
+        return f"🗑️ Directory successfully deleted: {path}"
     except Exception as e:
-        return f"Errore eliminazione cartella: {e}"
+        return f"Directory deletion error: {e}"
 
 
 def modify_file_tool(inp):
-    # Questo tool cambia il CONTENUTO
+    # Modifies file CONTENT (overwrite or append)
     fname = _get_arg(inp, ["filename", "path", "file"])
-    if not fname: return "Errore: Specifica il nome del file da modificare."
+    if not fname: return "Error: Please specify the filename to modify."
     
     path = _normalize_path(fname)
-    if not os.path.exists(path): return "Errore: File non trovato."
+    if not os.path.exists(path): return "Error: File not found."
 
     content = inp.get("content", "") if isinstance(inp, dict) else ""
     mode = "a" if isinstance(inp, dict) and inp.get("mode") == "append" else "w"
@@ -187,36 +252,36 @@ def modify_file_tool(inp):
         with open(path, mode, encoding="utf-8") as f:
             if mode == "a": f.write("\n" + content)
             else: f.write(content)
-        return f"✅ Modificato ({mode}): {path}"
-    except Exception as e: return f"Errore: {e}"
+        return f"✅ Modified ({mode}): {path}"
+    except Exception as e: return f"Error: {e}"
 
 def rename_file_tool(inp):
-    # NUOVO TOOL PER RINOMINARE
+    # File/directory rename operation
     old = _get_arg(inp, ["old_name", "old_path", "filename", "current_name"])
     new = _get_arg(inp, ["new_name", "new_path", "name"])
     
-    if not old or not new: return "Errore: Servono 'old_name' e 'new_name'."
+    if not old or not new: return "Error: Both 'old_name' and 'new_name' are required."
     
     p_old = _normalize_path(old)
     p_new = _normalize_path(new)
     
-    if not os.path.exists(p_old): return f"Errore: '{old}' non trovato."
-    if os.path.exists(p_new): return f"Errore: '{new}' esiste già."
+    if not os.path.exists(p_old): return f"Error: '{old}' not found."
+    if os.path.exists(p_new): return f"Error: '{new}' already exists."
     
     try:
         os.rename(p_old, p_new)
-        return f"✅ Rinomina completata: {old} -> {new}"
-    except Exception as e: return f"Errore rename: {e}"
+        return f"✅ Renamed: {old} -> {new}"
+    except Exception as e: return f"Rename error: {e}"
 
 def delete_file_tool(inp):
     fname = _get_arg(inp, ["filename", "path", "file"])
     path = _normalize_path(fname)
-    if not os.path.exists(path): return "File non trovato."
+    if not os.path.exists(path): return "File not found."
     try:
-        if os.path.isdir(path): os.rmdir(path)
+        if os.path.isdir(path): shutil.rmtree(path)  # FIX: rmtree for non-empty directories
         else: os.remove(path)
-        return f"🗑️ Eliminato: {path}"
-    except Exception as e: return f"Errore: {e}"
+        return f"🗑️ Deleted: {path}"
+    except Exception as e: return f"Error: {e}"
 
 # --- AUTOMATION TOOLS ---
 
@@ -224,101 +289,98 @@ def launch_app_tool(inp):
     cmd = _get_arg(inp, ["app_name", "command", "cmd"])
     try:
         subprocess.Popen(shlex.split(cmd), stdout=subprocess.DEVNULL, start_new_session=True)
-        return f"🚀 Lanciato: {cmd}"
-    except Exception as e: return f"Errore: {e}"
+        return f"🚀 Launched: {cmd}"
+    except Exception as e: return f"Error: {e}"
 
 def _focus_window(app_name):
-    """
-    Tenta di portare la finestra in primo piano usando wmctrl su Linux.
-    """
+    """Attempts to bring a window to the foreground using wmctrl on Linux."""
     if not app_name: return
     try:
-        # wmctrl -a cerca una finestra che contiene 'app_name' nel titolo
+        # wmctrl -a searches for a window containing 'app_name' in the title
         subprocess.run(["wmctrl", "-a", app_name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        time.sleep(0.5) # Tempo per l'animazione della finestra
+        time.sleep(0.5)  # Allow time for window animation
     except Exception:
         pass
 
 def keyboard_type_tool(inp):
-    if not PYAUTOGUI_AVAILABLE: return "Errore GUI."
+    if not PYAUTOGUI_AVAILABLE: return "GUI Error: pyautogui unavailable."
     
     text = inp.get("text", "")
     target = _get_arg(inp, ["at_element", "where", "target"])
     press_enter = inp.get("press_enter", False)
     
-    # 1. GESTIONE FINESTRA (XORG)
-    # Proviamo ad attivare la finestra se menzionata
+    # 1. WINDOW MANAGEMENT (XORG)
+    # Attempt to activate the relevant window if mentioned
     common_apps = ["firefox", "chrome", "code", "terminal", "discord", "spotify", "gedit", "files", "nautilus", "settings"]
     if target:
         t_low = target.lower()
         for app in common_apps:
             if app in t_low:
-                print(f"🚀 Attivo finestra '{app}'...")
+                print(f"🚀 Activating window '{app}'...")
                 try:
                     subprocess.run(["xdotool", "search", "--onlyvisible", "--name", app, "windowactivate"], 
                                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    time.sleep(0.8) # Tempo per redraw
+                    time.sleep(0.8) # Allow time for window redraw
                 except: pass
                 break
 
-    # 2. VISIONE E CLICK
+    # 2. VISION AND CLICK
     if target:
-        print(f"👀 Mirino di precisione su: '{target}'")
-        coords = vision.analyze_screen_for_coordinates(target)
+        print(f"👀 Searching for target: '{target}'")
+        
+        # 2a. Try OCR first (most accurate for text elements)
+        coords = vision.find_text_on_screen(target)
+        
+        # 2b. Fallback to VLM Grid (for icons, unlabeled buttons, complex descriptions)
+        if not coords or "x" not in coords:
+            print(f"⚠️ OCR failed for '{target}', falling back to VLM Grid analysis...")
+            coords = vision.analyze_screen_for_coordinates(target)
         
         if coords and "x" in coords:
             x, y = coords['x'], coords['y']
-            print(f"🎯 Sposto mouse a ({x}, {y})")
+            print(f"🎯 Moving cursor to ({x}, {y})")
             
-            # Movimento umano (non istantaneo)
+            # Human-like movement (non-instantaneous)
             pyautogui.moveTo(x, y, duration=0.8, tween=pyautogui.easeInOutQuad)
             
-            # Correzione offset (opzionale): A volte gli LLM mirano leggermente in alto
-            # Se vedi che clicca sempre sul bordo superiore, decommenta la riga sotto:
-            # y += 10 
+            # Offset correction (optional): LLMs sometimes aim slightly too high
+            # If clicks consistently land on the upper border, uncomment the line below:
+            # y += 10
             
             pyautogui.click()
             time.sleep(0.1)
-            pyautogui.click() # Doppio click per selezionare testo/input
+            pyautogui.click()  # Double click to select text/input field
             time.sleep(0.5)
         else:
-            print("⚠️ Target non trovato. Scrivo nella posizione attuale.")
+            print("⚠️ Target not found. Typing at current cursor position.")
 
-    # 3. SCRITTURA
+    # 3. TEXT INPUT
     try:
         if text and text.strip():
-            print(f"✍️  Scrivo: {text}")
+            print(f"✍️  Typing: {text}")
             pyautogui.write(text, interval=0.05)
         
         if press_enter: 
             time.sleep(0.3)
-            print("↵ Invio")
+            print("↵ Enter")
             pyautogui.press('enter')
             
-        return f"✅ Fatto."
-    except Exception as e: return f"Errore: {e}"
+        return f"✅ Done."
+    except Exception as e: return f"Error: {e}"
 
-def _get_arg(inp, keys, default=None):
-    """Estrae un argomento cercando tra varie chiavi possibili."""
-    if isinstance(inp, str): return inp
-    if isinstance(inp, dict):
-        for k in keys:
-            if k in inp and inp[k]: return inp[k]
-    return default
+# NOTE: _get_arg is defined at line 66. Duplicate copy removed.
 
 def _focus_window_xorg(name_fragment):
-    """
-    Tenta di portare la finestra in primo piano usando xdotool su Xorg.
-    """
+    """Attempts to bring a window to the foreground using xdotool on Xorg."""
     if not name_fragment: return False
     try:
-        # Cerca finestre visibili che contengono il nome (es. 'settings' o 'firefox')
+        # Search for visible windows containing the given name fragment
         subprocess.run(["xdotool", "search", "--onlyvisible", "--name", name_fragment, "windowactivate"], 
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         return True
     except Exception:
         try:
-            # Fallback ricerca per classe (es. 'Gnome-control-center')
+            # Fallback: search by window class name
             subprocess.run(["xdotool", "search", "--onlyvisible", "--class", name_fragment, "windowactivate"], 
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
@@ -326,54 +388,61 @@ def _focus_window_xorg(name_fragment):
             return False
 
 def visual_click_tool(inp):
-    if not PYAUTOGUI_AVAILABLE: return "Errore: Libreria GUI non disponibile."
+    if not PYAUTOGUI_AVAILABLE: return "Error: GUI library unavailable."
     
     description = _get_arg(inp, ["description", "target", "element"])
     click_type = _get_arg(inp, ["click_type", "type"], "left").lower()
     
-    if not description: return "Errore: Descrizione target mancante."
+    if not description: return "Error: Target description missing."
 
-    # 1. TENTA IL FOCUS AUTOMATICO
-    # Se l'utente dice "Clicca Bluetooth in Impostazioni", cerchiamo di attivare 'settings' o 'impostazioni'
+    # 1. AUTOMATIC WINDOW FOCUS
+    # If the user says "Click Bluetooth in Settings", attempt to activate the relevant window
     common_apps = ["settings", "impostazioni", "firefox", "chrome", "terminal", "code"]
     desc_lower = description.lower()
     for app in common_apps:
         if app in desc_lower:
-            print(f"🚀 Rilevato contesto '{app}': Attivo finestra...")
+            print(f"🚀 Context detected '{app}': Activating window...")
             _focus_window_xorg(app)
-            time.sleep(1.0) # Attesa per l'animazione di Linux
+            time.sleep(1.0)  # Allow time for Linux window animation
             break
-
-    # 2. VISIONE E MIRA (GRID SYSTEM)
-    print(f"👀 Analisi visiva per click: '{description}'")
-    coords = vision.analyze_screen_for_coordinates(description)
+    # 2. VISION AND TARGET ACQUISITION
+    print(f"👀 Visual search for click target: '{description}'")
+    
+    # 2a. Try OCR first (best for text elements)
+    coords = vision.find_text_on_screen(description)
+    
+    # 2b. Fallback to VLM Grid System
+    if not coords or "x" not in coords:
+        print(f"⚠️ OCR could not locate '{description}', falling back to VLM Grid analysis...")
+        coords = vision.analyze_screen_for_coordinates(description)
 
     if coords and "x" in coords:
         x, y = coords['x'], coords['y']
-        print(f"🎯 Coordinate target: ({x}, {y})")
+        print(f"🎯 Target coordinates: ({x}, {y})")
 
-        # 3. AZIONE FISICA
+        # 3. PHYSICAL ACTION
         pyautogui.moveTo(x, y, duration=0.8, tween=pyautogui.easeInOutQuad)
         
         if "right" in click_type or "destr" in click_type:
             pyautogui.click(button='right')
-            res = "Click Destro"
+            res = "Right Click"
         elif "double" in click_type or "doppio" in click_type:
             pyautogui.doubleClick()
-            res = "Doppio Click"
+            res = "Double Click"
         else:
             pyautogui.click()
-            res = "Click Sinistro"
+            res = "Left Click"
 
-        return f"✅ {res} eseguito su '{description}'."
+        return f"✅ {res} executed on '{description}'."
     
-    return f"⚠️ Impossibile trovare visivamente: '{description}'"
+    return f"⚠️ Unable to visually locate: '{description}'"
 
 def describe_screen_tool(inp):
-    q = _get_arg(inp, ["question"], "Cosa vedi?")
+    q = _get_arg(inp, ["question"], "What do you see?")
     return vision.describe_screen_content(q)
 
 TOOLS = {
+    "finance_price": finance_price_tool,
     "crypto_price": crypto_price_tool,
     "web_search": web_search_tool,
     "system_stats": system_stats_tool,
@@ -381,7 +450,7 @@ TOOLS = {
     "read_file": read_file_tool,
     "create_file": create_file_tool,
     "modify_file": modify_file_tool,
-    "rename_file": rename_file_tool, # NUOVO
+    "rename_file": rename_file_tool,
     "delete_file": delete_file_tool,
     "launch_app": launch_app_tool,
     "keyboard_type": keyboard_type_tool,

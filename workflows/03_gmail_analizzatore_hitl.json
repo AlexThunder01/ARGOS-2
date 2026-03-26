@@ -1,0 +1,179 @@
+{
+    "name": "ARGOS - 📧 Gmail Analyzer (Lettura + Notifica)",
+    "nodes": [
+        {
+            "parameters": {
+                "pollTimes": {
+                    "item": [
+                        {
+                            "mode": "everyMinute",
+                            "minute": 5
+                        }
+                    ]
+                },
+                "filters": {
+                    "readStatus": "unread"
+                },
+                "options": {
+                    "downloadAttachments": false
+                }
+            },
+            "name": "Nuova Email Ricevuta",
+            "type": "n8n-nodes-base.gmailTrigger",
+            "typeVersion": 1.2,
+            "position": [
+                100,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "jsCode": "const items = $input.all();\nconst results = [];\n\nfor (const item of items) {\n  const email = item.json;\n  const fromRaw = email.From || '';\n  const emailMatch = fromRaw.match(/<([^>]+)>/);\n  const senderEmail = emailMatch ? emailMatch[1] : fromRaw;\n  const subject = email.Subject || '';\n  const text = email.snippet || '';\n  \n  const prompt = `Analyze the following email. Respond EXACTLY in this textual format (DO NOT use JSON):\\n\\nPRIORITY: [high/medium/low]\\nSUMMARY: [summarize the sender's request in 1-2 sentences]\\nDRAFT RESPONSE:\\n[draft a polite and professional response in the SAME LANGUAGE as the original email. Do NOT include placeholder signatures like '[Your Name]' or 'Your Name'. End the response with 'Cordiali saluti.' if the email is in Italian, or 'Best regards.' if in English]\\n\\nDo not hallucinate information. Base your response strictly on the provided text.\\n\\nSENDER: ${senderEmail}\\nSUBJECT: ${subject}\\nBODY: ${text}`;\n  \n  try {\n    const response = await this.helpers.httpRequest({\n      method: 'POST',\n      url: 'http://argos-api:8000/run',\n      body: {\n        task: prompt,\n        max_steps: 3,\n        require_confirmation: false\n      },\n      json: true,\n      timeout: 60000\n    });\n    \n    const result = response.result || '';\n    \n    const impMatch = result.match(/PRIORITY:\\s*(\\S+)/i);\n    const importanza = impMatch ? impMatch[1].toLowerCase() : 'medium';\n    \n    if (importanza.includes('low') || importanza.includes('bassa')) continue;\n\n    const riasMatch = result.match(/SUMMARY:\\s*(.+?)(?=\\nDRAFT|$)/is);\n    const riassunto = riasMatch ? riasMatch[1].trim() : '';\n\n    const draftMatch = result.match(/DRAFT RESPONSE:\\s*\\n?([\\s\\S]*)/i);\n    const draftPlain = draftMatch ? draftMatch[1].trim() : result;\n\n    const draftHtml = '<div style=\"font-family: Arial, sans-serif; font-size: 14px; line-height: 1.6;\">' +\n      draftPlain.split('\\n\\n').map(p => '<p style=\"margin: 0 0 12px 0;\">' + p.replace(/\\n/g, '<br>') + '</p>').join('') +\n      '</div>';\n      \n    results.push({ json: { \n      senderEmail, \n      subject, \n      messageId: email.id || '', \n      threadId: email.threadId || '', \n      importanza, \n      riassunto, \n      draft: draftPlain, \n      draftHtml, \n      fromRaw \n    }});\n  } catch(e) {\n    console.error(\"ARGOS API Execution Error:\", e);\n  }\n}\n\nreturn results;"
+            },
+            "name": "Elaborazione Batch Email",
+            "type": "n8n-nodes-base.code",
+            "typeVersion": 2,
+            "position": [
+                340,
+                300
+            ]
+        },
+        {
+            "parameters": {
+                "method": "POST",
+                "url": "http://argos-api:8000/pending_email",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "={\n  \"sender\": \"{{ $('Elaborazione Batch Email').item.json.senderEmail }}\",\n  \"subject\": \"{{ $('Elaborazione Batch Email').item.json.subject }}\",\n  \"messageId\": \"{{ $('Elaborazione Batch Email').item.json.messageId }}\",\n  \"threadId\": \"{{ $('Elaborazione Batch Email').item.json.threadId }}\",\n  \"draft\": {{ JSON.stringify($('Elaborazione Batch Email').item.json.draft) }},\n  \"draftHtml\": {{ JSON.stringify($('Elaborazione Batch Email').item.json.draftHtml) }}\n}",
+                "options": {
+                    "timeout": 5000
+                }
+            },
+            "name": "Accoda Contesto API",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                580,
+                200
+            ]
+        },
+        {
+            "parameters": {
+                "authentication": "predefinedCredentialType",
+                "nodeCredentialType": "gmailOAuth2",
+                "method": "POST",
+                "url": "=https://gmail.googleapis.com/gmail/v1/users/me/messages/{{ $('Elaborazione Batch Email').item.json.messageId }}/modify",
+                "sendBody": true,
+                "specifyBody": "json",
+                "jsonBody": "{\"removeLabelIds\":[\"UNREAD\"]}",
+                "options": {}
+            },
+            "name": "Gmail: Segna Letta",
+            "type": "n8n-nodes-base.httpRequest",
+            "typeVersion": 4.1,
+            "position": [
+                820,
+                200
+            ],
+            "credentials": {
+                "gmailOAuth2": {
+                    "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+                    "name": "Gmail account"
+                }
+            }
+        },
+        {
+            "parameters": {
+                "chatId": "YOUR_TELEGRAM_CHAT_ID",
+                "text": "=📧 *NEW PENDING EMAIL*\n━━━━━━━━━━━━━━━━━━━\n\n👤 *From:* {{ $('Elaborazione Batch Email').item.json.senderEmail }}\n📌 *Subject:* {{ $('Elaborazione Batch Email').item.json.subject }}\n🔴 *Priority:* {{ $('Elaborazione Batch Email').item.json.importanza }}\n\n📋 *Summary:*\n{{ $('Elaborazione Batch Email').item.json.riassunto }}\n\n✍️ *Suggested Draft Response:*\n{{ $('Elaborazione Batch Email').item.json.draft }}\n\n━━━━━━━━━━━━━━━━━━━\nPlease select an action below:",
+                "replyMarkup": "inlineKeyboard",
+                "inlineKeyboard": {
+                    "rows": [
+                        {
+                            "row": {
+                                "buttons": [
+                                    {
+                                        "text": "✅ SEND",
+                                        "additionalFields": {
+                                            "callback_data": "=approve|{{ $('Elaborazione Batch Email').item.json.messageId }}"
+                                        }
+                                    },
+                                    {
+                                        "text": "❌ DISCARD",
+                                        "additionalFields": {
+                                            "callback_data": "=reject|{{ $('Elaborazione Batch Email').item.json.messageId }}"
+                                        }
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "additionalFields": {
+                    "appendAttribution": false,
+                    "parse_mode": "Markdown"
+                }
+            },
+            "name": "Notifica Telegram",
+            "type": "n8n-nodes-base.telegram",
+            "typeVersion": 1.1,
+            "position": [
+                1060,
+                200
+            ],
+            "credentials": {
+                "telegramApi": {
+                    "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+                    "name": "Telegram account"
+                }
+            }
+        }
+    ],
+    "connections": {
+        "Nuova Email Ricevuta": {
+            "main": [
+                [
+                    {
+                        "node": "Elaborazione Batch Email",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Elaborazione Batch Email": {
+            "main": [
+                [
+                    {
+                        "node": "Accoda Contesto API",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Accoda Contesto API": {
+            "main": [
+                [
+                    {
+                        "node": "Gmail: Segna Letta",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        },
+        "Gmail: Segna Letta": {
+            "main": [
+                [
+                    {
+                        "node": "Notifica Telegram",
+                        "type": "main",
+                        "index": 0
+                    }
+                ]
+            ]
+        }
+    },
+    "settings": {}
+}

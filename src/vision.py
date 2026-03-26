@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 import requests
+import pytesseract
 from PIL import Image, ImageDraw
 from .utils import detect_backend 
 from .config import (GROQ_API_KEY, GROQ_CHAT_URL, OLLAMA_URL, 
@@ -57,23 +58,86 @@ def take_screenshot_robust():
             continue
     return None
 
-def add_grid_to_image(image, step=100):
+def add_grid_to_image(image, step=80):
+    """Disegna una griglia con etichette ad ogni intersezione per massima precisione VLM."""
     draw = ImageDraw.Draw(image)
     width, height = image.size
-    # Verde fluo per massimo contrasto
-    grid_color = (0, 255, 0) 
+    grid_color = (0, 255, 0)  # Verde fluo
+    label_bg = (0, 0, 0)      # Sfondo nero per leggibilità
     
-    # Linee Verticali
+    # Prova a caricare un font più grande per leggibilità
+    try:
+        from PIL import ImageFont
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14)
+    except Exception:
+        font = ImageDraw.Draw(image).getfont()
+    
+    # Linee Verticali con etichette in alto
     for x in range(0, width, step):
-        draw.line((x, 0, x, height), fill=grid_color, width=2) # Spessore 2
-        draw.text((x + 5, 5), str(x), fill=grid_color)
-
-    # Linee Orizzontali
+        draw.line((x, 0, x, height), fill=grid_color, width=1)
+    
+    # Linee Orizzontali con etichette a sinistra
     for y in range(0, height, step):
-        draw.line((0, y, width, y), fill=grid_color, width=2)
-        draw.text((5, y + 5), str(y), fill=grid_color)
-        
+        draw.line((0, y, width, y), fill=grid_color, width=1)
+    
+    # Etichette ad OGNI intersezione (il trucco per la precisione)
+    for x in range(0, width, step):
+        for y in range(0, height, step):
+            label = f"{x},{y}"
+            # Sfondo nero per il testo
+            bbox = font.getbbox(label)
+            tw = bbox[2] - bbox[0]
+            th = bbox[3] - bbox[1]
+            draw.rectangle([x + 2, y + 2, x + tw + 6, y + th + 6], fill=label_bg)
+            draw.text((x + 4, y + 2), label, fill=grid_color, font=font)
+    
     return image
+
+# --- NEW: OCR TEXT FINDER ---
+def find_text_on_screen(text_to_find, lang='ita+eng'):
+    """
+    Cerca un testo specifico sullo schermo usando OCR (Tesseract).
+    Ritorna il centro (x, y) della prima occorrenza trovata.
+    Molto più preciso del VLM per cliccare scritte!
+    """
+    print(f"🔍 Analisi OCR per il testo: '{text_to_find}'...")
+    screen = take_screenshot_robust()
+    if not screen: return None
+
+    # Esegui OCR restituendo dizionario dati (parole, bounding box, confidenza)
+    try:
+        data = pytesseract.image_to_data(screen, lang=lang, output_type=pytesseract.Output.DICT)
+    except Exception as e:
+        print(f"❌ OCR Error: {e}")
+        return None
+
+    target = text_to_find.lower().strip()
+    words = target.split()
+    
+    # Se cerchiamo una singola parola
+    if len(words) == 1:
+        for i, word in enumerate(data['text']):
+            if target in word.lower() and int(data['conf'][i]) > 40:
+                x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
+                cx, cy = x + w//2, y + h//2
+                print(f"🎯 OCR Trovato '{word}' -> Coordinate: ({cx}, {cy})")
+                return {"x": cx, "y": cy}
+                
+    # Se cerchiamo una frase (più parole consecutive)
+    # Match semplice best-effort: cerca se una delle parole chiave esiste con alta confidenza
+    # Nelle GUI spesso basta trovare la parola più unica della frase
+    else:
+        longest_word = max(words, key=len)
+        if len(longest_word) > 3:
+            for i, word in enumerate(data['text']):
+                if longest_word in word.lower() and int(data['conf'][i]) > 30:
+                    x, y, w, h = data['left'][i], data['top'][i], data['width'][i], data['height'][i]
+                    cx, cy = x + w//2, y + h//2
+                    print(f"🎯 OCR Trovato '{word}' (da frase) -> Coordinate: ({cx}, {cy})")
+                    return {"x": cx, "y": cy}
+
+    print("❌ OCR did not find the target text.")
+    return None
 
 # --- FUNZIONE 1: ANALISI COORDINATE (CON GRIGLIA) ---
 def analyze_screen_for_coordinates(description):
@@ -120,14 +184,22 @@ def analyze_screen_for_coordinates(description):
         backend = detect_backend()
         model_to_use = VISION_MODEL_GROQ if backend == "groq" else VISION_MODEL_OLLAMA
         
-        # --- PROMPT DI PRECISIONE ---
+        # --- PROMPT DI PRECISIONE MIGLIORATO ---
         prompt = (
-            f"Image resolution: {target_w}x{target_h}. "
-            f"I have overlaid a BRIGHT GREEN GRID. The numbers on the edges are pixel coordinates. "
-            f"TASK: Find the exact center (x, y) for: '{description}'. "
-            "Look at the grid lines to provide an accurate estimate. "
-            "Return ONLY a JSON object: {\"x\": 123, \"y\": 456}. "
-            "DO NOT write any other text."
+            f"This is a screenshot of a Linux desktop with resolution {target_w}x{target_h} pixels. "
+            f"A GREEN GRID is overlaid on the image. Each intersection has coordinates labeled as 'x,y'. "
+            f"\n\nCOORDINATE SYSTEM:"
+            f"\n- x=0 is the LEFT edge, x={target_w} is the RIGHT edge"
+            f"\n- y=0 is the TOP edge (top of screen), y={target_h} is the BOTTOM edge"
+            f"\n- Elements at the TOP of the screen have SMALL y values (y < 100)"
+            f"\n- Elements at the BOTTOM of the screen have LARGE y values (y > {target_h - 100})"
+            f"\n\nTASK: Find the pixel coordinates of the CENTER of this element: '{description}'"
+            f"\n\nSTEPS:"
+            f"\n1. First, identify WHERE on the screen the element is (top/middle/bottom, left/center/right)"
+            f"\n2. Find the nearest grid label to the element"
+            f"\n3. Estimate the precise x,y coordinates"
+            f"\n\nReturn ONLY a JSON object: {{\"x\": <number>, \"y\": <number>}}"
+            f"\nDo NOT write any other text."
         )
 
         # Chiamata al modello Vision (VLM)
@@ -157,12 +229,12 @@ def analyze_screen_for_coordinates(description):
                     print(f"🎯 Coordinate calcolate: LLM({seen_x},{seen_y}) -> MONITOR({final_x},{final_y})")
                     return {"x": final_x, "y": final_y}
             except json.JSONDecodeError:
-                print(f"❌ Errore nel formato JSON ricevuto: {content}")
+                print(f"❌ Invalid JSON format received: {content}")
         else:
-            print(f"⚠️ Nessun JSON trovato nella risposta: {content}")
+            print(f"⚠️ No JSON found in response: {content}")
 
     except Exception as e:
-        print(f"❌ Errore interno durante l'analisi Vision: {e}")
+        print(f"❌ Internal Vision analysis error: {e}")
     
     return None
 
@@ -170,7 +242,7 @@ def analyze_screen_for_coordinates(description):
 def describe_screen_content(question):
     print("📸 Analisi visiva schermo (Descrizione)...")
     screen = take_screenshot_robust()
-    if not screen: return "Errore screenshot."
+    if not screen: return "Screenshot error."
 
     try:
         # Resize per velocità, ma niente griglia
@@ -195,7 +267,7 @@ def describe_screen_content(question):
         return content
 
     except Exception as e:
-        return f"Errore interno Vision: {e}"
+        return f"Internal Vision Error: {e}"
 
 # --- HELPER CHIAMATA API ---
 def _call_vlm(backend, model, prompt, img_b64):
