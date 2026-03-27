@@ -23,7 +23,7 @@ Once triggered, you need to instruct ARGOS on what to do. Since ARGOS and n8n sh
 1. Add an **"HTTP Request"** node to your workflow.
 2. Configure it as follows:
    - **Method**: `POST`
-   - **URL**: `=http://argos-api:8000/run`
+   - **URL**: `=http://argos-api:8000/analyze_email`
    - **Send Body**: `ON`
    - Select **Specify Body** -> **JSON**
 3. In the **Body Parameters**, paste the JSON payload to trigger the agent:
@@ -41,7 +41,7 @@ Once triggered, you need to instruct ARGOS on what to do. Since ARGOS and n8n sh
 ---
 
 ## 🎯 3. Handle the ARGOS Response
-The `/run` endpoint processes tasks **Synchronously**. This means the HTTP Request node will wait (loading state) until ARGOS completes the entire cognitive loop (clicking, reading, searching, and formulating the final text).
+The `/analyze_email` endpoint processes tasks **Synchronously**. This means the HTTP Request node will wait (loading state) until ARGOS completes the entire cognitive loop (reading, prioritizing, summarizing, and drafting the final text).
 
 Upon completion, ARGOS returns a JSON payload containing the final result, for example:
 ```json

@@ -26,3 +26,6 @@ pytest>=8.0.0
 
 # --- Setup Utilities ---
 setuptools>=69.0.3
+pyyaml>=6.0.1
+watchdog==4.0.0
+pybreaker==1.2.0

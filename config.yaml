@@ -1,0 +1,49 @@
+# ==============================================================================
+# ARGOS WORKFLOW CONFIGURATION
+# 
+# This file controls the runtime behavior of the n8n workflows 
+# globally from a centralized configuration, without needing to 
+# edit the visual workflows themselves.
+# ==============================================================================
+
+gmail_assistant:
+  # Master switch: if false, the agent will instantly ignore all new emails 
+  # without consuming any LLM tokens or creating Telegram notifications.
+  enabled: true
+
+  # ----------------------------------------------------------------------------
+  # FILTERING
+  # ----------------------------------------------------------------------------
+  filters:
+    # List of sender email patterns (regex or exact match) to automatically ignore
+    ignore_senders:
+      - "*@newsletter.com"
+      - "noreply@*"
+      - "*@marketing.*"
+      - "info@*"
+
+    # If defined, only process emails that are recognized as one of these languages.
+    # Leave empty or commented out to process all languages.
+    allowed_languages:
+      - "it"
+      - "en"
+
+    # Minimum priority required to notify the user and generate a draft.
+    # Available levels (from highest to lowest): HIGH, MEDIUM, LOW, SPAM.
+    # If set to MEDIUM, then LOW and SPAM will be automatically ignored.
+    min_priority: "MEDIUM"
+
+  # ----------------------------------------------------------------------------
+  # AGENT BEHAVIOR
+  # ----------------------------------------------------------------------------
+  behavior:
+    # Instructs the LLM on how to style the generated draft response. 
+    # Example: "professional yet highly empathetic", "extremely formal", "casual and brief"
+    tone_of_voice: "professional yet friendly"
+
+    # Append this text to the end of every drafted email
+    custom_signature: "\n\n--\nCordiali Saluti, \n Alessandro Catania"
+
+    # If true, emails classified as "low" priority or "spam" will be automatically
+    # discarded by n8n without requiring Human-In-The-Loop approval via Telegram.
+    auto_discard_spam: false

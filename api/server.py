@@ -17,6 +17,17 @@ import glob
 import uuid
 import requests
 from collections import defaultdict
+import sqlite3
+import pybreaker
+
+# --- File System & DB Config ---
+DB_DIR = "/app/data" if os.environ.get("DOCKER_ENV") else "./data"
+os.makedirs(DB_DIR, exist_ok=True)
+DB_PATH = os.path.join(DB_DIR, "argos_state.db")
+
+# --- Circuit Breaker ---
+# Fails fast for 60 seconds after 3 consecutive LLM timeouts
+llm_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
 
 # Append the root directory to the system path to locate the src/ modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -57,12 +68,32 @@ async def verify_api_key(key: str = Security(api_key_header)):
         )
 
 
+def init_db():
+    """Initializes the SQLite state database ensuring safe WAL mode concurrency."""
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute('''CREATE TABLE IF NOT EXISTS pending_emails (
+            msg_id TEXT PRIMARY KEY,
+            payload TEXT
+        )''')
+        conn.commit()
+    except sqlite3.Error as e:
+        print(f"❌ Failed to initialize SQLite database: {e}")
+    finally:
+        if 'conn' in locals(): conn.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initializes the core agent upon server startup."""
+    """Initializes the core agent and database upon server startup."""
     global _agent, _logger
     _logger = setup_tracer()
     _logger.info("🚀 ARGOS API Server Initialized")
+    
+    # Init Database
+    init_db()
+    
     try:
         _agent = JarvisAgent()
         _logger.info(f"✅ Agent Ready [Backend: {_agent.backend}] [Model: {_agent.model}]")
@@ -150,8 +181,14 @@ def _run_task_sync(task: str, require_confirmation: bool, max_steps: int) -> Tas
 
     _metrics["tasks_total"] += 1
     for step_num in range(max_steps):
-        # Think
-        raw = _agent.think()
+        # Think with Circuit Breaker
+        try:
+            raw = llm_breaker.call(_agent.think)
+        except pybreaker.CircuitBreakerError:
+            final_result = "Step execution failure: LLM Service is unavailable (Circuit Breaker OPEN)"
+            _logger.error("🛑 LLM Circuit Breaker tripped. Failing fast.")
+            break
+            
         decision = parse_planner_response(raw)
 
         log_decision(_logger, decision.thought, decision.tool or "done", decision.confidence)
@@ -310,59 +347,146 @@ async def run_task_async(req: TaskAsyncRequest, background_tasks: BackgroundTask
         message="The task has been securely queued. Final execution payload will be sequentially delivered to the provided webhook."
     )
 
+class EmailAnalyzeRequest(BaseModel):
+    sender: str
+    subject: str
+    body: str
+
+@app.post("/analyze_email", tags=["Email HITL"], dependencies=[Depends(verify_api_key)])
+async def analyze_email(req: EmailAnalyzeRequest):
+    """
+    Dynamically categorizes and evaluates incoming emails based on the central config.yaml.
+    """
+    from src.workflows_config import config
+    import re
+
+    # 1. Global Killswitch
+    if not config.is_gmail_enabled:
+        return {"status": "ignored", "reason": "gmail_assistant is disabled in config.yaml"}
+
+    # 2. Sender Filtering
+    for pattern in config.ignore_senders:
+        regex_pattern = pattern.replace("*", ".*")
+        if re.search(regex_pattern, req.sender, re.IGNORECASE):
+            _logger.info(f"🚫 Email ignored: sender {req.sender} matches blacklist pattern {pattern}")
+            return {"status": "ignored", "reason": "sender_blacklisted"}
+
+    # 3. Dynamic Prompt Construction
+    prompt = f"""Analyze the following email. Respond EXACTLY in this textual format (DO NOT use JSON):
+
+PRIORITY: [high/medium/low/spam]
+SUMMARY: [summarize the sender's request in 1-2 sentences. If spam, write 'Spam detected.']
+DRAFT RESPONSE:
+[draft a polite response in the SAME LANGUAGE as the original email. Tone: {config.tone_of_voice}. End the response with: {config.custom_signature}. If spam, write 'ignored'.]
+
+### GREETING & PERSONA INSTRUCTIONS:
+1. You are responding on behalf of the owner of this inbox. Speak natively in the first person (e.g., "I will check this", "Thank you for reaching out to me").
+2. ALWAYS greet the sender by their actual Name if it is available in the SENDER field (e.g., "Dear Alessandro", "Buongiorno Marco").
+3. NEVER address the sender by their raw email address (e.g., do NOT write "Gentile catania.alex3@gmail.com").
+4. If no human name is found in the SENDER field, use a generic polite greeting without a name (e.g., "Buongiorno," or "Dear customer,").
+
+"""
+    if config.allowed_languages:
+        prompt += f"IMPORTANT: Only process this if the email is primarily in one of these languages: {', '.join(config.allowed_languages)}. If not, set PRIORITY: low and DRAFT RESPONSE: ignored.\n\n"
+
+    prompt += f"Do not hallucinate information. Base your response strictly on the provided text.\n\nSENDER: {req.sender}\nSUBJECT: {req.subject}\nBODY: {req.body}"
+
+    # 4. LLM Execution
+    try:
+        result = _run_task_sync(prompt, require_confirmation=False, max_steps=3)
+        result_text = result.result
+        
+        # 5. Parsing & Schema Validation
+        import re as regex
+        imp_match = regex.search(r'PRIORITY:\s*(\S+)', result_text, regex.IGNORECASE)
+        importanza = imp_match.group(1).upper() if imp_match else 'MEDIUM'
+        
+        # Schema verification defense
+        allowed_priorities = {"HIGH", "MEDIUM", "LOW", "SPAM"}
+        if importanza not in allowed_priorities:
+            _logger.warning(f"⚠️ LLM hallucinated priority '{importanza}'. Falling back to LOW.")
+            importanza = "LOW"
+        
+        # Priority Threshold Engine
+        priority_map = {"HIGH": 4, "MEDIUM": 3, "LOW": 2, "SPAM": 1}
+        email_prio_val = priority_map.get(importanza, 3) # default mapping fallback
+        min_prio_val = priority_map.get(config.min_priority, 2) # defaults to LOW if not set
+
+        if email_prio_val < min_prio_val:
+            _logger.info(f"🚫 Email ignored: Priority '{importanza}' is below threshold '{config.min_priority}'")
+            return {"status": "ignored", "reason": f"priority_below_threshold ({importanza})"}
+
+        rias_match = regex.search(r'SUMMARY:\s*(.+?)(?=\nDRAFT|$)', result_text, regex.IGNORECASE | regex.DOTALL)
+        riassunto = rias_match.group(1).strip() if rias_match else ''
+        
+        draft_match = regex.search(r'DRAFT RESPONSE:\s*\n?([\s\S]*)', result_text, regex.IGNORECASE)
+        draft = draft_match.group(1).strip() if draft_match else result_text
+
+        return {
+            "status": "success",
+            "priority": importanza.lower(),
+            "summary": riassunto,
+            "draft": draft
+        }
+    except Exception as e:
+        _logger.error(f"Error in /analyze_email: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # --- Persistent Email Queue Logic (Dedicated HITL architecture) ---
-_PENDING_FILE = "/tmp/argos_pending_reply.json"
 
 @app.post("/pending_email", tags=["Email HITL"], dependencies=[Depends(verify_api_key)])
 async def store_pending_email(data: dict):
-    """Generates a persisted context index linking metadata dictionary payloads directly to thread message IDs."""
+    """Generates a persisted context index linking metadata dictionary payloads directly to thread message IDs in SQLite."""
     import json as _json
     import os as _os
     
-    store = {}
-    if _os.path.exists(_PENDING_FILE):
-        try:
-            with open(_PENDING_FILE, "r", encoding="utf-8") as f:
-                store = _json.load(f)
-                if isinstance(store, list):
-                    store = {} # Overwrite inherited legacy datatype architecture
-        except:
-            store = {}
-            
     msg_id = data.get("messageId", "default")
-    store[msg_id] = data
+    payload_str = _json.dumps(data, ensure_ascii=False)
     
-    with open(_PENDING_FILE, "w", encoding="utf-8") as f:
-        _json.dump(store, f, ensure_ascii=False)
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=10)
+        # Using INSERT OR REPLACE to handle unexpected upstream retries gracefully
+        conn.execute("INSERT OR REPLACE INTO pending_emails (msg_id, payload) VALUES (?, ?)", (msg_id, payload_str))
+        conn.commit()
+    except sqlite3.Error as e:
+        _logger.error(f"SQLite Write Error: {e}")
+        return {"status": "error", "reason": "database_write_error"}
+    finally:
+        if 'conn' in locals(): conn.close()
         
     _metrics["emails_queued"] += 1
-    _logger.info(f"📧 Active Context Queued: ID {msg_id} (Allocated heap index count: {len(store)})")
-    return {"status": "saved", "sender": data.get("sender", ""), "queue_size": len(store)}
+    _logger.info(f"📧 Active Context Queued in SQLite: ID {msg_id}")
+    return {"status": "saved", "sender": data.get("sender", "")}
 
-@app.delete("/pending_email", tags=["Email HITL"], dependencies=[Depends(verify_api_key)])
-async def delete_pending_email(message_id: str):
-    """Query, extract, and synchronously destruct email queues bounded to explicitly defined IDs."""
+@app.post("/pending_email/{message_id}/consume", tags=["Email HITL"], dependencies=[Depends(verify_api_key)])
+async def consume_pending_email(message_id: str):
+    """Atomic SELECT and DELETE operation. Neutralizes replay-attacks by returning 404 if context doesn't exist."""
     import json as _json
-    import os as _os
+    
     try:
-        with open(_PENDING_FILE, "r", encoding="utf-8") as f:
-            store = _json.load(f)
-            
-        if not isinstance(store, dict):
-            return {"status": "empty", "reason": "invalid_store"}
-            
-        if message_id not in store:
-            return {"status": "empty", "reason": "not_found"}
-            
-        data = store.pop(message_id) # Estrai e cancella
+        conn = sqlite3.connect(DB_PATH, timeout=10)
+        cursor = conn.cursor()
         
-        with open(_PENDING_FILE, "w", encoding="utf-8") as f:
-            _json.dump(store, f, ensure_ascii=False)
+        # Standard SELECT and delayed DELETE inside a transaction
+        cursor.execute("SELECT payload FROM pending_emails WHERE msg_id = ?", (message_id,))
+        row = cursor.fetchone()
+        
+        if not row:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Email context not found or already consumed.")
             
+        data = _json.loads(row[0])
+        cursor.execute("DELETE FROM pending_emails WHERE msg_id = ?", (message_id,))
+        conn.commit()
+        
         _metrics["emails_deleted"] += 1
-        return {**data, "status": "deleted", "remaining": len(store)}
-    except Exception as e:
-        return {"status": "empty", "reason": str(e)}
+        return {**data, "status": "deleted_and_consumed"}
+        
+    except sqlite3.Error as e:
+        _logger.error(f"SQLite Read/Delete Error: {e}")
+        raise HTTPException(status_code=500, detail="State architecture failure")
+    finally:
+        if 'conn' in locals(): conn.close()
 
 
 @app.get("/logs/last", tags=["System"], dependencies=[Depends(verify_api_key)])

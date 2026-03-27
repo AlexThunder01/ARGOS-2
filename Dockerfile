@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY api/ ./api/
 COPY src/ ./src/
 COPY main.py .
+COPY config.yaml .
 
 # Create required runtime directories and set permissions
 RUN mkdir -p /tmp/argos_logs

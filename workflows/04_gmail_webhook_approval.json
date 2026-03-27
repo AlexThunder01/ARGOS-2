@@ -65,8 +65,8 @@
     },
     {
       "parameters": {
-        "method": "DELETE",
-        "url": "=http://argos-api:8000/pending_email?message_id={{ $json.queue_id }}",
+        "method": "POST",
+        "url": "=http://argos-api:8000/pending_email/{{ $json.queue_id }}/consume",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -89,8 +89,8 @@
     },
     {
       "parameters": {
-        "method": "DELETE",
-        "url": "=http://argos-api:8000/pending_email?message_id={{ $json.queue_id }}",
+        "method": "POST",
+        "url": "=http://argos-api:8000/pending_email/{{ $json.queue_id }}/consume",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
