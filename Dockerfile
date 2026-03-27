@@ -20,6 +20,8 @@ COPY api/ ./api/
 COPY src/ ./src/
 COPY main.py .
 COPY config.yaml .
+COPY inject_n8n.py clear_n8n.py n8n_client.py ./
+COPY workflows/ ./workflows/
 
 # Create required runtime directories and set permissions
 RUN mkdir -p /tmp/argos_logs
