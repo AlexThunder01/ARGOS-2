@@ -9,9 +9,19 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - GROQ_API_KEY=${GROQ_API_KEY:-}
-      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_API_KEY2=${GROQ_API_KEY2:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - N8N_API_KEY=${N8N_API_KEY}
+      - ARGOS_API_KEY=${ARGOS_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    volumes:
+      - ./logs:/tmp/argos_logs
     networks:
       - argos-network
 
@@ -25,16 +35,19 @@ services:
     ports:
       - "5678:5678"
     environment:
-      - N8N_HOST=0.0.0.0
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=http
-      - NODE_ENV=production
-      - WEBHOOK_URL=https://${NGROK_DOMAIN:-localhost:5678}/
-      - GENERIC_TIMEZONE=Europe/Rome
+      - WEBHOOK_URL=https://${NGROK_DOMAIN}/
+      - N8N_EDITOR_BASE_URL=http://localhost:5678
     volumes:
       - n8n_data:/home/node/.n8n
     depends_on:
-      - argos-api
+      argos-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5678/healthz", "||", "exit", "1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
     networks:
       - argos-network
 

@@ -42,12 +42,19 @@ This reference implementation handles emails autonomously while maintaining a ma
 ├── 🐋 docker-compose.yml       # Orchestration for n8n + Python API + Ngrok
 ├── 🐋 Dockerfile               # FastAPI backend build configuration
 ├── 🐍 api/server.py            # Microservices & REST Endpoints (LLM / State Queue)
-├── 🐍 main.py                  # Core Agent logic (LangGraph / LangChain)
+├── 🐍 main.py                  # Core Agent logic (Reasoning Loop & Tool Execution)
 ├── 🐍 inject_n8n.py            # CLI Injector (Deploys workflows seamlessly to n8n)
 ├── 🐍 clear_n8n.py             # CLI Cleaner (Hard-resets n8n user space)
 └── ⚙️ workflows/               # Pre-configured JSON Workflow Blueprints
     ├── 03_gmail_analizzatore_hitl.json
     └── 04_gmail_webhook_approval.json
+
+### 🛡️ Production Hardening (v2.0)
+The framework has been hardened for secure remote deployment:
+- **API Security**: Mandatory `X-ARGOS-API-KEY` header authentication for all sensitive endpoints.
+- **Docker Security**: Containers run as a **non-root user** (`argos`) with minimal privileges.
+- **Monitoring**: Built-in `/health` and `/metrics` endpoints for uptime and task tracking.
+- **Persistence**: Log files and n8n data are persisted via Docker volumes.
 ```
 
 ---
@@ -68,53 +75,50 @@ ARGOS is architected with a bifurcated design to handle two distinct operational
 
 ---
 
-## 🚀 Quickstart: One-Click Deploy
+## 🚀 Quickstart: Zero-Touch Deploy
 
-You can launch the entire agentic hub on your local machine in under 3 minutes using **Docker**.
+You can launch the entire agentic hub and inject the fully functional workflows on your local machine in under 5 minutes using **Docker** and our zero-touch deployer.
 
 ### 1. Environment Variables Configuration
-Clone the repository and navigate into the root directory. Duplicate the environment template file:
+Clone the repository and duplicate the environment template file:
 ```bash
 cp .env.example .env
 ```
-Populate the `.env` file with your minimum base credentials:
-- `TELEGRAM_BOT_TOKEN="your_telegram_token"`
+Populate the `.env` file with your base credentials:
+- `TELEGRAM_BOT_TOKEN="your_telegram_token"` & `TELEGRAM_CHAT_ID="your_telegram_chat_id"`
+- `GOOGLE_CLIENT_ID="your_client_id"` & `GOOGLE_CLIENT_SECRET="your_client_secret"` (from Google Cloud Console)
 - `GROQ_API_KEY="gsk_yourkey"` *(Required for high-speed Llama/Qwen frameworks)*
 - `NGROK_AUTHTOKEN="your_ngrok_token"` *(Required for exposing local Webhooks to Telegram)*
 - `NGROK_DOMAIN="your_static_domain"` *(e.g., your-domain.ngrok-free.app)*
 
 ### 2. Container Initialization
-Start the Docker orchestrator to execute the entire architecture in detached mode. The required n8n, Ngrok, and Python images will initialize dynamically.
+Start the Docker orchestrator to execute the architecture in detached mode:
 ```bash
 docker compose up -d --build
 ```
-- **n8n UI**: [http://localhost:5678](http://localhost:5678)
-- **ARGOS API**: [http://localhost:8000/docs](http://localhost:8000/docs) (Interactive Swagger UI)
 
-### 3. Workflow Injection
-Once the servers are online, the n8n database will be initially empty. Access the n8n dashboard (`Settings > API`), generate a new API Token, and append it to your `.env` file under: `N8N_API_KEY="<your_token>"`.
+### 3. Automated Workflow Injection
+ARGOS ships with a zero-touch pipeline that automatically creates n8n credentials, patches JSON workflows with your unique IDs, injects them via REST API, and activates them.
 
-Execute the automated injection suite (requires a local Python environment or shell execution within the Python container):
-```bash
-pip install -r requirements.txt
-python3 clear_n8n.py
-python3 inject_n8n.py
-```
+1. **Create Account**: Open `http://localhost:5678` and create your initial admin account.
+2. **Setup API Key**: Inside n8n, navigate to **Settings > API**, generate a new API Key, and append it to your `.env` file as `N8N_API_KEY="<your_token>"`.
+3. **Inject**: Run the setup script locally:
+   ```bash
+   pip install -r requirements.txt
+   python3 inject_n8n.py
+   ```
+4. **Register Webhooks**: Restart the n8n container to force the routing table to register your new webhook URLs:
+   ```bash
+   docker restart argos-n8n
+   ```
 
-### 4. OAuth2 Configuration & Workflow Activation
-To allow ARGOS to autonomously read and reply to your emails, you must authorize your Google and Telegram accounts within the n8n UI, and toggle the workflows to Active.
+### 4. Gmail OAuth2 Authorization
+Google strictly requires manual user consent for email access.
+1. Open n8n at `http://localhost:5678`.
+2. Navigate to **Credentials** -> **Gmail account**.
+3. Click **Sign in with Google** to complete the OAuth flow.
 
-1. **Create the Credentials**: Access n8n at `http://localhost:5678`. On the left sidebar, click on **Credentials** > **Add Credential**. Create your **Gmail OAuth2 API** (connecting your Google Account) and your **Telegram API** (pasting your bot token).
-2. **Configure Workflow 03**: Open the *ARGOS - 📧 Gmail Analyzer* workflow.
-   - Double-click the **New Email Received** trigger node and select your Gmail credential.
-   - Double-click the **Notifica Telegram** node and select your Telegram credential.
-   - Toggle the switch in the top-right corner from *Inactive* to **Active** so it listens continuously.
-3. **Configure Workflow 04**: Open the *04 - Gmail: Webhook Approvazione Reale* workflow.
-   - Double-click the **Rispondi Gmail** node and select your Gmail credential.
-   - Double-click the two **Conferma** Telegram nodes and select your Telegram credential.
-   - Toggle the switch in the top-right corner to **Active**.
-
-> 💡 **Pro Tip:** Once both workflows are Active, do NOT click the yellow "Execute Workflow" button (n8n cannot share Webhook testing and production ports simultaneously for Telegram). Simply send an email to yourself and watch the Magic happen on your phone!
+> 🎉 **Done!** Send an email to your inbox and you will immediately receive the AI analysis and approval interface on your Telegram app.
 
 ---
 

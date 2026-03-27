@@ -23,6 +23,7 @@ class JarvisAgent:
         self.history = []
         self.backend = LLM_BACKEND
         self.model = MODEL_GROQ if self.backend == "groq" else MODEL_OLLAMA
+        self.history_limit = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))
 
         # --- System Context Detection ---
         user = os.environ.get("USER", "user")
@@ -32,6 +33,7 @@ class JarvisAgent:
         # Core System Prompt — Constrains the agent's reasoning and output format
         self.system_prompt = """
         You are ARGOS, an intelligent and precise virtual assistant.
+        PRIMARY LANGUAGE: English. Always respond in English by default, UNLESS the user speaks to you in another language.
 
         - Operating System: {os_system}
         - Current User: {user}
@@ -88,13 +90,20 @@ class JarvisAgent:
         self.history = [{"role": "system", "content": self.system_prompt}]
 
     def add_message(self, role, content):
-        """Appends a message to the conversation history with automatic truncation."""
-        self.history.append({"role": role, "content": content})
-        if len(self.history) > HISTORY_LIMIT + 1:
-            self.history = [self.history[0]] + self.history[-HISTORY_LIMIT:]
+        """Appends a new message to the memory buffer."""
+        self.history.append({"role": role, "content": str(content)})
+
+    def trim_history(self):
+        """Maintains the conversation history within the configured limit to prevent context overflow."""
+        if len(self.history) > self.history_limit + 1:
+            # Keep the system prompt (index 0) and the most recent N messages
+            system_prompt = self.history[0]
+            recent_context = self.history[-(self.history_limit):]
+            self.history = [system_prompt] + recent_context
 
     def think(self):
-        """Dispatches the current conversation to the configured LLM backend."""
+        """Executes one step of the agent's reasoning loop."""
+        self.trim_history()
         try:
             if self.backend == "groq":
                 return self._call_groq()

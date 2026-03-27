@@ -1,7 +1,7 @@
 """
-Tracer — Sistema di logging strutturato per ARGOS.
-Scrive su file con timestamp e su console con colori.
-Ogni sessione crea un file separato in logs/.
+Tracer — Structured logging system for ARGOS.
+Writes to file with timestamps and to console with clean formatting.
+Each session creates a separate file in logs/.
 """
 import logging
 import json
@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 def setup_tracer(log_dir: str = "logs") -> logging.Logger:
     """
-    Inizializza il logger per la sessione corrente.
+    Initializes the logger for the current session.
     Creates a logs/argos_YYYYMMDD_HHMMSS.log file on each startup.
     """
     os.makedirs(log_dir, exist_ok=True)
@@ -25,29 +25,29 @@ def setup_tracer(log_dir: str = "logs") -> logging.Logger:
     logger = logging.getLogger("argos")
     logger.setLevel(logging.DEBUG)
 
-    # Evita handler duplicati se chiamato più volte
+    # Prevent duplicate handlers if called multiple times
     if logger.handlers:
         logger.handlers.clear()
 
-    # Handler su file (tutto il dettaglio)
+    # File handler (full verbosity)
     fh = logging.FileHandler(log_file, encoding="utf-8")
     fh.setLevel(logging.DEBUG)
     fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
 
-    # Handler su console (solo INFO e superiori)
+    # Console handler (INFO and above only)
     ch = logging.StreamHandler()
     ch.setLevel(logging.INFO)
-    ch.setFormatter(logging.Formatter("%(message)s"))  # Console pulita, senza timestamp
+    ch.setFormatter(logging.Formatter("%(message)s"))  # Clean console, no timestamp
 
     logger.addHandler(fh)
     logger.addHandler(ch)
 
-    logger.info(f"📋 Log sessione: {log_file}")
+    logger.info(f"📋 Session Log: {log_file}")
     return logger
 
 
 def log_step(logger: logging.Logger, state: "WorldState", tool: str, result: str, success: bool):
-    """Logga un singolo step dell'agente in formato JSON strutturato."""
+    """Logs a single agent execution step in structured JSON format."""
     entry = {
         "step": state.step_count,
         "tool": tool,
@@ -57,11 +57,11 @@ def log_step(logger: logging.Logger, state: "WorldState", tool: str, result: str
     }
     logger.debug(f"STEP: {json.dumps(entry, ensure_ascii=False)}")
     if not success:
-        logger.warning(f"⚠️  Step {state.step_count} fallito — tool={tool} → {str(result)[:100]}")
+        logger.warning(f"⚠️  Step {state.step_count} failed — tool={tool} → {str(result)[:100]}")
 
 
 def log_decision(logger: logging.Logger, thought: str, tool: str, confidence: float):
-    """Logga la decisione del planner (reasoning + tool scelto)."""
+    """Logs the planner's decision mapping (reasoning + chosen tool)."""
     logger.debug(json.dumps({
         "event": "planner_decision",
         "thought": thought[:200],

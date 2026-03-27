@@ -16,12 +16,14 @@ import logging
 import glob
 import uuid
 import requests
+from collections import defaultdict
 
 # Append the root directory to the system path to locate the src/ modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Security, Depends, status
 from fastapi.responses import JSONResponse
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 from contextlib import asynccontextmanager
 
@@ -37,6 +39,22 @@ from src.utils import extract_json
 # --- Global Server State ---
 _agent: JarvisAgent = None
 _logger: logging.Logger = None
+_metrics = defaultdict(int)
+_metrics["start_time"] = time.time()
+
+# --- Security Configuration ---
+ARGOS_API_KEY = os.getenv("ARGOS_API_KEY", "").strip()
+api_key_header = APIKeyHeader(name="X-ARGOS-API-KEY", auto_error=False)
+
+async def verify_api_key(key: str = Security(api_key_header)):
+    """Validates the incoming request's X-ARGOS-API-KEY header."""
+    if not ARGOS_API_KEY:
+        return # Permissive mode if no key is set in .env
+    if key != ARGOS_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unauthorized: Invalid or missing API Key"
+        )
 
 
 @asynccontextmanager
@@ -130,6 +148,7 @@ def _run_task_sync(task: str, require_confirmation: bool, max_steps: int) -> Tas
     final_result = ""
     step_records = []
 
+    _metrics["tasks_total"] += 1
     for step_num in range(max_steps):
         # Think
         raw = _agent.think()
@@ -178,7 +197,6 @@ def _run_task_sync(task: str, require_confirmation: bool, max_steps: int) -> Tas
         else:
             final_result = f"Step execution failure at {state.step_count}: {action_result.message}"
 
-        time.sleep(0.3)
 
     return TaskResponse(
         success=not final_result.startswith("Step execution failure"),
@@ -217,7 +235,23 @@ def _run_task_async_worker(job_id: str, webhook_url: str, task: str, req_conf: b
         except:
             pass
 
+@app.get("/metrics", tags=["System"], dependencies=[Depends(verify_api_key)])
+async def get_metrics():
+    """Provides real-time operational observability and performance metrics."""
+    return {
+        "uptime_seconds": time.time() - _metrics["start_time"],
+        "tasks_executed": _metrics["tasks_total"],
+        "emails_queued": _metrics["emails_queued"],
+        "emails_deleted": _metrics["emails_deleted"],
+        "pending_file_exists": os.path.exists(_PENDING_FILE)
+    }
+
 # --- Core Application Endpoints ---
+
+@app.get("/health", tags=["System"])
+async def health():
+    """Diagnostic health check for Docker orchestration."""
+    return {"status": "ok", "timestamp": time.time()}
 
 @app.get("/status", response_model=StatusResponse, tags=["System"])
 async def status():
@@ -231,7 +265,7 @@ async def status():
     )
 
 
-@app.post("/run", response_model=TaskResponse, tags=["Agent"])
+@app.post("/run", response_model=TaskResponse, tags=["Agent"], dependencies=[Depends(verify_api_key)])
 async def run_task(req: TaskRequest):
     """
     Executes a standard synchronous autonomous cycle.
@@ -248,7 +282,7 @@ async def run_task(req: TaskRequest):
         _logger.error(f"Endpoint Exception /run: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/run_async", response_model=AsyncAcceptedResponse, status_code=202, tags=["Agent"])
+@app.post("/run_async", response_model=AsyncAcceptedResponse, status_code=202, tags=["Agent"], dependencies=[Depends(verify_api_key)])
 async def run_task_async(req: TaskAsyncRequest, background_tasks: BackgroundTasks):
     """
     Initializes a background detached job stream preventing long-polling n8n upstream timeouts.
@@ -279,7 +313,7 @@ async def run_task_async(req: TaskAsyncRequest, background_tasks: BackgroundTask
 # --- Persistent Email Queue Logic (Dedicated HITL architecture) ---
 _PENDING_FILE = "/tmp/argos_pending_reply.json"
 
-@app.post("/pending_email", tags=["Email HITL"])
+@app.post("/pending_email", tags=["Email HITL"], dependencies=[Depends(verify_api_key)])
 async def store_pending_email(data: dict):
     """Generates a persisted context index linking metadata dictionary payloads directly to thread message IDs."""
     import json as _json
@@ -301,10 +335,11 @@ async def store_pending_email(data: dict):
     with open(_PENDING_FILE, "w", encoding="utf-8") as f:
         _json.dump(store, f, ensure_ascii=False)
         
+    _metrics["emails_queued"] += 1
     _logger.info(f"📧 Active Context Queued: ID {msg_id} (Allocated heap index count: {len(store)})")
     return {"status": "saved", "sender": data.get("sender", ""), "queue_size": len(store)}
 
-@app.delete("/pending_email", tags=["Email HITL"])
+@app.delete("/pending_email", tags=["Email HITL"], dependencies=[Depends(verify_api_key)])
 async def delete_pending_email(message_id: str):
     """Query, extract, and synchronously destruct email queues bounded to explicitly defined IDs."""
     import json as _json
@@ -324,12 +359,13 @@ async def delete_pending_email(message_id: str):
         with open(_PENDING_FILE, "w", encoding="utf-8") as f:
             _json.dump(store, f, ensure_ascii=False)
             
+        _metrics["emails_deleted"] += 1
         return {**data, "status": "deleted", "remaining": len(store)}
     except Exception as e:
         return {"status": "empty", "reason": str(e)}
 
 
-@app.get("/logs/last", tags=["System"])
+@app.get("/logs/last", tags=["System"], dependencies=[Depends(verify_api_key)])
 async def last_log():
     """Ritorna il contenuto dell'ultimo file di log della sessione."""
     log_files = sorted(glob.glob("logs/argos_*.log"))

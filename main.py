@@ -92,9 +92,10 @@ def main():
                     break
 
                 # Infinite loop protection
+                max_loops = int(os.getenv("MAX_TOOL_LOOPS", "10"))
                 loop_count += 1
-                if loop_count > 4:
-                    msg = "STOP: Too many automatic actions."
+                if loop_count > max_loops:
+                    msg = f"STOP: Too many automatic actions (limit: {max_loops})."
                     logger.warning(msg)
                     print(f"\n🛑 {msg}")
                     jarvis.add_message("system", f"{msg} Request user input.")
@@ -148,8 +149,6 @@ def main():
                     # Feedback to the agent's brain
                     jarvis.add_message("assistant", json.dumps({"action": {"tool": tool_name, "input": tool_input}}))
                     jarvis.add_message("user", f"TOOL RESULT: {result}")
-
-                    time.sleep(0.5)
 
         except KeyboardInterrupt:
             logger.info("Forced exit (Ctrl+C).")
