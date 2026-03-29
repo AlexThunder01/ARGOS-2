@@ -55,3 +55,29 @@ The file is located in the project root and is automatically mounted into the Do
 #### `auto_discard_spam` (Boolean)
 - **Effect**: Automatically drops emails the LLM classifies as SPAM.
 - **Usage**: If `true`, these won't even appear in your "Ignored" logs inside n8n.
+
+---
+
+## 💬 Telegram Assistant Configuration
+
+The `telegram_assistant` block controls the conversational agent and its memory system.
+
+### `identity` (Object)
+- **`persona`**: The core system prompt injected before every conversation. Defines how the agent thinks and acts.
+- **`welcome_message`**: The text sent when a user types `/start`.
+- **`unauthorized_message`**: The text sent to unapproved users while they wait for admin approval.
+
+### `behavior` (Object)
+- **`default_language`**: ISO code for the language to use if the user doesn't specify one (default: `it`).
+- **`conversation_window`**: Number of recent messages to keep in the sliding window context.
+- **`enable_memory_extraction`**: If `true`, the agent will extract long-term facts/preferences in the background and store them as embeddings.
+- **`rag_similarity_threshold`**: (Float 0.0-1.0). Minimum cosine similarity required to inject a memory into the prompt. Higher means stricter memory matching.
+
+### `memory` (Object: Cognitive Security)
+- **`enable_poisoning_detection`**: If `true`, activates the 4-layer security pipeline (regex heuristics + LLM Judge) to protect the DB from prompt injection.
+- **`risk_threshold`**: (Float 0.0-1.0). The maximum acceptable risk score before the system blocks the memory insertion.
+- **`suspicious_retention`**: Number of suspicious memories to retain in the audit log for admin review before garbage collection.
+
+### `admin` (Object)
+- **`notify_on_new_user`**: If `true`, sends an InlineKeyboard approval message to the `ADMIN_CHAT_ID` when a new user types `/start`.
+- **`auto_approve`**: If `true`, skips the whitelist and allows anyone on Telegram to use your LLM API limits. Use with extreme caution.

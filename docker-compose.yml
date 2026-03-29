@@ -13,6 +13,8 @@ services:
       - GROQ_API_KEY=${GROQ_API_KEY}
       - GROQ_API_KEY2=${GROQ_API_KEY2:-}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_BOT_TOKEN=${TELEGRAM_CHAT_BOT_TOKEN:-}
+      - ADMIN_CHAT_ID=${ADMIN_CHAT_ID:-}
       - N8N_API_KEY=${N8N_API_KEY}
       - ARGOS_API_KEY=${ARGOS_API_KEY:-}
     healthcheck:
@@ -36,10 +38,12 @@ services:
     container_name: argos-n8n
     restart: unless-stopped
     ports:
-      - "5678:5678"
+      - "127.0.0.1:5678:5678"
     environment:
       - WEBHOOK_URL=https://${NGROK_DOMAIN}/
       - N8N_EDITOR_BASE_URL=http://localhost:5678
+      - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
+      - ARGOS_API_KEY=${ARGOS_API_KEY:-}
     volumes:
       - n8n_data:/home/node/.n8n
     depends_on:

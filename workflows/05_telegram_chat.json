@@ -1,0 +1,221 @@
+{
+  "name": "05 - Telegram Chat Bot (ARGOS AI)",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ]
+      },
+      "id": "c1a2b3c4-d5e6-f7a8-b9c0-d1e2f3a4b5c6",
+      "name": "Telegram Chat Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "webhookId": "a9b8c7d6-e5f4-3a2b-1c0d-9e8f7a6b5c4d",
+      "position": [200, 300],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Telegram Chat Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extract message payload and check if it's a text message\nconst msg = $input.first().json;\n\n// Safely get the message object (could be in different locations)\nconst message = msg.message || msg;\n\nconst text = message.text || null;\nconst chat_id = message.chat?.id || message.from?.id || null;\nconst user_id = message.from?.id || null;\nconst first_name = message.from?.first_name || '';\nconst username = message.from?.username || '';\n\n// Check for non-text messages\nconst isPhoto = !!message.photo;\nconst isVoice = !!message.voice;\nconst isDocument = !!message.document;\nconst isSticker = !!message.sticker;\nconst isLocation = !!message.location;\nconst isContact = !!message.contact;\n\nconst isTextMessage = !!text && !isPhoto && !isVoice && !isDocument && !isSticker && !isLocation && !isContact;\n\nreturn [\n  {\n    json: {\n      is_text: isTextMessage,\n      text: text || '',\n      chat_id: chat_id,\n      user_id: user_id,\n      first_name: first_name,\n      username: username\n    }\n  }\n];"
+      },
+      "id": "d2e3f4a5-b6c7-d8e9-f0a1-b2c3d4e5f6a7",
+      "name": "Extract & Classify Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.is_text }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "e3f4a5b6-c7d8-e9f0-a1b2-c3d4e5f6a7b8",
+      "name": "Is Text Message?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://argos-api:8000/telegram/chat",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-ARGOS-API-KEY",
+              "value": "={{ $env.ARGOS_API_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"user_id\": {{ $json.user_id }},\n  \"chat_id\": {{ $json.chat_id }},\n  \"text\": {{ JSON.stringify($json.text) }},\n  \"first_name\": {{ JSON.stringify($json.first_name) }},\n  \"username\": {{ JSON.stringify($json.username) }}\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "f4a5b6c7-d8e9-f0a1-b2c3-d4e5f6a7b8c9",
+      "name": "Call ARGOS Brain",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 220]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.status }}",
+              "operation": "equal",
+              "value2": "banned"
+            }
+          ]
+        }
+      },
+      "id": "a5b6c7d8-e9f0-a1b2-c3d4-e5f6a7b8c9d0",
+      "name": "Is Banned?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1140, 220]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Extract & Classify Message').item.json.chat_id }}",
+        "text": "={{ $('Call ARGOS Brain').item.json.reply }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "b6c7d8e9-f0a1-b2c3-d4e5-f6a7b8c9d0e1",
+      "name": "Send AI Reply",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [1380, 160],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Telegram Chat Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Extract & Classify Message').item.json.chat_id }}",
+        "text": "📝 I only support text messages for now. Please type your question!",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "id": "c7d8e9f0-a1b2-c3d4-e5f6-a7b8c9d0e1f2",
+      "name": "Non-Text Fallback",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [900, 440],
+      "credentials": {
+        "telegramApi": {
+          "id": "REPLACE_WITH_YOUR_CREDENTIAL_ID",
+          "name": "Telegram Chat Bot"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "d8e9f0a1-b2c3-d4e5-f6a7-b8c9d0e1f2a3",
+      "name": "Silence (Banned User)",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1380, 320]
+    }
+  ],
+  "connections": {
+    "Telegram Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract & Classify Message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract & Classify Message": {
+      "main": [
+        [
+          {
+            "node": "Is Text Message?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Text Message?": {
+      "main": [
+        [
+          {
+            "node": "Call ARGOS Brain",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Non-Text Fallback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call ARGOS Brain": {
+      "main": [
+        [
+          {
+            "node": "Is Banned?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is Banned?": {
+      "main": [
+        [
+          {
+            "node": "Silence (Banned User)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send AI Reply",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

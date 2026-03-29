@@ -3,7 +3,7 @@ import os
 import requests
 import sys
 
-from n8n_client import get_n8n_config
+from scripts.n8n_client import get_n8n_config
 
 def clear_n8n():
     print("="*50)

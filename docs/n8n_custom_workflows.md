@@ -66,4 +66,4 @@ To see this decoupled architecture in a powerful real-world scenario, ARGOS-2 na
 1. **`03_gmail_analizzatore_hitl.json`**: Automatically intercepts incoming emails, delegates reading/summarization/drafting to the Python LLM backend, and notifies you securely on Telegram using Inline Keyboard Buttons (`✅ SEND`, `❌ DISCARD`).
 2. **`04_gmail_webhook_approval.json`**: Acts as the zero-latency Webhook receiver for the Telegram buttons. Upon clicking, the Python API atomically extracts the draft from the persistent FIFO queue and executes the Gmail reply, while dynamically editing your Telegram message to prevent duplicate clicks.
 
-**How to Test Them:** Run the `inject_n8n.py` script and ensure you've configured your Gmail OAuth2 Credentials within the n8n UI!
+**How to Test Them:** Run the `python3 scripts/inject_n8n.py` script and ensure you've configured your Gmail OAuth2 Credentials within the n8n UI!

@@ -18,13 +18,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application source code
 COPY api/ ./api/
 COPY src/ ./src/
-COPY main.py .
+COPY scripts/ ./scripts/
 COPY config.yaml .
-COPY inject_n8n.py clear_n8n.py n8n_client.py ./
 COPY workflows/ ./workflows/
 
 # Create required runtime directories and set permissions
-RUN mkdir -p /tmp/argos_logs
+RUN mkdir -p /tmp/argos_logs /app/data
 
 # Security: Create a non-root user and assign ownership
 RUN groupadd -r argos && useradd -r -g argos -d /app -s /sbin/nologin argos \

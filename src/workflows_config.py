@@ -37,6 +37,56 @@ class WorkflowsConfig:
     def custom_signature(self) -> str:
         return self._data.get('gmail_assistant', {}).get('behavior', {}).get('custom_signature', "")
 
+    # --- Telegram Chat Module Properties ---
+
+    @property
+    def is_telegram_enabled(self) -> bool:
+        return self._data.get('telegram_assistant', {}).get('enabled', False)
+
+    @property
+    def telegram_config(self) -> dict:
+        return self._data.get('telegram_assistant', {})
+
+    @property
+    def telegram_bot_name(self) -> str:
+        return self._data.get('telegram_assistant', {}).get('identity', {}).get('bot_name', 'AI Assistant')
+
+    @property
+    def telegram_persona(self) -> str:
+        return self._data.get('telegram_assistant', {}).get('identity', {}).get('persona', '')
+
+    @property
+    def telegram_welcome_message(self) -> str:
+        return self._data.get('telegram_assistant', {}).get('identity', {}).get('welcome_message', 'Hello!')
+
+    @property
+    def telegram_unauthorized_message(self) -> str:
+        return self._data.get('telegram_assistant', {}).get('identity', {}).get('unauthorized_message', 'Access denied.')
+
+    @property
+    def telegram_conversation_window(self) -> int:
+        return self._data.get('telegram_assistant', {}).get('behavior', {}).get('conversation_window', 20)
+
+    @property
+    def telegram_max_memories(self) -> int:
+        return self._data.get('telegram_assistant', {}).get('behavior', {}).get('max_memories_retrieved', 3)
+
+    @property
+    def telegram_rag_threshold(self) -> float:
+        return self._data.get('telegram_assistant', {}).get('behavior', {}).get('rag_similarity_threshold', 0.70)
+
+    @property
+    def telegram_max_input_length(self) -> int:
+        return self._data.get('telegram_assistant', {}).get('behavior', {}).get('max_input_length', 4000)
+
+    @property
+    def telegram_auto_approve(self) -> bool:
+        return self._data.get('telegram_assistant', {}).get('admin', {}).get('auto_approve', False)
+
+    @property
+    def telegram_notify_on_new_user(self) -> bool:
+        return self._data.get('telegram_assistant', {}).get('admin', {}).get('notify_on_new_user', True)
+
 
 # Thread-Safe Global Cache
 _config_lock = threading.Lock()

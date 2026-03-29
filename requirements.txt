@@ -23,9 +23,12 @@ uvicorn[standard]==0.29.0
 
 # --- Testing ---
 pytest==8.0.0
+pytest-cov==6.1.1
+httpx==0.27.0
 
 # --- Setup Utilities ---
 setuptools==69.0.3
 pyyaml==6.0.1
 watchdog==4.0.0
 pybreaker==1.2.0
+numpy==1.26.4

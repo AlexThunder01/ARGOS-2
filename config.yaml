@@ -47,3 +47,61 @@ gmail_assistant:
     # If true, emails classified as "low" priority or "spam" will be automatically
     # discarded by n8n without requiring Human-In-The-Loop approval via Telegram.
     auto_discard_spam: false
+
+# ==============================================================================
+# TELEGRAM CHAT BOT — Public Chat Module Configuration
+# ==============================================================================
+
+telegram_assistant:
+  # Master switch — if false, the bot won't process any messages
+  enabled: true
+
+  # --------------------------------------------------------------------------
+  # BOT IDENTITY
+  # --------------------------------------------------------------------------
+  identity:
+    bot_name: "ARGOS"
+    persona: >
+      You are an intelligent and precise AI assistant. You are curious, direct,
+      and value clarity. You don't use empty courtesy phrases.
+      When you don't know something, you admit it without hesitation.
+    welcome_message: >
+      Hello! I'm ARGOS, your personal AI assistant.
+      I can remember our previous conversations and adapt
+      to your preferences over time. How can I help?
+    unauthorized_message: >
+      Hello! This bot is invite-only.
+      Your access request has been registered.
+      You'll receive a notification when approved.
+
+  # --------------------------------------------------------------------------
+  # BEHAVIOR & RESPONSE
+  # --------------------------------------------------------------------------
+  behavior:
+    default_language: "it"
+    default_tone: "neutral"
+    conversation_window: 20
+    max_memories_retrieved: 3
+    rag_similarity_threshold: 0.70
+    max_conversation_history: 200
+    enable_memory_extraction: true
+    max_input_length: 4000
+    memory:
+      enable_poisoning_detection: true
+      risk_threshold: 0.5
+      suspicious_retention: 500
+
+  # --------------------------------------------------------------------------
+  # RATE LIMITING
+  # --------------------------------------------------------------------------
+  limits:
+    max_messages_per_day: 0    # 0 = unlimited
+    max_messages_per_hour: 0
+
+  # --------------------------------------------------------------------------
+  # ADMIN
+  # --------------------------------------------------------------------------
+  admin:
+    notify_on_new_user: true
+    auto_approve: false
+

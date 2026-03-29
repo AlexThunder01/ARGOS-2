@@ -163,3 +163,71 @@ class JarvisAgent:
             return r.json()["message"]["content"]
         except Exception as e:
             return f"Ollama Error: {e}"
+
+    # --- External History Methods (Telegram Chat Module) ---
+
+    def think_with_messages(self, messages: list[dict]) -> str:
+        """Executes a single LLM inference with an externally-provided message history.
+        Used by the Telegram chat module where each user has their own context."""
+        try:
+            if self.backend == "groq":
+                return self._call_groq_with_messages(messages)
+            else:
+                payload = {"model": self.model, "messages": messages, "stream": False}
+                r = requests.post(OLLAMA_URL, json=payload, timeout=60)
+                return r.json()["message"]["content"]
+        except Exception as e:
+            return f"LLM Error: {e}"
+
+    def _call_groq_with_messages(self, messages: list[dict], retries=0) -> str:
+        """Groq API call with external message history and key rotation."""
+        from .config import GROQ_API_KEY, GROQ_API_KEY2
+
+        current_key = GROQ_API_KEY2 if (retries % 2 != 0 and GROQ_API_KEY2) else GROQ_API_KEY
+        headers = {"Authorization": f"Bearer {current_key}", "Content-Type": "application/json"}
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.3  # Slightly creative for conversational responses
+        }
+
+        try:
+            response = requests.post(GROQ_CHAT_URL, headers=headers, json=payload, timeout=30)
+
+            if response.status_code == 429:
+                if retries < 3:
+                    if retries % 2 == 0 and GROQ_API_KEY2:
+                        return self._call_groq_with_messages(messages, retries + 1)
+                    else:
+                        wait_time = 5 * (retries + 1)
+                        time.sleep(wait_time)
+                        return self._call_groq_with_messages(messages, retries + 1)
+                else:
+                    return "Error: Groq Rate Limit exceeded."
+
+            if response.status_code != 200:
+                return "API Error."
+
+            return response.json()["choices"][0]["message"]["content"]
+
+        except Exception as e:
+            return f"Connection Error: {e}"
+
+    def call_lightweight(self, prompt: str) -> str:
+        """Calls a lightweight model for structured extraction tasks (memory extraction).
+        Uses llama-3.1-8b-instant for reduced latency and token cost."""
+        from .config import GROQ_API_KEY, GROQ_CHAT_URL
+
+        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
+        payload = {
+            "model": "llama-3.1-8b-instant",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.0
+        }
+        try:
+            response = requests.post(GROQ_CHAT_URL, headers=headers, json=payload, timeout=15)
+            if response.status_code == 200:
+                return response.json()["choices"][0]["message"]["content"]
+            return ""
+        except Exception:
+            return ""

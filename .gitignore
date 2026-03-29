@@ -14,3 +14,8 @@ logs/
 # Large local TTS models (excluded from repository)
 Qwen3-TTS-12Hz-1.7B-VoiceDesign/
 Qwen3-TTS-local/
+
+# Runtime data and test artifacts
+data/
+.coverage
+.pytest_cache/

@@ -4,10 +4,21 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111.0-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![n8n](https://img.shields.io/badge/n8n-Workflow_Automation-FF6B6B.svg?logo=n8n)](https://n8n.io/)
 [![Docker](https://img.shields.io/badge/Docker-Enabled-2496ED.svg?logo=docker)](https://www.docker.com/)
+[![Coverage](https://img.shields.io/badge/Coverage-36%25-green.svg)](https://pytest.org/)
 
 **ARGOS-2** is an enterprise-grade agentic hub that bridges the gap between **visual workflow orchestration (n8n)** and **high-performance cognitive reasoning (FastAPI + Python)**. 
 
-Unlike traditional "chatbots", ARGOS is a decoupled architecture designed for reliable, scalable, and human-in-the-loop automation.
+Unlike traditional "chatbots", ARGOS features a decoupled **Brain-Body architecture** designed for reliable, scalable, and secure automation.
+
+---
+
+## ✨ Key Features (v2.0)
+
+- **🧠 Brain-Body Split Architecture**: n8n handles all I/O and routing (the Body), while a dedicated Python/FastAPI backend handles LLM reasoning, state management, and memory (the Brain).
+- **💬 Telegram Agent with RAG Memory**: A fully functional conversational assistant with persistent, long-term memory. It uses Groq embeddings and cosine similarity to remember user preferences, facts, and tasks over time.
+- **🛡️ 4-Layer Cognitive Security**: Protection against prompt injection and data poisoning via regex blocklists, regex heuristics, conversational anomaly detection, and a dedicated paranoid LLM Judge.
+- **📧 Gmail HITL (Human-In-The-Loop)**: Automatic email analysis and prioritization with Telegram push notifications for one-tap approvals.
+- **⚡ Production Hardened**: Thread-local SQLite connection pooling, modular tool architecture, and a test suite with 93 passing tests (mocked network, in-memory DB fixtures).
 
 ---
 
@@ -15,21 +26,22 @@ Unlike traditional "chatbots", ARGOS is a decoupled architecture designed for re
 - [🚀 Quickstart](#-quickstart)
 - [🏗️ Architecture](#️-architecture)
 - [🎛️ Configuration](#️-configuration)
-- [📧 Reference Implementation: Gmail HITL](#-reference-implementation-gmail-hitl)
 - [🛠️ Developer Documentation](#️-developer-documentation)
 
 ---
 
 ## 🚀 Quickstart: Deploy in 2 Minutes
 
-ARGOS is fully containerized. You can go from zero to a live, AI-powered Gmail assistant in minutes.
+ARGOS is fully containerized. You can go from zero to a live, memory-augmented Telegram assistant in minutes.
 
 ### 1. Configure the Environment
 ```bash
 cp .env.example .env
 # Open .env and populate:
 # - GROQ_API_KEY (Your LLM brain)
-# - TELEGRAM_BOT_TOKEN & TELEGRAM_CHAT_ID (Your UI)
+# - TELEGRAM_BOT_TOKEN (For Gmail HITL approvals)
+# - TELEGRAM_CHAT_BOT_TOKEN (For the conversational agent)
+# - ADMIN_CHAT_ID (To receive access requests)
 # - NGROK_AUTHTOKEN & NGROK_DOMAIN (Your secure tunnel)
 ```
 
@@ -39,60 +51,74 @@ docker compose up -d --build
 ```
 
 ### 3. Inject AI Workflows
-Once the containers are healthy, run the automated injector:
+Once the containers are healthy, run the automated injector to bootstrap n8n credentials and workflows:
 ```bash
-pip install -r requirements.txt
-python3 inject_n8n.py
+pip install requests python-dotenv
+python3 scripts/inject_n8n.py
 ```
 
-### 4. Authorize Google
+### 4. Authorize Google (Optional, for Gmail HITL)
 1. Open n8n at `http://localhost:5678`.
 2. Go to **Credentials** -> **Gmail account** -> **Sign in with Google**.
 
 ---
 
 ## 🏗️ Architecture
+
 ARGOS separates the **Nervous System** from the **Brain**:
+
+- **[Architecture Deep Dive](docs/ARCHITECTURE.md)**: How n8n communicates with Python securely.
+- **[Telegram RAG Module Spec](docs/TELEGRAM_MODULE_SPEC.md)**: Details on the sliding-window context, debounced memory extraction, vectors, and Garbage Collection.
 - **[Technical Specification](docs/TECHNICAL_SPECIFICATION.md)**: Exhaustive HLD architecture, Sequence Flow diagrams, and Data Models.
-- **[Architecture Deep Dive](docs/ARCHITECTURE.md)**: How n8n communicates with Python.
-- **[Cognitive Backend](api/server.py)**: The FastAPI server handling reasoning and state queues.
+
+### Security Model
+- **Non-Root Execution**: Containers run as a restricted `argos` user.
+- **Internal Isolation**: The FastAPI backend is never exposed to the public internet. n8n acts as the only API Gateway.
+- **Admin Approval**: The Telegram bot is whitelist-only. New users trigger an approval workflow sent to the `ADMIN_CHAT_ID`.
 
 ---
 
 ## 🎛️ Configuration
-All agent behavior is controlled via a centralized YAML file. No code changes required to change the agent's persona or filtering rules.
-- **[Configuration Guide](docs/CONFIGURATION_GUIDE.md)**: mastering the `config.yaml` file.
+
+All agent behavior is controlled via a centralized, hot-reloadable YAML file. Avoid hardcoding prompts!
+
+- **[Configuration Guide](docs/CONFIGURATION_GUIDE.md)**: Mastering the `config.yaml` file.
 
 ```yaml
-gmail_assistant:
+telegram_assistant:
   enabled: true
-  filters:
-    min_priority: "MEDIUM"  # Ignore LOW/SPAM automatically
+  identity:
+    bot_name: "ARGOS"
+    persona: "You are a stark, precise AI assistant. You value clarity."
   behavior:
-    tone_of_voice: "professional yet empathetic"
+    default_language: "it"
+    rag_similarity_threshold: 0.70
+    max_memories_retrieved: 3
+    enable_memory_extraction: true
 ```
 
 ---
 
-## 📧 Reference Implementation: Gmail HITL
-ARGOS ships with a production-ready showcase of **Human-In-The-Loop (HITL)** email management.
-- **Automatic Analysis**: LLM prioritizes and summarizes incoming emails.
-- **Telegram Webhooks**: Instant UI cards for mobile approval.
-- **Atomic Operations**: Secure queue management prevents duplicate replies.
-
----
-
 ## 🛠️ Developer Documentation
-Want to build your own tools or integrate Slack, Shopify, or custom logic?
-- **[Development Guide](docs/DEVELOPMENT.md)**: Extending the agent.
-- **[Custom n8n Workflows](docs/n8n_custom_workflows.md)**: How to build for ARGOS.
+
+Want to build your own tools or integrate new platforms?
+
+- **[Development Guide](docs/DEVELOPMENT.md)**: Extending the Python backend, adding new modular tools, and writing tests.
+- **[Custom n8n Workflows](docs/n8n_custom_workflows.md)**: How to build custom n8n branches that interact with the FastAPI brain.
+
+### Running Tests
+ARGOS uses `pytest` with an in-memory database and mocked network dependencies for deterministic CI/CD:
+```bash
+pip install -r requirements.txt
+pytest tests/ -v --cov=src --cov=api --cov-report=term-missing
+```
 
 ---
 
 ## 🔮 Future Roadmap (v3.0)
-- **Redis Queue**: Moving the state from RAM/Disk to Redis for horizontal scaling.
-- **Multimodal Vision**: Native support for analyzing images/PDFs in Gmail via VLM.
-- **Voice Response**: Auto-generating audio summaries of your inbox.
+- **PostgreSQL + pgvector**: Migrating off SQLite for horizontal scaling and HNSW indexing.
+- **Multimodal Vision**: Native support for analyzing images/PDFs in incoming chats.
+- **WhatsApp Integration**: Expanding the Body surface area beyond Telegram and Gmail.
 
 ---
 **Powered by n8n & Python ✨**

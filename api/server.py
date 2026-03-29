@@ -19,11 +19,11 @@ import requests
 from collections import defaultdict
 import sqlite3
 import pybreaker
+from src.db.connection import get_connection, DB_PATH
 
 # --- File System & DB Config ---
 DB_DIR = "/app/data" if os.environ.get("DOCKER_ENV") else "./data"
 os.makedirs(DB_DIR, exist_ok=True)
-DB_PATH = os.path.join(DB_DIR, "argos_state.db")
 
 # --- Circuit Breaker ---
 # Fails fast for 60 seconds after 3 consecutive LLM timeouts
@@ -71,8 +71,7 @@ async def verify_api_key(key: str = Security(api_key_header)):
 def init_db():
     """Initializes the SQLite state database ensuring safe WAL mode concurrency."""
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=10)
-        conn.execute("PRAGMA journal_mode=WAL")
+        conn = get_connection()
         conn.execute('''CREATE TABLE IF NOT EXISTS pending_emails (
             msg_id TEXT PRIMARY KEY,
             payload TEXT
@@ -80,8 +79,6 @@ def init_db():
         conn.commit()
     except sqlite3.Error as e:
         print(f"❌ Failed to initialize SQLite database: {e}")
-    finally:
-        if 'conn' in locals(): conn.close()
 
 
 @asynccontextmanager
@@ -444,15 +441,13 @@ async def store_pending_email(data: dict):
     payload_str = _json.dumps(data, ensure_ascii=False)
     
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=10)
+        conn = get_connection()
         # Using INSERT OR REPLACE to handle unexpected upstream retries gracefully
         conn.execute("INSERT OR REPLACE INTO pending_emails (msg_id, payload) VALUES (?, ?)", (msg_id, payload_str))
         conn.commit()
     except sqlite3.Error as e:
         _logger.error(f"SQLite Write Error: {e}")
         return {"status": "error", "reason": "database_write_error"}
-    finally:
-        if 'conn' in locals(): conn.close()
         
     _metrics["emails_queued"] += 1
     _logger.info(f"📧 Active Context Queued in SQLite: ID {msg_id}")
@@ -464,7 +459,7 @@ async def consume_pending_email(message_id: str):
     import json as _json
     
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=10)
+        conn = get_connection()
         cursor = conn.cursor()
         
         # Standard SELECT and delayed DELETE inside a transaction
@@ -472,7 +467,6 @@ async def consume_pending_email(message_id: str):
         row = cursor.fetchone()
         
         if not row:
-            conn.close()
             raise HTTPException(status_code=404, detail="Email context not found or already consumed.")
             
         data = _json.loads(row[0])
@@ -485,8 +479,6 @@ async def consume_pending_email(message_id: str):
     except sqlite3.Error as e:
         _logger.error(f"SQLite Read/Delete Error: {e}")
         raise HTTPException(status_code=500, detail="State architecture failure")
-    finally:
-        if 'conn' in locals(): conn.close()
 
 
 @app.get("/logs/last", tags=["System"], dependencies=[Depends(verify_api_key)])
@@ -497,4 +489,353 @@ async def last_log():
         raise HTTPException(status_code=404, detail="Nessun log disponibile.")
     with open(log_files[-1], "r", encoding="utf-8") as f:
         lines = f.readlines()
-    return JSONResponse({"log_file": log_files[-1], "lines": lines[-100:]})  # ultimi 100 righe
+    return JSONResponse({"log_file": log_files[-1], "lines": lines[-100:]})
+
+
+# ==============================================================================
+# TELEGRAM CHAT MODULE
+# ==============================================================================
+
+# --- Telegram Pydantic Schemas ---
+
+class TelegramChatRequest(BaseModel):
+    user_id: int = Field(..., description="Telegram user_id (immutable)")
+    chat_id: int = Field(..., description="Telegram chat_id for the reply")
+    text: str = Field(..., description="User message text")
+    first_name: str = Field(default="", description="Telegram first name")
+    username: str = Field(default="", description="Telegram @username (optional)")
+
+class TelegramChatResponse(BaseModel):
+    status: str  # 'ok' | 'unauthorized' | 'pending' | 'banned' | 'disabled'
+    reply: str
+    user_id: int
+    memories_used: int = 0
+    is_new_user: bool = False
+
+class AdminActionRequest(BaseModel):
+    admin_chat_id: int
+    target_user_id: int
+    reason: str = ""
+
+
+# --- Telegram Slash Command Handler ---
+
+def _handle_telegram_command(text: str, user_id: int, config) -> str | None:
+    """Handles slash commands without invoking the LLM. Returns response or None."""
+    from src.telegram.db import (
+        db_clear_conversation_window, db_get_user_stats,
+        db_delete_user_data, db_update_profile, db_get_open_tasks
+    )
+
+    if not text.startswith("/"):
+        return None
+
+    parts = text.split()
+    cmd = parts[0].lower().split("@")[0]  # Strip @botname suffix
+
+    if cmd == "/start":
+        return config.telegram_welcome_message
+
+    elif cmd == "/help":
+        return (
+            "📋 *Available commands:*\n"
+            "/reset — Clear current session context\n"
+            "/status — View your statistics\n"
+            "/language it|en|... — Change language\n"
+            "/tone formal|casual|neutral — Change tone\n"
+            "/name <name> — Set your preferred name\n"
+            "/tasks — Your open tasks\n"
+            "/deleteme CONFIRM — Delete all your data"
+        )
+
+    elif cmd == "/reset":
+        db_clear_conversation_window(user_id)
+        return "✅ Session context cleared. Let's start fresh."
+
+    elif cmd == "/status":
+        stats = db_get_user_stats(user_id)
+        return (
+            f"👤 *Your profile:*\n"
+            f"Status: ✅ Approved\n"
+            f"Total messages: {stats['msg_count']}\n"
+            f"Saved memories: {stats['memory_count']}\n"
+            f"Open tasks: {stats['open_tasks']}\n"
+            f"Member since: {stats['registered_at']}"
+        )
+
+    elif cmd == "/deleteme":
+        if len(parts) > 1 and parts[1].upper() == "CONFIRM":
+            db_delete_user_data(user_id)
+            return (
+                "🗑️ All your data has been permanently deleted.\n"
+                "Your access has been revoked. Send a message to request approval again."
+            )
+        else:
+            return (
+                "⚠️ This will *permanently delete ALL* your data "
+                "(conversations, memories, preferences, tasks).\n\n"
+                "Type `/deleteme CONFIRM` to proceed."
+            )
+
+    elif cmd == "/language" and len(parts) > 1:
+        lang = parts[1][:5]
+        db_update_profile(user_id, language=lang)
+        return f"✅ Language set to: {lang}"
+
+    elif cmd == "/tone" and len(parts) > 1:
+        tone = parts[1].lower()
+        if tone not in ("formal", "casual", "neutral"):
+            return "❌ Invalid tone. Use: formal | casual | neutral"
+        db_update_profile(user_id, preferred_tone=tone)
+        return f"✅ Tone set to: {tone}"
+
+    elif cmd == "/name" and len(parts) > 1:
+        name = " ".join(parts[1:])[:50]
+        db_update_profile(user_id, display_name=name)
+        return f"✅ I'll call you {name}."
+
+    elif cmd == "/tasks":
+        tasks = db_get_open_tasks(user_id)
+        if not tasks:
+            return "📋 No open tasks."
+        lines = "\n".join(f"• {t['description']}" for t in tasks)
+        return f"📋 *Open tasks:*\n{lines}"
+
+    return None  # Not a recognized command → pass to LLM
+
+
+# --- Admin Notification Helper ---
+
+def _notify_admin_new_user(user_id: int, first_name: str, username: str):
+    """Sends a notification to the admin via the existing HITL Telegram bot."""
+    admin_chat_id = os.getenv("ADMIN_CHAT_ID", "").strip()
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    if not admin_chat_id or not bot_token:
+        _logger.warning("[Telegram] Cannot notify admin: ADMIN_CHAT_ID or TELEGRAM_BOT_TOKEN not set.")
+        return
+    text = (
+        f"🆕 *New chat access request*\n\n"
+        f"👤 Name: {first_name}\n"
+        f"🔗 Username: @{username or 'none'}\n"
+        f"🆔 User ID: `{user_id}`\n\n"
+        f"To approve, send:\n`/approve_{user_id}`"
+    )
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{bot_token}/sendMessage",
+            json={"chat_id": admin_chat_id, "text": text, "parse_mode": "Markdown"},
+            timeout=10,
+        )
+    except Exception as e:
+        _logger.error(f"[Telegram] Admin notification failed: {e}")
+
+
+# --- Main Telegram Chat Endpoint ---
+
+@app.post("/telegram/chat", response_model=TelegramChatResponse,
+          tags=["Telegram"], dependencies=[Depends(verify_api_key)])
+async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTasks):
+    """
+    Processes a single Telegram conversational turn.
+    Handles: whitelist verification, memory retrieval (RAG), LLM call, memory extraction.
+    """
+    from src.workflows_config import get_workflows_config
+    from src.telegram.db import (
+        db_get_user, db_register_user, db_approve_user,
+        db_get_profile, db_get_conversation_window,
+        db_save_conversation_turn, db_increment_msg_count,
+        db_get_open_tasks, db_gc_memories, db_get_all_memory_blobs
+    )
+    from src.telegram.memory import (
+        retrieve_relevant_memories, should_extract_memory,
+        should_run_gc, extract_memories_from_text, save_extracted_memories
+    )
+    from src.telegram.prompt import build_telegram_system_prompt
+
+    config = get_workflows_config()
+
+    # 1. Master switch
+    if not config.is_telegram_enabled:
+        return TelegramChatResponse(
+            status="disabled", reply="The bot is temporarily disabled.",
+            user_id=req.user_id
+        )
+
+    # 2. Input validation
+    max_len = config.telegram_max_input_length
+    if len(req.text) > max_len:
+        return TelegramChatResponse(
+            status="ok",
+            reply=f"⚠️ Message too long ({len(req.text)} chars). Maximum: {max_len}.",
+            user_id=req.user_id
+        )
+
+    # 3. Whitelist check
+    user = db_get_user(req.user_id)
+
+    if user is None:
+        db_register_user(req.user_id, req.first_name, req.username)
+        if config.telegram_auto_approve:
+            db_approve_user(req.user_id)
+        else:
+            if config.telegram_notify_on_new_user:
+                background_tasks.add_task(_notify_admin_new_user, req.user_id, req.first_name, req.username)
+            return TelegramChatResponse(
+                status="pending", reply=config.telegram_unauthorized_message,
+                user_id=req.user_id, is_new_user=True
+            )
+        user = db_get_user(req.user_id)
+
+    elif user["status"] == "pending":
+        return TelegramChatResponse(
+            status="pending", reply="Your access request is still pending approval.",
+            user_id=req.user_id
+        )
+
+    elif user["status"] == "banned":
+        _logger.info(f"[Telegram] Message from banned user {req.user_id} — silenced.")
+        return TelegramChatResponse(
+            status="banned", reply="", user_id=req.user_id
+        )
+
+    # 4. Handle slash commands (no LLM call)
+    cmd_response = _handle_telegram_command(req.text, req.user_id, config)
+    if cmd_response is not None:
+        return TelegramChatResponse(
+            status="ok", reply=cmd_response, user_id=req.user_id
+        )
+
+    # 5. Increment message counter
+    db_increment_msg_count(req.user_id)
+    msg_count = (user.get("msg_count_total", 0) or 0) + 1
+
+    # 6. Retrieve context
+    user_profile = db_get_profile(req.user_id)
+    recent_history = db_get_conversation_window(
+        req.user_id, limit=config.telegram_conversation_window
+    )
+    relevant_memories = retrieve_relevant_memories(
+        req.user_id, req.text,
+        top_k=config.telegram_max_memories,
+        min_similarity=config.telegram_rag_threshold
+    )
+    open_tasks = db_get_open_tasks(req.user_id)
+
+    # 7. Build prompt and call LLM
+    system_prompt = build_telegram_system_prompt(
+        bot_config=config.telegram_config,
+        user_profile=user_profile,
+        memories=relevant_memories,
+        tasks=open_tasks
+    )
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(recent_history)
+    messages.append({"role": "user", "content": req.text})
+
+    try:
+        raw_reply = llm_breaker.call(_agent.think_with_messages, messages)
+    except pybreaker.CircuitBreakerError:
+        return TelegramChatResponse(
+            status="ok",
+            reply="⚠️ Service temporarily unavailable. Please try again in a minute.",
+            user_id=req.user_id
+        )
+
+    # 8. Persist conversation turn (background)
+    background_tasks.add_task(db_save_conversation_turn, req.user_id, req.text, raw_reply)
+
+    # 9. Debounced memory extraction (background)
+    if should_extract_memory(req.text, msg_count):
+        # Read anti-poisoning config
+        tg_cfg = config.telegram_config if hasattr(config, 'telegram_config') else {}
+        beh_cfg = tg_cfg.get("behavior", {}) if isinstance(tg_cfg, dict) else {}
+        mem_cfg = beh_cfg.get("memory", {})
+        _poisoning_on = mem_cfg.get("enable_poisoning_detection", True)
+        _risk_thresh = mem_cfg.get("risk_threshold", 0.5)
+        _susp_ret = mem_cfg.get("suspicious_retention", 500)
+        def _do_extraction():
+            existing = [{"content": m["content"], "category": m["category"]} for m in relevant_memories]
+            facts = extract_memories_from_text(req.text, existing, _agent.call_lightweight)
+            if facts:
+                save_extracted_memories(
+                    req.user_id, facts,
+                    llm_call_fn=_agent.call_lightweight,
+                    poisoning_enabled=_poisoning_on,
+                    risk_threshold=_risk_thresh,
+                    suspicious_retention=_susp_ret
+                )
+        background_tasks.add_task(_do_extraction)
+
+    # 10. Memory GC (background, periodic)
+    if should_run_gc(msg_count):
+        background_tasks.add_task(db_gc_memories, req.user_id)
+
+    _metrics["telegram_messages_total"] = _metrics.get("telegram_messages_total", 0) + 1
+
+    # 11. Sanitize markdown from LLM output (Telegram plain-text safety)
+    clean_reply = _strip_markdown(raw_reply)
+
+    return TelegramChatResponse(
+        status="ok", reply=clean_reply, user_id=req.user_id,
+        memories_used=len(relevant_memories)
+    )
+
+
+import re
+
+def _strip_markdown(text: str) -> str:
+    """Strips Markdown formatting that would break Telegram plain-text delivery."""
+    text = re.sub(r'```[\s\S]*?```', lambda m: m.group(0).strip('`'), text)  # code blocks
+    text = re.sub(r'`([^`]+)`', r'\1', text)          # inline code
+    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.M) # headers
+    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)      # **bold**
+    text = re.sub(r'__(.+?)__', r'\1', text)           # __bold__
+    text = re.sub(r'\*(.+?)\*', r'\1', text)           # *italic*
+    text = re.sub(r'_(.+?)_', r'\1', text)             # _italic_
+    return text
+
+
+# --- Telegram Admin Endpoints ---
+
+def _get_admin_chat_id() -> str:
+    """Reads ADMIN_CHAT_ID dynamically from the environment."""
+    return os.getenv("ADMIN_CHAT_ID", "0").strip()
+
+@app.post("/telegram/admin/approve", tags=["Telegram Admin"], dependencies=[Depends(verify_api_key)])
+async def admin_approve_user(req: AdminActionRequest):
+    """Approves a pending user. Verifies that the requester is admin."""
+    from src.telegram.db import db_approve_user
+    if str(req.admin_chat_id) != _get_admin_chat_id():
+        raise HTTPException(status_code=403, detail="Not admin.")
+    db_approve_user(req.target_user_id, approved_by=req.admin_chat_id)
+    return {"status": "approved", "user_id": req.target_user_id}
+
+
+@app.post("/telegram/admin/ban", tags=["Telegram Admin"], dependencies=[Depends(verify_api_key)])
+async def admin_ban_user(req: AdminActionRequest):
+    """Bans a user."""
+    from src.telegram.db import db_ban_user
+    if str(req.admin_chat_id) != _get_admin_chat_id():
+        raise HTTPException(status_code=403, detail="Not admin.")
+    db_ban_user(req.target_user_id, reason=req.reason)
+    return {"status": "banned", "user_id": req.target_user_id}
+
+
+@app.get("/telegram/admin/users", tags=["Telegram Admin"], dependencies=[Depends(verify_api_key)])
+async def admin_list_users(status_filter: str = "pending"):
+    """Lists users filtered by status: pending | approved | banned"""
+    from src.telegram.db import db_list_users
+    if status_filter not in ("pending", "approved", "banned"):
+        raise HTTPException(status_code=400, detail="Invalid status filter.")
+    return {"users": db_list_users(status_filter)}
+
+
+@app.get("/telegram/admin/suspicious", tags=["Telegram Admin"], dependencies=[Depends(verify_api_key)])
+async def admin_suspicious_memories(admin_chat_id: int, limit: int = 50, offset: int = 0):
+    """Returns paginated suspicious memory attempts. Requires admin auth."""
+    from src.telegram.db import db_get_suspicious
+    if str(admin_chat_id) != _get_admin_chat_id():
+        raise HTTPException(status_code=403, detail="Not admin.")
+    if limit > 100:
+        limit = 100
+    return {"suspicious": db_get_suspicious(limit=limit, offset=offset)}
