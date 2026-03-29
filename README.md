@@ -6,7 +6,7 @@
 [![Docker](https://img.shields.io/badge/Docker-Enabled-2496ED.svg?logo=docker)](https://www.docker.com/)
 [![Coverage](https://img.shields.io/badge/Coverage-36%25-green.svg)](https://pytest.org/)
 
-**ARGOS-2** is an enterprise-grade agentic hub that bridges the gap between **visual workflow orchestration (n8n)** and **high-performance cognitive reasoning (FastAPI + Python)**. 
+**ARGOS-2** is an advanced agentic hub that bridges the gap between **visual workflow orchestration (n8n)** and **high-performance cognitive reasoning (FastAPI + Python)**. 
 
 Unlike traditional "chatbots", ARGOS features a decoupled **Brain-Body architecture** designed for reliable, scalable, and secure automation.
 
@@ -34,7 +34,7 @@ Most AI chatbots exist in a vacuum. ARGOS is built to act on the real world by s
 ### 2. Solving Real-World Asynchrony
 How does an AI reply to a Telegram user regarding an email it analyzed 10 minutes ago? ARGOS implements an atomic SQLite state queue in WAL mode. This guarantees thread-safety and allows the system to pause workflows, await Human-In-The-Loop approvals on mobile, and resume execution deterministically. 
 
-### 3. Enterprise-Grade Defense
+### 3. Robust Cognitive Defense
 Public-facing AI agents are vulnerable to prompt injection. ARGOS doesn't just pass user input to the LLM; it routes it through a **4-Layer Cognitive Security pipeline**. A paranoid LLM Judge sanitizes inputs before they are allowed to enter the RAG vector database, preventing long-term behavioral poisoning.
 
 ---
