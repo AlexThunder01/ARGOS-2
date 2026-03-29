@@ -601,29 +601,57 @@ def _handle_telegram_command(text: str, user_id: int, config) -> str | None:
         lines = "\n".join(f"• {t['description']}" for t in tasks)
         return f"📋 *Open tasks:*\n{lines}"
 
+    elif cmd.startswith("/approve_") or cmd.startswith("/reject_"):
+        admin_id = int(os.getenv("ADMIN_CHAT_ID", "0"))
+        if user_id != admin_id:
+            return "❌ Unauthorized. Only the admin can use this command."
+        
+        target_id_str = cmd.split("_")[1]
+        if not target_id_str.isdigit():
+            return "❌ Invalid user ID."
+            
+        target_id = int(target_id_str)
+        
+        from src.telegram.db import db_get_user
+        target_user = db_get_user(target_id)
+        if not target_user:
+            return "❌ User not found in database."
+        if target_user["status"] != "pending":
+            return f"⚠️ Action already taken. User is currently `{target_user['status']}`."
+            
+        if cmd.startswith("/approve_"):
+            from src.telegram.db import db_approve_user
+            db_approve_user(target_id, approved_by=admin_id)
+            return f"✅ User `{target_id}` has been fiercely approved."
+        else:
+            from src.telegram.db import db_ban_user
+            db_ban_user(target_id, reason="Rejected by admin via chat command")
+            return f"🚫 User `{target_id}` has been successfully rejected."
+
     return None  # Not a recognized command → pass to LLM
 
 
 # --- Admin Notification Helper ---
 
 def _notify_admin_new_user(user_id: int, first_name: str, username: str):
-    """Sends a notification to the admin via the existing HITL Telegram bot."""
+    """Sends a notification to the admin via the Public Chat bot."""
     admin_chat_id = os.getenv("ADMIN_CHAT_ID", "").strip()
-    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
+    bot_token = os.getenv("TELEGRAM_CHAT_BOT_TOKEN", "").strip()
     if not admin_chat_id or not bot_token:
-        _logger.warning("[Telegram] Cannot notify admin: ADMIN_CHAT_ID or TELEGRAM_BOT_TOKEN not set.")
+        _logger.warning("[Telegram] Cannot notify admin: ADMIN_CHAT_ID or TELEGRAM_CHAT_BOT_TOKEN not set.")
         return
     text = (
-        f"🆕 *New chat access request*\n\n"
+        f"🆕 <b>New chat access request</b>\n\n"
         f"👤 Name: {first_name}\n"
         f"🔗 Username: @{username or 'none'}\n"
-        f"🆔 User ID: `{user_id}`\n\n"
-        f"To approve, send:\n`/approve_{user_id}`"
+        f"🆔 User ID: <code>{user_id}</code>\n\n"
+        f"✅ To approve, tap:\n/approve_{user_id}\n\n"
+        f"❌ To reject, tap:\n/reject_{user_id}"
     )
     try:
         requests.post(
             f"https://api.telegram.org/bot{bot_token}/sendMessage",
-            json={"chat_id": admin_chat_id, "text": text, "parse_mode": "Markdown"},
+            json={"chat_id": admin_chat_id, "text": text, "parse_mode": "HTML"},
             timeout=10,
         )
     except Exception as e:
