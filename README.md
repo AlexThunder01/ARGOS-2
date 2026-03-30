@@ -1,4 +1,4 @@
-# 🛡️ ARGOS-2: Professional Agentic Workflow Framework
+# 🛡️ ARGOS-2: Personal AI Linux Agent & Workflow Hub
 
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111.0-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com/)
@@ -15,6 +15,8 @@ Unlike traditional "chatbots", ARGOS features a decoupled **Brain-Body architect
 ## ✨ Key Features (v2.0)
 
 - **🧠 Brain-Body Split Architecture**: n8n handles all I/O and routing (the Body), while a dedicated Python/FastAPI backend handles LLM reasoning, state management, and memory (the Brain).
+- **💻 Interactive Linux Terminal**: A rich command-line interface (CLI) powered by `rich` for direct local interaction, real-time logging, and system monitoring directly from your Linux terminal without needing a messaging app.
+- **⚙️ Native Linux Agent**: ARGOS is not just a chat bot; it acts as a local system agent. It can execute bash commands, manage local files, parse system logs, and autonomously assist with Linux server management via the sandboxed Python reasoning engine.
 - **💬 Telegram Agent with RAG Memory**: A fully functional conversational assistant with persistent, long-term memory. It uses Groq embeddings and cosine similarity to remember user preferences, facts, and tasks over time.
 - **🛡️ 4-Layer Cognitive Security**: Protection against prompt injection and data poisoning via regex blocklists, regex heuristics, conversational anomaly detection, and a dedicated paranoid LLM Judge.
 - **📧 Gmail HITL (Human-In-The-Loop)**: Automatic email analysis and prioritization with Telegram push notifications for one-tap approvals.
@@ -26,15 +28,19 @@ Unlike traditional "chatbots", ARGOS features a decoupled **Brain-Body architect
 
 Most AI chatbots exist in a vacuum. ARGOS is built to act on the real world by solving three core engineering challenges:
 
-### 1. The "Brain-Body" Synergy
-- **n8n (The Body)** is unparalleled for deterministic API orchestration (Google, Telegram, Slack), but it lacks cognitive reasoning.
-- **FastAPI (The Brain)** is incredibly smart, but writing and maintaining Python integrations for every external API is a nightmare.
-- **The Solution:** ARGOS uses n8n to route data and FastAPI to "think". If you want to migrate from Telegram to Slack tomorrow, you change one node in n8n—zero Python code changes required.
+### 1. The Cloud Orchestrator (n8n Fusion)
+Writing boilerplate Python code to handle OAuth2 flows, API rate limits, polling loops, and webhook parsing is a tedious nightmare. **ARGOS solves this through complete n8n fusion.** 
+n8n acts as the system's *sensory and motor cortex*: it connects to Gmail, listens to Telegram webhooks, and handles deterministic routing. Once data is cleaned and structured, n8n fires a precise payload to the Python FastAPI backend (The Brain). 
+This **Brain-Body Split** means if you decide to migrate your assistant from Telegram to Slack tomorrow, you only swap out one visual node in n8n—*zero Python code changes are required.*
 
-### 2. Solving Real-World Asynchrony
+### 2. The Local Powerhouse (Linux System Agent)
+ARGOS isn't trapped in the cloud. While it serves external users via messaging apps, it grants the owner full **Agentic OS Control** locally on Linux. 
+Using a beautifully formatted command-line interface powered by `rich`, you can interact with ARGOS directly from your Linux terminal. Because the Python backend runs locally, it wields an arsenal of native tools: it can navigate your directories, read and write to your local filesystem, execute complex bash pipelines, analyze system logs, and write code. It acts as an autonomous system administrator and developer assistant rolled into one, directly integrated into your Linux environment.
+
+### 3. Solving Real-World Asynchrony
 How does an AI reply to a Telegram user regarding an email it analyzed 10 minutes ago? ARGOS implements an atomic SQLite state queue in WAL mode. This guarantees thread-safety and allows the system to pause workflows, await Human-In-The-Loop approvals on mobile, and resume execution deterministically. 
 
-### 3. Robust Cognitive Defense
+### 4. Robust Cognitive Defense
 Public-facing AI agents are vulnerable to prompt injection. ARGOS doesn't just pass user input to the LLM; it routes it through a **4-Layer Cognitive Security pipeline**. A paranoid LLM Judge sanitizes inputs before they are allowed to enter the RAG vector database, preventing long-term behavioral poisoning.
 
 ---
