@@ -4,8 +4,8 @@ import os
 import json
 import time
 
-# Aggiunge src al path per trovare i moduli
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Aggiunge la root del progetto al path per trovare i moduli (src)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.agent import JarvisAgent
 from src.tools import TOOLS
