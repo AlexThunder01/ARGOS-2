@@ -58,11 +58,17 @@ sequenceDiagram
 
 ### 2.2 Cognitive Node (FastAPI Backend)
 - **Runtime**: Python 3.12 Slim (Custom Container).
-- **Stack**: FastAPI, Uvicorn (ASGI), PyYAML, Requests.
+- **Stack**: FastAPI, Uvicorn (ASGI), PyYAML, Requests, PyBreaker.
+- **Structure**: Modular `APIRouter` architecture:
+  - `api/routes/agent.py`: Core autonomous task execution (`/run`).
+  - `api/routes/email.py`: Email analysis and context management (`/analyze_email`).
+  - `api/routes/telegram.py`: Conversational logic and RAG memory integration.
+  - `api/routes/admin.py`: Administrative user and security monitoring.
+- **Concurrency Model**: Utilizes `asyncio.to_thread` for LLM blocking I/O, allowing the single-worker Uvicorn process to handle concurrent requests without freezing the event loop.
 - **Responsibilities**:
-  - `POST /analyze_email`: A stateless endpoint that decodes the n8n request, evaluates real-time *regex blacklists*, and queries the AI gateway for probabilistic inference.
-  - `POST /pending_email` & `POST /pending_email/{id}/consume`: **Stateful** Context Management. A thread-safe SQLite database (`/app/data/argos_state.db` in WAL mode) mapping the unique `messageId` of the email to its volatile context (Generated Draft, Thread ID, Original Sender).
-- **Why a Parking State Backend?** In n8n, when a Webhook from Telegram resumes an interrupted workflow, it inherently loses access to payloads processed in upstream nodes unless serialized via an external database. The ARGOS backend acts as a High-Speed Cache (O(log N) lookup) decoupler.
+  - `POST /analyze_email`: Stateless endpoint that decodes n8n requests and queries the AI gateway.
+  - `POST /pending_email` & `POST /pending_email/{id}/consume`: Stateful Context Management via SQLite (WAL mode).
+- **Why a Parking State Backend?** In n8n, when a Telegram Webhook resumes a workflow, it loses access to upstream payloads. The ARGOS backend acts as a High-Speed Cache decoupler.
 
 ### 2.3 Network Layer and Tunneling
 - Traffic between n8n and FastAPI traverses exclusively on the `argos-network` docker bridge network, physically isolated from the host machine's networking stack.

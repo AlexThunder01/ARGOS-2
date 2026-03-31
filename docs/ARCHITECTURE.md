@@ -27,14 +27,16 @@ The "Body" of ARGOS. n8n handles all I/O, secret management for third-party serv
 
 ## 2. The Brain: FastAPI Cognitive Backend
 The "Reasoning" center. Written in Python 3.12, it provides the intelligence that n8n lacks.
+- **Modular Architecture**: The API is now organized into functional routes (`api/routes/`) for Agent logic, Email HITL, and Telegram management, ensuring maintainability and scalability.
 - **LLM Gateway**: Dynamically builds complex system prompts using the `config.yaml` parameters before querying the LLM (Cloud/Local).
-- **Persistent State Queue**: To prevent race conditions during concurrent Telegram interactions, FastAPI relies on an atomic SQLite database in WAL Mode (bound to `workers=1`). This allows n8n to retrieve the exact context (Drafts, Thread IDs) sequentially just by passing a `messageId` to the `POST /consume` endpoint.
-- **Tool Execution**: When the agent needs to "do" something (like OCR a PDF or search the web), it executes local Python tools within this backend.
+- **Asynchronous Execution**: Long-running LLM inferences are executed off-thread using `asyncio.to_thread` to prevent blocking the FastAPI event loop, ensuring responsive concurrent handling.
+- **Persistent State Queue**: To prevent race conditions, FastAPI relies on an atomic SQLite database in WAL Mode. This allows n8n to retrieve the exact context (Drafts, Thread IDs) sequentially.
+- **Tool Execution**: Executes local Python tools within this backend.
 
 ## 3. The Communication Bridge: REST API
 All communication between n8n and the Backend is done via standard HTTP/REST.
-- **Security**: Every request from n8n to Python must include a valid `X-ARGOS-API-KEY`.
-- **Networking**: In Docker, they communicate via an internal network (`argos-network`), keeping the API hidden from the public internet. Only the n8n Webhook port is exposed via the Ngrok tunnel.
+- **Security**: Mandatory `X-ARGOS-API-KEY` validation. The server warns on startup if no key is configured to prevent unintentional public exposure.
+- **Networking**: Internal Docker network (`argos-network`) isolation. Only n8n is exposed to the outside world.
 
 ---
 

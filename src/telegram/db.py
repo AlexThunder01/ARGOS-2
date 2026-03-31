@@ -117,10 +117,17 @@ def db_update_profile(user_id: int, **kwargs):
     """Updates profile fields. Creates the profile row if it doesn't exist."""
     conn = _get_conn()
     conn.execute("INSERT OR IGNORE INTO tg_user_profiles (user_id) VALUES (?)", (user_id,))
+    allowed_cols = {
+        "display_name": "display_name",
+        "language": "language",
+        "preferred_tone": "preferred_tone",
+        "custom_prefs": "custom_prefs"
+    }
     for key, value in kwargs.items():
-        if key in ("display_name", "language", "preferred_tone", "custom_prefs"):
+        if key in allowed_cols:
+            safe_col = allowed_cols[key]
             conn.execute(
-                f"UPDATE tg_user_profiles SET {key}=?, updated_at=datetime('now') WHERE user_id=?",
+                f"UPDATE tg_user_profiles SET {safe_col}=?, updated_at=datetime('now') WHERE user_id=?",
                 (value, user_id)
             )
     conn.commit()
