@@ -38,10 +38,17 @@ def test_extract_json_nested():
     assert result["action"]["tool"] == "read_file"
 
 
+def test_detect_backend():
+    from unittest.mock import patch
+    with patch('src.utils.LLM_BACKEND', 'openai-compatible'):
+        from src.utils import detect_backend
+        assert detect_backend() == "openai-compatible"
+
 if __name__ == "__main__":
     test_extract_json_clean()
     test_extract_json_embedded_in_text()
     test_extract_json_no_json()
     test_extract_json_malformed()
     test_extract_json_nested()
+    test_detect_backend()
     print("✅ Tutti i test utils passati.")

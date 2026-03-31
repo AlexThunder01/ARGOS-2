@@ -12,39 +12,48 @@ import os
 
 logger = logging.getLogger(__name__)
 
-# --- Groq Embeddings Configuration ---
-GROQ_EMBEDDINGS_URL = "https://api.groq.com/openai/v1/embeddings"
-EMBEDDING_MODEL = "nomic-embed-text-v1.5"
-EMBEDDING_DIM = 768
+# --- Embeddings Configuration ---
+from src.config import EMBEDDING_BASE_URL, EMBEDDING_API_KEY, EMBEDDING_MODEL, EMBEDDING_DIM
 
 # --- Debounce & GC constants ---
 EXTRACT_EVERY_N = 5        # Extract memories every Nth message
 EXTRACT_MIN_LENGTH = 100   # Or if message length exceeds this
 GC_EVERY_N = 50            # Run GC every Nth message
 
-
-def _get_groq_key() -> str:
-    return os.getenv("GROQ_API_KEY", "")
-
-
 # ==========================================================================
 # Embedding Generation & Serialization
 # ==========================================================================
 
 def get_embedding(text: str) -> np.ndarray:
-    """Calls Groq Embeddings API and returns a numpy float32 vector."""
+    """Calls configured embeddings API and returns a numpy float32 vector."""
+    headers = {"Content-Type": "application/json"}
+    if EMBEDDING_API_KEY:
+        headers["Authorization"] = f"Bearer {EMBEDDING_API_KEY}"
+        
+    url = f"{EMBEDDING_BASE_URL.rstrip('/')}/embeddings"
     response = requests.post(
-        GROQ_EMBEDDINGS_URL,
-        headers={
-            "Authorization": f"Bearer {_get_groq_key()}",
-            "Content-Type": "application/json"
-        },
+        url,
+        headers=headers,
         json={"model": EMBEDDING_MODEL, "input": text},
         timeout=10
     )
     response.raise_for_status()
     vec = response.json()["data"][0]["embedding"]
     return np.array(vec, dtype=np.float32)
+
+def check_embedding_dimensions():
+    """Boot-time dimension check to prevent DB incompatibility when switching models."""
+    from src.telegram.db import db_get_one_memory_blob
+    
+    blob = db_get_one_memory_blob()
+    if blob is not None:
+        stored_dim = len(blob) // 4  # float32 is 4 bytes
+        if stored_dim != EMBEDDING_DIM:
+            raise RuntimeError(
+                f"Embedding dimension mismatch: DB contains {stored_dim}-dim vectors "
+                f"but current backend configured for {EMBEDDING_DIM}-dim. "
+                f"Run scripts/migrate_embeddings.py to re-embed your memories."
+            )
 
 
 def serialize_embedding(vec: np.ndarray) -> bytes:

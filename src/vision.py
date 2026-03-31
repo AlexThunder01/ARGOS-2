@@ -7,9 +7,7 @@ import subprocess
 import requests
 import pytesseract
 from PIL import Image, ImageDraw
-from .utils import detect_backend 
-from .config import (GROQ_API_KEY, GROQ_CHAT_URL, OLLAMA_URL, 
-                     MODEL_GROQ, VISION_MODEL_OLLAMA, VISION_MODEL_GROQ)
+from .config import VISION_API_KEY, VISION_BASE_URL, VISION_MODEL
 
 def encode_image_to_base64(image):
     buffered = io.BytesIO()
@@ -181,9 +179,6 @@ def analyze_screen_for_coordinates(description):
         # Codifica in Base64
         img_b64 = encode_image_to_base64(screen_with_grid)
         
-        backend = detect_backend()
-        model_to_use = VISION_MODEL_GROQ if backend == "groq" else VISION_MODEL_OLLAMA
-        
         # --- PROMPT DI PRECISIONE MIGLIORATO ---
         prompt = (
             f"This is a screenshot of a Linux desktop with resolution {target_w}x{target_h} pixels. "
@@ -203,7 +198,7 @@ def analyze_screen_for_coordinates(description):
         )
 
         # Chiamata al modello Vision (VLM)
-        content = _call_vlm(backend, model_to_use, prompt, img_b64)
+        content = _call_vlm(prompt, img_b64)
         
         if not content:
             print("❌ Il modello Vision non ha restituito dati.")
@@ -249,16 +244,13 @@ def describe_screen_content(question):
         screen.thumbnail((1500, 1500))
         img_b64 = encode_image_to_base64_high_quality(screen)
         
-        backend = detect_backend()
-        model_to_use = VISION_MODEL_GROQ if backend == "groq" else VISION_MODEL_OLLAMA
-        
         prompt = (
             "You are Jarvis. Analyze this computer screenshot. "
             "Describe the visible windows, applications, text, and context. "
             f"User Question: {question}"
         )
 
-        content = _call_vlm(backend, model_to_use, prompt, img_b64)
+        content = _call_vlm(prompt, img_b64)
         
         # Filtro per falsi positivi di sicurezza
         if content.strip().lower() in ["safe", "unsafe", "i cannot"]:
@@ -270,32 +262,29 @@ def describe_screen_content(question):
         return f"Internal Vision Error: {e}"
 
 # --- HELPER CHIAMATA API ---
-def _call_vlm(backend, model, prompt, img_b64):
-    if backend == "groq":
-        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-        payload = {
-            "model": model, 
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
-                    ]
-                }
-            ],
-            "temperature": 0.1, 
-            "max_tokens": 500
-        }
-        try:
-            r = requests.post(GROQ_CHAT_URL, headers=headers, json=payload, timeout=40)
-            if r.status_code != 200: return f"Error {r.status_code}: {r.text}"
-            return r.json()["choices"][0]["message"]["content"]
-        except Exception as e: return str(e)
-    else:
-        # OLLAMA
-        payload = {"model": model, "messages": [{"role": "user", "content": prompt, "images": [img_b64]}], "stream": False}
-        try:
-            r = requests.post(OLLAMA_URL, json=payload, timeout=60)
-            return r.json()["message"]["content"]
-        except Exception as e: return str(e)
+def _call_vlm(prompt, img_b64):
+    headers = {"Content-Type": "application/json"}
+    if VISION_API_KEY:
+        headers["Authorization"] = f"Bearer {VISION_API_KEY}"
+        
+    payload = {
+        "model": VISION_MODEL, 
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
+                ]
+            }
+        ],
+        "temperature": 0.1, 
+        "max_tokens": 500
+    }
+    try:
+        url = f"{VISION_BASE_URL.rstrip('/')}/chat/completions"
+        r = requests.post(url, headers=headers, json=payload, timeout=60)
+        if r.status_code != 200: return f"Error {r.status_code}: {r.text}"
+        return r.json()["choices"][0]["message"]["content"]
+    except Exception as e: 
+        return str(e)

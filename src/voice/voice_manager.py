@@ -8,6 +8,7 @@ import subprocess
 import os
 from dataclasses import dataclass, field
 from typing import Optional, List
+import requests
 
 
 @dataclass
@@ -60,18 +61,86 @@ def init_stt():
         return None, False
 
 
+def _transcribe_audio(temp_filename: str, language: str) -> Optional[str]:
+    from src.config import STT_BACKEND, STT_CUSTOM_URL, STT_CUSTOM_API_KEY
+    import os
+    
+    backend = STT_BACKEND
+    
+    # We load standard keys if backend is groq/openai
+    # Fallback to LLM_API_KEY if specific keys are not in env
+    api_key = ""
+    url = ""
+    model = ""
+    data = {}
+    
+    if backend == "groq":
+        # Groq Whisper
+        api_key = os.getenv("GROQ_API_KEY", os.getenv("LLM_API_KEY", ""))
+        url = "https://api.groq.com/openai/v1/audio/transcriptions"
+        model = "distil-whisper-large-v3-en" if language.startswith("en") else "whisper-large-v3-turbo"
+        data = {
+            "model": model,
+            "language": language[:2],
+            "response_format": "json"
+        }
+    elif backend == "openai":
+        # OpenAI Whisper
+        api_key = os.getenv("OPENAI_API_KEY", os.getenv("LLM_API_KEY", ""))
+        url = "https://api.openai.com/v1/audio/transcriptions"
+        model = "whisper-1"
+        data = {
+            "model": model,
+            "language": language[:2],
+            "response_format": "json"
+        }
+    elif backend == "custom":
+        # Custom Endpoint
+        api_key = STT_CUSTOM_API_KEY
+        url = STT_CUSTOM_URL
+        if not url:
+            raise ValueError("STT_BACKEND=custom requires STT_CUSTOM_URL to be set in .env")
+        # Custom may not need a model or language spec if defaults handle it
+        data = {}
+        # Try injecting if standard behavior allows
+        if language:
+            data["language"] = language[:2]
+    else:
+        raise ValueError(f"Unknown STT_BACKEND: '{backend}'")
+
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    with open(temp_filename, "rb") as f:
+        files = {"file": (temp_filename, f, "audio/wav")}
+        response = requests.post(url, headers=headers, files=files, data=data, timeout=15)
+        
+    if response.status_code == 429:
+        print("⚠️  Trascrizione: Rate Limit raggiunto (Audio). Riprova tra poco.")
+        return None
+        
+    if response.status_code != 200:
+        print(f"❌ STT API Error: {response.text}")
+        return None
+        
+    try:
+        return response.json().get("text", "").strip()
+    except Exception:
+        print(f"❌ Invalid STT JSON Response: {response.text}")
+        return None
+
+
 def listen_stt(recognizer, language: str = "it", timeout: int = 5, phrase_limit: int = 10) -> Optional[str]:
     """
-    Ascolta dal microfono e ritorna il testo trascritto usando Groq Whisper (molto più veloce e accurato).
+    Ascolta dal microfono e ritorna il testo trascritto usando il backend STT configurato.
     Returns None on error or silence.
     """
     if not recognizer:
         return None
     try:
         from src.utils import no_alsa_err
-        from src.config import GROQ_API_KEY
         import speech_recognition as sr
-        import requests
         
         # Riduciamo il tempo che il recognizer aspetta dopo che l'utente smette di parlare
         recognizer.pause_threshold = 0.35
@@ -83,7 +152,7 @@ def listen_stt(recognizer, language: str = "it", timeout: int = 5, phrase_limit:
                 recognizer.adjust_for_ambient_noise(source, duration=0.2)
                 audio = recognizer.listen(source, timeout=timeout, phrase_time_limit=phrase_limit)
                 
-                print("   (Trascrizione in corso tramite Groq Whisper...)")
+                print("   (Trascrizione STT in corso...)")
                 
                 # Salva temporaneamente l'audio
                 wav_data = audio.get_wav_data()
@@ -91,38 +160,8 @@ def listen_stt(recognizer, language: str = "it", timeout: int = 5, phrase_limit:
                 with open(temp_filename, "wb") as f:
                     f.write(wav_data)
                 
-                # Chiama Groq Whisper
-                headers = {
-                    "Authorization": f"Bearer {GROQ_API_KEY}"
-                }
+                text = _transcribe_audio(temp_filename, language)
                 
-                with open(temp_filename, "rb") as f:
-                    files = {
-                        "file": (temp_filename, f, "audio/wav")
-                    }
-                    data = {
-                        "model": "distil-whisper-large-v3-en" if language.startswith("en") else "whisper-large-v3-turbo",
-                        "language": language[:2], # Groq accetta 'it' / 'en'
-                        "response_format": "json"
-                    }
-                    
-                    response = requests.post(
-                        "https://api.groq.com/openai/v1/audio/transcriptions",
-                        headers=headers,
-                        files=files,
-                        data=data,
-                        timeout=10
-                    )
-                
-                if response.status_code == 429:
-                    print("⚠️  Trascrizione: Rate Limit Groq raggiunto (Audio). Riprova tra poco.")
-                    return None
-                    
-                if response.status_code != 200:
-                    print(f"❌ Whisper API Error: {response.text}")
-                    return None
-                    
-                text = response.json().get("text", "").strip()
                 if text:
                     print(f'👤 Tu: "{text}"')
                     return text

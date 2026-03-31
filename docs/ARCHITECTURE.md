@@ -8,7 +8,7 @@ ARGOS-2 is built on a **decoupled, event-driven architecture** that separates de
 graph TD
     A[Gmail/External Trigger] -->|Event| B(n8n Workflow Engine)
     B -->|REST POST /analyze_email| C[FastAPI Cognitive Backend]
-    C -->|Construct Prompt| D{LLM / Groq}
+    C -->|Construct Prompt| D{LLM Provider}
     D -->|Reasoning Payload| C
     C -->|JSON Response| B
     B -->|Webhook Push| E[Telegram App]
@@ -27,7 +27,7 @@ The "Body" of ARGOS. n8n handles all I/O, secret management for third-party serv
 
 ## 2. The Brain: FastAPI Cognitive Backend
 The "Reasoning" center. Written in Python 3.12, it provides the intelligence that n8n lacks.
-- **LLM Gateway**: Dynamically builds complex system prompts using the `config.yaml` parameters before querying the LLM (Groq/Local).
+- **LLM Gateway**: Dynamically builds complex system prompts using the `config.yaml` parameters before querying the LLM (Cloud/Local).
 - **Persistent State Queue**: To prevent race conditions during concurrent Telegram interactions, FastAPI relies on an atomic SQLite database in WAL Mode (bound to `workers=1`). This allows n8n to retrieve the exact context (Drafts, Thread IDs) sequentially just by passing a `messageId` to the `POST /consume` endpoint.
 - **Tool Execution**: When the agent needs to "do" something (like OCR a PDF or search the web), it executes local Python tools within this backend.
 

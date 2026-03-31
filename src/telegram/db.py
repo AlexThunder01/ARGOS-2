@@ -212,6 +212,12 @@ def db_get_all_memory_blobs(user_id: int) -> list[tuple]:
 
     return [(r["id"], r["content"], r["embedding"], r["category"], r["confidence"]) for r in rows]
 
+def db_get_one_memory_blob() -> bytes | None:
+    """Returns a single embedding blob for dimension checking on boot."""
+    conn = _get_conn()
+    row = conn.execute("SELECT embedding FROM tg_memory_vectors LIMIT 1").fetchone()
+    return row["embedding"] if row else None
+
 
 def db_update_memory_access(memory_ids: list[int]):
     if not memory_ids:

@@ -10,8 +10,8 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - GROQ_API_KEY2=${GROQ_API_KEY2:-}
+      - LLM_API_KEY=${LLM_API_KEY}
+      - LLM_API_KEY_2=${LLM_API_KEY_2:-}
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHAT_BOT_TOKEN=${TELEGRAM_CHAT_BOT_TOKEN:-}
       - ADMIN_CHAT_ID=${ADMIN_CHAT_ID:-}

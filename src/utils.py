@@ -6,7 +6,7 @@ import shutil
 import contextlib
 import requests
 import time
-from .config import ENABLE_VOICE, LLM_BACKEND, OLLAMA_URL, GROQ_API_KEY
+from .config import ENABLE_VOICE, LLM_BACKEND
 
 
 def check_system_deps():
@@ -74,12 +74,7 @@ def normalize_path(path):
 
 def detect_backend():
     """Rileva backend attivo."""
-    if LLM_BACKEND in ("ollama", "groq"): return LLM_BACKEND
-    if GROQ_API_KEY: return "groq"
-    try:
-        if requests.get(OLLAMA_URL, timeout=0.5).ok: return "ollama"
-    except: pass
-    return "ollama"
+    return LLM_BACKEND
 
 def print_banner():
     CYAN = "\033[96m"

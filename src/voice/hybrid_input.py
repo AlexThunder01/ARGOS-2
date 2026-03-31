@@ -51,8 +51,8 @@ def _process_background_impl(recognizer, audio):
                 
         if detected_word:
             # Wake word rilevata! Ignoriamo il resto della frase imprecisa di Google
-            # e passiamo immediatamente al riconoscimento ad alta fedeltà di Groq Whisper.
-            print(f"\r🎤 [Wake-Word rilevata] Passaggio a Groq Whisper...{' '*20}\n", flush=True)
+            # e passiamo immediatamente al riconoscimento ad alta fedeltà STT.
+            print(f"\r🎤 [Wake-Word rilevata] Passaggio all'STT principale...{' '*20}\n", flush=True)
             
             # import locali per evitare loop circolari
             from src.voice.voice_manager import speak_tts, listen_stt
@@ -77,10 +77,10 @@ def _process_background_impl(recognizer, audio):
             cmd = listen_stt(whisper_rec, language="it", timeout=8, phrase_limit=20)
             
             if cmd:
-                print(f"✅ [Comando Whisper]: '{cmd}'\n")
+                print(f"✅ [Comando STT]: '{cmd}'\n")
                 voice_command_queue.put(cmd)
             else:
-                print(f"❌ [Whisper] Nessun comando rilevato.\n")
+                print(f"❌ [STT] Nessun comando rilevato.\n")
                 
             # Riaccendiamo "le orecchie" passive di Google
             resume_hybrid_listener()

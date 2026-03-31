@@ -17,10 +17,10 @@ Unlike traditional "chatbots", ARGOS features a decoupled **Brain-Body architect
 - **🧠 Brain-Body Split Architecture**: n8n handles all I/O and routing (the Body), while a dedicated Python/FastAPI backend handles LLM reasoning, state management, and memory (the Brain).
 - **💻 Interactive Linux Terminal**: A rich command-line interface (CLI) powered by `rich` for direct local interaction, real-time logging, and system monitoring directly from your Linux terminal without needing a messaging app.
 - **⚙️ Native Linux Agent**: ARGOS is not just a chat bot; it acts as a local system agent. It can execute bash commands, manage local files, parse system logs, and autonomously assist with Linux server management via the sandboxed Python reasoning engine.
-- **💬 Telegram Agent with RAG Memory**: A fully functional conversational assistant with persistent, long-term memory. It uses Groq embeddings and cosine similarity to remember user preferences, facts, and tasks over time.
+- **💬 Telegram Agent with RAG Memory**: A fully functional conversational assistant with persistent, long-term memory. It uses configurable embeddings (OpenAI-compatible or local) and cosine similarity to remember user preferences, facts, and tasks over time.
 - **🛡️ 4-Layer Cognitive Security**: Protection against prompt injection and data poisoning via regex blocklists, regex heuristics, conversational anomaly detection, and a dedicated paranoid LLM Judge.
 - **📧 Gmail HITL (Human-In-The-Loop)**: Automatic email analysis and prioritization with Telegram push notifications for one-tap approvals.
-- **⚡ Production Hardened**: Thread-local SQLite connection pooling, modular tool architecture, and a test suite with 93 passing tests (mocked network, in-memory DB fixtures).
+- **⚡ Production Hardened**: Thread-local SQLite connection pooling, modular tool architecture, and a test suite with 101 passing tests (mocked network, in-memory DB fixtures).
 
 ---
 
@@ -61,11 +61,11 @@ ARGOS is fully containerized. You can go from zero to a live, memory-augmented T
 ```bash
 cp .env.example .env
 # Open .env and populate:
-# - GROQ_API_KEY (Your LLM brain)
+# - LLM_BACKEND (groq, anthropic, openai-compatible, or custom)
+# - LLM_BASE_URL (Your provider's API base URL)
+# - LLM_API_KEY (Your primary API key)
+# - LLM_MODEL (The specific model ID, e.g., llama-3.3-70b-versatile)
 # - TELEGRAM_BOT_TOKEN (For Gmail HITL approvals)
-# - TELEGRAM_CHAT_BOT_TOKEN (For the conversational agent)
-# - ADMIN_CHAT_ID (To receive access requests)
-# - NGROK_AUTHTOKEN & NGROK_DOMAIN (Your secure tunnel)
 ```
 
 ### 2. Launch the Orchestrator

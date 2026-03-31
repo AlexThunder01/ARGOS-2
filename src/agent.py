@@ -1,5 +1,5 @@
 """
-ARGOS Core Agent — LLM-driven cognitive loop with multi-backend support (Groq / Ollama).
+ARGOS Core Agent — LLM-driven cognitive loop with model-agnostic multi-backend support.
 
 This module encapsulates the agent's system prompt, conversational memory management,
 and provider-specific API integration logic with automatic key rotation for rate-limit resilience.
@@ -10,19 +10,18 @@ import time
 import requests
 import platform
 import os
-from .config import (LLM_BACKEND, OLLAMA_URL, MODEL_GROQ, MODEL_OLLAMA, 
-                     GROQ_API_KEY, GROQ_CHAT_URL, HISTORY_LIMIT)
+from .config import LLM_BACKEND, LLM_MODEL, HISTORY_LIMIT
 from src.planner.planner import build_system_prompt_suffix
 
 
 class JarvisAgent:
     """Primary autonomous agent class. Manages the system prompt, conversation
-    history, and LLM backend dispatch for both Groq Cloud and local Ollama inference."""
+    history, and LLM backend dispatch for OpenAI-compatible and Anthropic providers."""
 
     def __init__(self):
         self.history = []
         self.backend = LLM_BACKEND
-        self.model = MODEL_GROQ if self.backend == "groq" else MODEL_OLLAMA
+        self.model = LLM_MODEL
         self.history_limit = int(os.getenv("MAX_HISTORY_MESSAGES", "20"))
 
         # --- System Context Detection ---
@@ -105,49 +104,49 @@ class JarvisAgent:
         """Executes one step of the agent's reasoning loop."""
         self.trim_history()
         try:
-            if self.backend == "groq":
-                return self._call_groq()
+            if self.backend == "anthropic":
+                return self._call_anthropic(self.history, temperature=0.0)
             else:
-                return self._call_ollama()
+                return self._call_openai_compatible(self.history, temperature=0.0)
         except Exception as e:
             return f"LLM Error: {e}"
 
-    def _call_groq(self, retries=0):
-        """Executes a Groq Cloud API call with automatic key rotation on rate limits."""
-        from .config import GROQ_API_KEY, GROQ_API_KEY2
+    def _call_openai_compatible(self, messages: list[dict], temperature: float = 0.0, retries: int = 0, model_override: str = None) -> str:
+        """Executes an OpenAI-compatible API call with optional dual-key rotation on rate limits."""
+        from .config import LLM_BASE_URL, LLM_API_KEY, LLM_API_KEY_2
         
-        # Alternate between primary and secondary API keys to mitigate rate limits
-        current_key = GROQ_API_KEY2 if (retries % 2 != 0 and GROQ_API_KEY2) else GROQ_API_KEY
-        
+        current_key = LLM_API_KEY_2 if (retries % 2 != 0 and LLM_API_KEY_2) else LLM_API_KEY
         headers = {
-            "Authorization": f"Bearer {current_key}", 
             "Content-Type": "application/json"
         }
+        if current_key:
+            headers["Authorization"] = f"Bearer {current_key}"
+            
         payload = {
-            "model": self.model, 
-            "messages": self.history, 
-            "temperature": 0.0  # Zero temperature = deterministic output, minimal hallucination
+            "model": model_override or self.model, 
+            "messages": messages, 
+            "temperature": temperature
         }
         
         try:
-            response = requests.post(GROQ_CHAT_URL, headers=headers, json=payload, timeout=30)
+            url = f"{LLM_BASE_URL.rstrip('/')}/chat/completions"
+            response = requests.post(url, headers=headers, json=payload, timeout=60)
             
             if response.status_code == 429:
                 if retries < 3:
-                    # If a secondary key is available, rotate instantly without delay
-                    if retries % 2 == 0 and GROQ_API_KEY2:
+                    if retries % 2 == 0 and LLM_API_KEY_2:
                         print("⏳ Rate Limit (Key 1). Rotating instantly to Key 2...")
-                        return self._call_groq(retries + 1)
+                        return self._call_openai_compatible(messages, temperature, retries + 1, model_override)
                     else:
                         wait_time = 5 * (retries + 1)
-                        print(f"⏳ Global Rate Limit reached. Waiting {wait_time}s...")
+                        print(f"⏳ Rate Limit reached. Waiting {wait_time}s...")
                         time.sleep(wait_time)
-                        return self._call_groq(retries + 1)
+                        return self._call_openai_compatible(messages, temperature, retries + 1, model_override)
                 else:
-                    return "Error: Groq Rate Limit exceeded."
+                    return "Error: Rate Limit exceeded."
 
             if response.status_code != 200:
-                print(f"❌ GROQ ERROR: {response.text}")
+                print(f"❌ LLM ERROR: {response.text}")
                 return "API Error."
                 
             return response.json()["choices"][0]["message"]["content"]
@@ -155,14 +154,41 @@ class JarvisAgent:
         except Exception as e:
             return f"Connection Error: {e}"
 
-    def _call_ollama(self):
-        """Executes a local Ollama inference call."""
-        payload = {"model": self.model, "messages": self.history, "stream": False}
+    def _call_anthropic(self, messages: list[dict], temperature: float = 0.0, model_override: str = None) -> str:
+        """Executes an Anthropic API call."""
+        from .config import LLM_API_KEY
+        
+        # Anthropic doesn't support system messages in the same way (it goes top-level)
+        system_msg = ""
+        user_msgs = []
+        for m in messages:
+            if m["role"] == "system":
+                system_msg += m["content"] + "\n"
+            else:
+                user_msgs.append(m)
+                
+        headers = {
+            "x-api-key": LLM_API_KEY,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json"
+        }
+        
+        payload = {
+            "model": model_override or self.model,
+            "system": system_msg.strip(),
+            "messages": user_msgs,
+            "max_tokens": 1024,
+            "temperature": temperature
+        }
+        
         try:
-            r = requests.post(OLLAMA_URL, json=payload, timeout=60)
-            return r.json()["message"]["content"]
+            response = requests.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload, timeout=60)
+            if response.status_code != 200:
+                print(f"❌ ANTHROPIC ERROR: {response.text}")
+                return "API Error."
+            return response.json()["content"][0]["text"]
         except Exception as e:
-            return f"Ollama Error: {e}"
+            return f"Connection Error: {e}"
 
     # --- External History Methods (Telegram Chat Module) ---
 
@@ -170,64 +196,20 @@ class JarvisAgent:
         """Executes a single LLM inference with an externally-provided message history.
         Used by the Telegram chat module where each user has their own context."""
         try:
-            if self.backend == "groq":
-                return self._call_groq_with_messages(messages)
+            if self.backend == "anthropic":
+                return self._call_anthropic(messages, temperature=0.3)
             else:
-                payload = {"model": self.model, "messages": messages, "stream": False}
-                r = requests.post(OLLAMA_URL, json=payload, timeout=60)
-                return r.json()["message"]["content"]
+                return self._call_openai_compatible(messages, temperature=0.3)
         except Exception as e:
             return f"LLM Error: {e}"
 
-    def _call_groq_with_messages(self, messages: list[dict], retries=0) -> str:
-        """Groq API call with external message history and key rotation."""
-        from .config import GROQ_API_KEY, GROQ_API_KEY2
-
-        current_key = GROQ_API_KEY2 if (retries % 2 != 0 and GROQ_API_KEY2) else GROQ_API_KEY
-        headers = {"Authorization": f"Bearer {current_key}", "Content-Type": "application/json"}
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "temperature": 0.3  # Slightly creative for conversational responses
-        }
-
-        try:
-            response = requests.post(GROQ_CHAT_URL, headers=headers, json=payload, timeout=30)
-
-            if response.status_code == 429:
-                if retries < 3:
-                    if retries % 2 == 0 and GROQ_API_KEY2:
-                        return self._call_groq_with_messages(messages, retries + 1)
-                    else:
-                        wait_time = 5 * (retries + 1)
-                        time.sleep(wait_time)
-                        return self._call_groq_with_messages(messages, retries + 1)
-                else:
-                    return "Error: Groq Rate Limit exceeded."
-
-            if response.status_code != 200:
-                return "API Error."
-
-            return response.json()["choices"][0]["message"]["content"]
-
-        except Exception as e:
-            return f"Connection Error: {e}"
-
     def call_lightweight(self, prompt: str) -> str:
-        """Calls a lightweight model for structured extraction tasks (memory extraction).
-        Uses llama-3.1-8b-instant for reduced latency and token cost."""
-        from .config import GROQ_API_KEY, GROQ_CHAT_URL
-
-        headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-        payload = {
-            "model": "llama-3.1-8b-instant",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.0
-        }
+        """Calls a lightweight model for structured extraction tasks (memory extraction)."""
+        from .config import LLM_LIGHTWEIGHT_MODEL
         try:
-            response = requests.post(GROQ_CHAT_URL, headers=headers, json=payload, timeout=15)
-            if response.status_code == 200:
-                return response.json()["choices"][0]["message"]["content"]
-            return ""
+            if self.backend == "anthropic":
+                return self._call_anthropic([{"role": "user", "content": prompt}], temperature=0.0, model_override=LLM_LIGHTWEIGHT_MODEL)
+            else:
+                return self._call_openai_compatible([{"role": "user", "content": prompt}], temperature=0.0, model_override=LLM_LIGHTWEIGHT_MODEL)
         except Exception:
             return ""

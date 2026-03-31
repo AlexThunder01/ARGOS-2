@@ -40,7 +40,7 @@ from contextlib import asynccontextmanager
 
 from src.agent import JarvisAgent
 from src.tools import TOOLS
-from src.config import ENABLE_VOICE, LLM_BACKEND, MODEL_GROQ, MODEL_OLLAMA
+from src.config import ENABLE_VOICE, LLM_BACKEND, LLM_MODEL
 from src.world_model.state import WorldState
 from src.planner.planner import parse_planner_response
 from src.executor.executor import execute_with_retry
@@ -290,7 +290,7 @@ async def health():
 @app.get("/status", response_model=StatusResponse, tags=["System"])
 async def status():
     """Health check protocol: returns backend diagnostic state and LLM model initialization confirmation."""
-    model = MODEL_GROQ if (_agent and _agent.backend == "groq") else MODEL_OLLAMA
+    model = LLM_MODEL
     return StatusResponse(
         status="online",
         backend=LLM_BACKEND,

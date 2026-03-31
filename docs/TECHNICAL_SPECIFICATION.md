@@ -15,7 +15,7 @@ sequenceDiagram
     participant G as Gmail API
     participant N as n8n (Orchestrator)
     participant F as FastAPI (Cognitive Backend)
-    participant LLM as Groq Cloud API
+    participant LLM as LLM Provider (Cloud/Local)
     participant T as Telegram API (User)
 
     G->>N: Trigger: New Unread Email (Polling/Webhook)
@@ -120,4 +120,4 @@ The persistent state is managed via an `argos_state.db` SQLite volume operating 
 To guarantee thread safety without triggering `database is locked` OperationalErrors during massive bursts of I/O, the Uvicorn ASGI server is strictly bound to `--workers 1`. For multi-pod horizontal scaling (Kubernetes), SQLite must be swapped for Redis.
 
 ### 5.3 LLM Rate-Limiting & Circuit Breaking
-IMAP workflows are highly *bursty*. To prevent Groq API rate-limiter saturation (`429 Too Many Requests`), the FastAPI backend protects LLM inference via the **`pybreaker` Circuit Breaker** pattern. If the LLM provider fails 3 consecutive times, the Circuit opens and immediately fails-fast incoming requests for 60 seconds protecting Uvicorn's thread pools.
+IMAP workflows are highly *bursty*. To prevent LLM provider rate-limiter saturation (`429 Too Many Requests`), the FastAPI backend protects LLM inference via the **`pybreaker` Circuit Breaker** pattern. If the LLM provider fails 3 consecutive times, the Circuit opens and immediately fails-fast incoming requests for 60 seconds protecting Uvicorn's thread pools.
