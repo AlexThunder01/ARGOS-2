@@ -11,7 +11,7 @@ psutil==5.9.8
 
 # --- AI & Search Tools ---
 ddgs==9.11.4
-yfinance==0.2.37
+yfinance>=1.2.0
 
 # --- Voice & Audio ---
 gTTS==2.5.1
