@@ -58,29 +58,40 @@ Public-facing AI agents are vulnerable to prompt injection. ARGOS doesn't just p
 ARGOS is fully containerized. You can go from zero to a live, memory-augmented Telegram assistant in minutes.
 
 ### 1. Configure the Environment
+Clone the repository and prepare your environment file:
 ```bash
 cp .env.example .env
-# Open .env and populate:
-# - LLM_BACKEND (groq, anthropic, openai-compatible, or custom)
-# - LLM_BASE_URL (Your provider's API base URL)
-# - LLM_API_KEY (Your primary API key)
-# - LLM_MODEL (The specific model ID, e.g., llama-3.3-70b-versatile)
-# - TELEGRAM_BOT_TOKEN (For Gmail HITL approvals)
 ```
+Open the `.env` file and configure your preferred AI provider. ARGOS-2 is **model-agnostic** and natively supports Anthropic or any OpenAI-compatible API. 
+
+**Example (Using Groq for blazing fast inference):**
+```env
+LLM_BACKEND=openai-compatible
+LLM_BASE_URL=https://api.groq.com/openai/v1
+LLM_API_KEY=gsk_your_groq_api_key_here
+LLM_MODEL=llama-3.3-70b-versatile
+```
+*(Check `.env.example` for OpenAI, Anthropic, vLLM, and Ollama templates).*
+
+You will also need to populate your messaging credentials:
+- `TELEGRAM_BOT_TOKEN`: The token for your primary/admin bot (from BotFather).
+- `TELEGRAM_CHAT_BOT_TOKEN`: The token for the conversational AI bot.
+- `ADMIN_CHAT_ID`: Your personal Telegram User ID to receive access requests.
 
 ### 2. Launch the Orchestrator
+Start the FastAPI Cognitive Backend and the n8n automation engine:
 ```bash
 docker compose up -d --build
 ```
 
-### 3. Inject AI Workflows
-Once the containers are healthy, run the automated injector to bootstrap n8n credentials and workflows:
+### 3. Bootstrap AI Workflows
+Once the Docker containers are healthy and running, run the automated injector script. This will automatically configure n8n with the correct Telegram webhook registrations, internal API keys, and ARGOS workflows:
 ```bash
-pip install requests python-dotenv
 python3 scripts/inject_n8n.py
 ```
 
 ### 4. Authorize Google (Optional, for Gmail HITL)
+If you rely on the Gmail Human-In-The-Loop reading features:
 1. Open n8n at `http://localhost:5678`.
 2. Go to **Credentials** -> **Gmail account** -> **Sign in with Google**.
 
