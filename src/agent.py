@@ -79,6 +79,7 @@ class JarvisAgent:
         - web_search: {{"query": "search query"}}
         - crypto_price: {{"coin": "bitcoin"}}
         - finance_price: {{"asset": "gold"}}
+        - get_weather: {{"location": "Rome"}}
         """.format(os_system=os_system, user=user, home_dir=home_dir)
         
         self.system_prompt += "\n" + build_system_prompt_suffix()

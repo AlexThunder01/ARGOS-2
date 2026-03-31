@@ -8,7 +8,7 @@ Usage (unchanged from before):
     from src.tools import TOOLS
 """
 from .finance import finance_price_tool, crypto_price_tool
-from .web import web_search_tool, system_stats_tool
+from .web import web_search_tool, system_stats_tool, get_weather_tool
 from .filesystem import (
     list_files_tool, read_file_tool, create_file_tool,
     modify_file_tool, rename_file_tool, delete_file_tool,
@@ -35,5 +35,6 @@ TOOLS = {
     "visual_click": visual_click_tool,
     "describe_screen": describe_screen_tool,
     "create_directory": create_directory_tool,
-    "delete_directory": delete_directory_tool
+    "delete_directory": delete_directory_tool,
+    "get_weather": get_weather_tool
 }

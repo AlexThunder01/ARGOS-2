@@ -26,3 +26,55 @@ def web_search_tool(query):
 
 def system_stats_tool(_):
     return f"CPU: {psutil.cpu_percent()}%, RAM: {psutil.virtual_memory().percent}%"
+
+def get_weather_tool(query):
+    location = _get_arg(query, ["location", "city", "place", "query"])
+    if not location and isinstance(query, str):
+        location = query
+    if not location:
+        return "Error: No location specified."
+    
+    import requests
+    import urllib.parse
+    try:
+        # Step 1: Geocoding (City name -> Lat/Lon)
+        encoded_loc = urllib.parse.quote(location)
+        geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={encoded_loc}&count=1&language=it&format=json"
+        geo_res = requests.get(geo_url, timeout=10)
+        if geo_res.status_code != 200:
+            return f"Geocoding error: HTTP {geo_res.status_code}"
+            
+        geo_data = geo_res.json()
+        if not geo_data.get("results"):
+            return f"Weather Error: Could not find geographic coordinates for '{location}'."
+            
+        lat = geo_data["results"][0]["latitude"]
+        lon = geo_data["results"][0]["longitude"]
+        place_name = geo_data["results"][0].get("name", location)
+        country = geo_data["results"][0].get("country", "")
+        
+        # Step 2: Weather Forecast
+        weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
+        w_res = requests.get(weather_url, timeout=10)
+        if w_res.status_code != 200:
+            return f"Weather API error: HTTP {w_res.status_code}"
+            
+        w_data = w_res.json()
+        current = w_data.get("current_weather", {})
+        temp = current.get("temperature", "?")
+        wind = current.get("windspeed", "?")
+        
+        # We can map standard WMO codes to text (Open-Meteo provides WMO weathercode)
+        code = current.get("weathercode", 0)
+        wmo_map = {
+            0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
+            45: "Fog", 48: "Depositing rime fog", 51: "Light drizzle", 53: "Moderate drizzle",
+            55: "Dense drizzle", 61: "Slight rain", 63: "Moderate rain", 65: "Heavy rain",
+            71: "Slight snow", 73: "Moderate snow", 75: "Heavy snow", 80: "Slight rain showers",
+            81: "Moderate rain showers", 82: "Violent rain showers", 95: "Thunderstorm" 
+        }
+        desc = wmo_map.get(code, f"Code {code}")
+        
+        return f"Weather in {place_name} ({country}): {desc}, {temp}°C, Wind: {wind}km/h"
+    except Exception as e:
+        return f"Weather API Error: {e}"
