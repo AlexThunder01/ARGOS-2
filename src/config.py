@@ -1,4 +1,5 @@
 import os
+
 from dotenv import load_dotenv
 
 # Carica il file .env dalla root del progetto
@@ -31,3 +32,13 @@ STT_CUSTOM_API_KEY = os.getenv("STT_CUSTOM_API_KEY", "")
 # Settings Sistema
 ENABLE_VOICE = os.getenv("ENABLE_VOICE", "False").lower() == "true"
 HISTORY_LIMIT = 10
+
+# Rate Limiting
+RATE_LIMIT_PER_HOUR = int(os.getenv("RATE_LIMIT_PER_HOUR", "50"))
+RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "5"))
+
+# Isolation Workspace (Fase 8)
+DOCKER_HOST = os.getenv("DOCKER_HOST", "tcp://localhost:2375")
+HOST_WORKSPACE_DIR = os.getenv("HOST_WORKSPACE_DIR", "")
+WORKSPACE_DIR = os.getenv("WORKSPACE_DIR", "./workspace")
+os.makedirs(WORKSPACE_DIR, exist_ok=True)

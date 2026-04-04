@@ -1,9 +1,10 @@
 """
 Executor — Esegue i tool con retry automatico, timeout e classificazione degli errori.
 """
-import time
+
 import logging
-from typing import Callable, Any, Optional
+import time
+from typing import Any, Callable
 
 from src.actions.base import ActionResult, ActionStatus
 
@@ -14,14 +15,22 @@ RETRY_DELAY_BASE = 1.5  # secondi; il delay cresce: 1.5s, 3s, 4.5s
 
 # Keywords indicating a transient error (retry is worthwhile)
 RETRYABLE_KEYWORDS = [
-    "timeout", "connection", "network", "rate limit",
-    "api error", "api error", "connection error"
+    "timeout",
+    "connection",
+    "network",
+    "rate limit",
+    "api error",
+    "api error",
+    "connection error",
 ]
 
 # Keywords indicating a permanent error (retry is futile)
 FATAL_KEYWORDS = [
-    "not found", "does not exist", "permission denied",
-    "already exists", "error: please specify",
+    "not found",
+    "does not exist",
+    "permission denied",
+    "already exists",
+    "error: please specify",
     "is a directory",
 ]
 
@@ -48,7 +57,7 @@ def execute_with_retry(
 ) -> ActionResult:
     """
     Esegue un tool con retry automatico in caso di errori temporanei.
-    
+
     Returns:
         ActionResult con status SUCCESS, FAILED o RETRYING.
     """

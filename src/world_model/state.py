@@ -2,14 +2,16 @@
 WorldState — Rappresentazione esplicita dello stato del sistema.
 Viene aggiornato a ogni ciclo e alimenta il planner con contesto strutturato.
 """
+
 from dataclasses import dataclass, field
-from typing import Optional, List, Any
 from datetime import datetime
+from typing import Any, List, Optional
 
 
 @dataclass
 class ActionRecord:
     """Registro di un'azione eseguita."""
+
     step: int
     tool: str
     input: Any
@@ -24,6 +26,7 @@ class WorldState:
     Stato esplicito del mondo percepito da ARGOS.
     Centralizza tutto il contesto necessario al planner.
     """
+
     current_task: str = ""
     step_count: int = 0
     active_windows: List[str] = field(default_factory=list)
@@ -57,7 +60,7 @@ class WorldState:
         Mostra solo gli ultimi 3 step per non saturare il context window.
         """
         lines = [
-            f"[STATO ARGOS]",
+            "[STATO ARGOS]",
             f"  Current task: {self.current_task or 'none'}",
             f"  Step: {self.step_count}",
         ]
@@ -68,7 +71,9 @@ class WorldState:
             for a in recent:
                 status = "✅" if a.success else "❌"
                 result_preview = str(a.result)[:100].replace("\n", " ")
-                lines.append(f"    {status} [{a.timestamp}] {a.tool} → {result_preview}")
+                lines.append(
+                    f"    {status} [{a.timestamp}] {a.tool} → {result_preview}"
+                )
 
         if self.last_error:
             lines.append(f"  ⚠️  Last error: {self.last_error[:100]}")

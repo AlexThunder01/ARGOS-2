@@ -4,8 +4,9 @@ Adds the 5 core tables for the Telegram chat module to argos_state.db.
 Idempotent: uses IF NOT EXISTS on all tables and indexes.
 Run once before deploying the module.
 """
-import sqlite3
+
 import os
+import sqlite3
 
 DB_DIR = "/app/data" if os.environ.get("DOCKER_ENV") else "./data"
 DB_PATH = os.path.join(DB_DIR, "argos_state.db")

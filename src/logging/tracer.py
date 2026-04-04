@@ -3,8 +3,9 @@ Tracer — Structured logging system for ARGOS.
 Writes to file with timestamps and to console with clean formatting.
 Each session creates a separate file in logs/.
 """
-import logging
+
 import json
+import logging
 import os
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -46,7 +47,9 @@ def setup_tracer(log_dir: str = "logs") -> logging.Logger:
     return logger
 
 
-def log_step(logger: logging.Logger, state: "WorldState", tool: str, result: str, success: bool):
+def log_step(
+    logger: logging.Logger, state: "WorldState", tool: str, result: str, success: bool
+):
     """Logs a single agent execution step in structured JSON format."""
     entry = {
         "step": state.step_count,
@@ -57,14 +60,21 @@ def log_step(logger: logging.Logger, state: "WorldState", tool: str, result: str
     }
     logger.debug(f"STEP: {json.dumps(entry, ensure_ascii=False)}")
     if not success:
-        logger.warning(f"⚠️  Step {state.step_count} failed — tool={tool} → {str(result)[:100]}")
+        logger.warning(
+            f"⚠️  Step {state.step_count} failed — tool={tool} → {str(result)[:100]}"
+        )
 
 
 def log_decision(logger: logging.Logger, thought: str, tool: str, confidence: float):
     """Logs the planner's decision mapping (reasoning + chosen tool)."""
-    logger.debug(json.dumps({
-        "event": "planner_decision",
-        "thought": thought[:200],
-        "tool_chosen": tool,
-        "confidence": confidence
-    }, ensure_ascii=False))
+    logger.debug(
+        json.dumps(
+            {
+                "event": "planner_decision",
+                "thought": thought[:200],
+                "tool_chosen": tool,
+                "confidence": confidence,
+            },
+            ensure_ascii=False,
+        )
+    )

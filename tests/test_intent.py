@@ -1,10 +1,13 @@
 """
 Test dell'IntentParser — verifica il parsing deterministico dei comandi vocali.
 """
-import sys, os
+
+import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.voice.intent import parse_intent, format_confirmation_prompt
+from src.voice.intent import format_confirmation_prompt, parse_intent
 
 
 def test_intent_web_search():

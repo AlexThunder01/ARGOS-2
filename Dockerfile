@@ -21,6 +21,7 @@ COPY src/ ./src/
 COPY scripts/ ./scripts/
 COPY config.yaml .
 COPY workflows/ ./workflows/
+COPY dashboard/dist/ ./dashboard/dist/
 
 # Create required runtime directories and set permissions
 RUN mkdir -p /tmp/argos_logs /app/data

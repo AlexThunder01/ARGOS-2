@@ -1,7 +1,10 @@
 """
 Test delle utility — extract_json e normalize_path.
 """
-import sys, os
+
+import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.utils import extract_json
@@ -40,9 +43,12 @@ def test_extract_json_nested():
 
 def test_detect_backend():
     from unittest.mock import patch
-    with patch('src.utils.LLM_BACKEND', 'openai-compatible'):
+
+    with patch("src.utils.LLM_BACKEND", "openai-compatible"):
         from src.utils import detect_backend
+
         assert detect_backend() == "openai-compatible"
+
 
 if __name__ == "__main__":
     test_extract_json_clean()

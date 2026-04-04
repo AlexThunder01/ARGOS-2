@@ -11,11 +11,9 @@ L'output del modello LLM viene vincolato a questo schema JSON:
 
 If the model produces free-form text (final response), it is treated as "done: true".
 """
-import json
-import re
-from typing import Optional, Tuple
-from dataclasses import dataclass
 
+from dataclasses import dataclass
+from typing import Optional
 
 PLANNER_RESPONSE_SCHEMA = """
 FORMATO RISPOSTA OBBLIGATORIO — usa SEMPRE uno di questi due formati:
@@ -42,6 +40,7 @@ NON scrivere MAI testo al di fuori del JSON.
 @dataclass
 class PlannerDecision:
     """Decisione strutturata del planner, parsata dalla risposta LLM."""
+
     thought: str
     tool: Optional[str]
     tool_input: Optional[dict]
@@ -54,7 +53,7 @@ class PlannerDecision:
 def parse_planner_response(raw_response: str) -> PlannerDecision:
     """
     Parsa la risposta del modello LLM secondo lo schema vincolato.
-    
+
     Gestisce tre casi:
     1. JSON valido secondo lo schema → PlannerDecision strutturata
     2. JSON parziale/corrotto → fallback su extract_json best-effort
@@ -64,8 +63,9 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
 
     # Tenta il parse diretto usando il nuovo estrattore basato sul conteggio parentesi
     from src.utils import extract_json
+
     data = extract_json(text)
-    
+
     if data:
         try:
             thought = data.get("thought", "")

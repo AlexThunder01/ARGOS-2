@@ -1,69 +1,57 @@
-# 🔌 Guide: Creating Custom n8n Workflows for ARGOS-2
+# Custom n8n Workflows for ARGOS-2
 
-One of the greatest advantages of the **ARGOS-2** architecture is the ability to use the n8n visual engine to create any automation imaginable (Telegram, Google Sheets, Trello, etc.) while delegating the AI reasoning and computational heavy-lifting to the ARGOS Python backend.
-
-Here is how to create a custom workflow from scratch and interface it with the ARGOS brain.
+By using the n8n visual orchestrator, you can extend the reach of ARGOS-2 beyond its built-in modules.
 
 ---
 
-## 🏗️ 1. Create your n8n Trigger
-Every automation begins with a Trigger.
-1. Open **n8n** (`http://localhost:5678`).
-2. Click **"Add Workflow"** in the top right.
-3. Add the initial Trigger node. Examples:
-   - **Schedule Trigger**: To run the agent every morning at 09:00 AM.
-   - **Telegram Trigger**: To trigger ARGOS by typing a message in a chat.
-   - **Webhook**: To trigger the agent via a custom HTTP call.
+## 1. Interacting with the Unified Brain
+
+All communication between n8n and the cognitive engine is done via the **HTTP Request** node calling the FastAPI backend.
+
+### 🧩 The Primary Endpoint: `POST /run`
+
+When building a custom workflow (e.g., a Slack listener, a Cron job), send the user's task to this endpoint:
+
+- **URL**: `http://argos-api:8000/api/v1/agent/run`
+- **Method**: `POST`
+- **Body (JSON)**:
+  ```json
+  {
+    "task": "Extract the key points from this meeting...",
+    "user_id": "optional_id",
+    "memory_mode": "off" 
+  }
+  ```
 
 ---
 
-## 🧠 2. Delegate to ARGOS-2 (HTTP Request Node)
-Once triggered, you need to instruct ARGOS on what to do. Since ARGOS and n8n share the same Docker bridge network (`argos-network`), they communicate natively and instantly via internal HTTP requests.
+## 2. Advanced Reasoning Features in n8n
 
-1. Add an **"HTTP Request"** node to your workflow.
-2. Configure it as follows:
-   - **Method**: `POST`
-   - **URL**: `=http://argos-api:8000/analyze_email`
-   - **Send Body**: `ON`
-   - Select **Specify Body** -> **JSON**
-3. In the **Body Parameters**, paste the JSON payload to trigger the agent:
+Custom workflows can now leverage the **Advanced Tools** built into the `CoreAgent`.
 
-```json
-{
-  "task": "The objective you want ARGOS to accomplish",
-  "require_confirmation": false,
-  "max_steps": 15
-}
-```
-
-> 💡 **PRO Tip**: Make the `task` dynamic! For example, if your trigger is a Telegram message, you can map the task directly to the user's input: `=Search the internet for this: {{ $json.message.text }}`.
+### 📄 Analyzing PDF Attachments
+If n8n receives a PDF via a webhook (e.g., from a form submission):
+1. Use the **Write to File** node to save the PDF in a shared volume (e.g., `/tmp/argos/`).
+2. Call the `POST /run` endpoint with the task: `"Process and summarize this file: /tmp/argos/report.pdf"`.
+3. The `CoreAgent` will automatically trigger the `read_pdf` tool, extract the text, and return the result to n8n.
 
 ---
 
-## 🎯 3. Handle the ARGOS Response
-The `/analyze_email` endpoint processes tasks **Synchronously**. This means the HTTP Request node will wait (loading state) until ARGOS completes the entire cognitive loop (reading, prioritizing, summarizing, and drafting the final text).
+## 3. Human-In-The-Loop (HITL) Patterns
 
-Upon completion, ARGOS returns a JSON payload containing the final result, for example:
-```json
-{
-  "status": "success",
-  "result": "I searched the internet, Google's 2025 revenue was..."
-}
-```
+The most powerful n8n workflows implement the **HITL Sequence**:
 
-1. Add a subsequent node (e.g., **Telegram** "Send Message" or **Google Sheets** "Add Row") after the HTTP Request.
-2. Extract the result dynamically by dragging the `result` variable into your desired field. n8n will map it natively as:
-   `={{ $('HTTP Request').item.json.result }}`
-
-You have just created a hybrid agent: **n8n routes the data, while ARGOS handles the cognitive reasoning!**
+1. **Trigger**: New event (Email, Webhook).
+2. **Brain Call**: `POST /analyze_email` or `POST /run`.
+3. **Suspension**: n8n sends a message to the Telegram HITL bot with **Inline Buttons**.
+4. **Resume**: User clicks "Accept," and n8n executes the final action (e.g., Send Reply, Call API).
 
 ---
 
-## 📦 4. Bundled Workflows (Ready to Test)
+## 4. Security Requirements
 
-To see this decoupled architecture in a powerful real-world scenario, ARGOS-2 natively includes **two pre-built workflows** (located in the `workflows/` directory) designed for intelligent email management:
+Every request from n8n to the FastAPI backend must include the **API Key Header**:
+- **Key**: `X-ARGOS-API-KEY`
+- **Value**: Your `.env` configured key.
 
-1. **`03_gmail_analizzatore_hitl.json`**: Automatically intercepts incoming emails, delegates reading/summarization/drafting to the Python LLM backend, and notifies you securely on Telegram using Inline Keyboard Buttons (`✅ SEND`, `❌ DISCARD`).
-2. **`04_gmail_webhook_approval.json`**: Acts as the zero-latency Webhook receiver for the Telegram buttons. Upon clicking, the Python API atomically extracts the draft from the persistent FIFO queue and executes the Gmail reply, while dynamically editing your Telegram message to prevent duplicate clicks.
-
-**How to Test Them:** Run the `python3 scripts/inject_n8n.py` script and ensure you've configured your Gmail OAuth2 Credentials within the n8n UI!
+If you are sending user-generated text from a public source, the **Paranoid Judge** middleware will automatically validate it if enabled in your `.env`. No extra n8n configuration is required for this protection.

@@ -1,16 +1,19 @@
-import os
-import logging
 import asyncio
+import logging
+import os
+import re
+
 import pybreaker
 import requests
-import re
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
+
 from api.security import verify_api_key
 
 router = APIRouter(prefix="/telegram", tags=["Telegram"])
 logger = logging.getLogger("argos")
 telegram_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
+
 
 class TelegramChatRequest(BaseModel):
     user_id: int = Field(..., description="Telegram user_id")
@@ -19,12 +22,14 @@ class TelegramChatRequest(BaseModel):
     first_name: str = Field(default="", description="Telegram first name")
     username: str = Field(default="", description="Telegram @username")
 
+
 class TelegramChatResponse(BaseModel):
     status: str
     reply: str
     user_id: int
     memories_used: int = 0
     is_new_user: bool = False
+
 
 def _notify_admin_new_user(user_id: int, first_name: str, username: str):
     admin_chat_id = os.getenv("ADMIN_CHAT_ID", "").strip()
@@ -48,20 +53,25 @@ def _notify_admin_new_user(user_id: int, first_name: str, username: str):
     except Exception as e:
         logger.error(f"[Telegram] Admin notification failed: {e}")
 
+
 def _strip_markdown(text: str) -> str:
-    text = re.sub(r'```[\s\S]*?```', lambda m: m.group(0).strip('`'), text)
-    text = re.sub(r'`([^`]+)`', r'\1', text)
-    text = re.sub(r'^#{1,6}\s+', '', text, flags=re.M)
-    text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
-    text = re.sub(r'__(.+?)__', r'\1', text)
-    text = re.sub(r'\*(.+?)\*', r'\1', text)
-    text = re.sub(r'_(.+?)_', r'\1', text)
+    text = re.sub(r"```[\s\S]*?```", lambda m: m.group(0).strip("`"), text)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"^#{1,6}\s+", "", text, flags=re.M)
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"__(.+?)__", r"\1", text)
+    text = re.sub(r"\*(.+?)\*", r"\1", text)
+    text = re.sub(r"_(.+?)_", r"\1", text)
     return text
+
 
 def _handle_telegram_command(text: str, user_id: int, config) -> str | None:
     from src.telegram.db import (
-        db_clear_conversation_window, db_get_user_stats,
-        db_delete_user_data, db_update_profile, db_get_open_tasks
+        db_clear_conversation_window,
+        db_delete_user_data,
+        db_get_open_tasks,
+        db_get_user_stats,
+        db_update_profile,
     )
 
     if not text.startswith("/"):
@@ -84,8 +94,10 @@ def _handle_telegram_command(text: str, user_id: int, config) -> str | None:
         return "✅ Session context cleared. Let's start fresh."
     elif cmd == "/status":
         stats = db_get_user_stats(user_id)
-        return (f"👤 *Your profile:*\nStatus: ✅ Approved\nTotal messages: {stats['msg_count']}\n"
-                f"Saved memories: {stats['memory_count']}\nOpen tasks: {stats['open_tasks']}\nMember since: {stats['registered_at']}")
+        return (
+            f"👤 *Your profile:*\nStatus: ✅ Approved\nTotal messages: {stats['msg_count']}\n"
+            f"Saved memories: {stats['memory_count']}\nOpen tasks: {stats['open_tasks']}\nMember since: {stats['registered_at']}"
+        )
     elif cmd == "/deleteme":
         if len(parts) > 1 and parts[1].upper() == "CONFIRM":
             db_delete_user_data(user_id)
@@ -114,51 +126,68 @@ def _handle_telegram_command(text: str, user_id: int, config) -> str | None:
         admin_id = int(os.getenv("ADMIN_CHAT_ID", "0"))
         if user_id != admin_id:
             return "❌ Unauthorized. Only the admin can use this command."
-        
+
         target_id_str = cmd.split("_")[1]
         if not target_id_str.isdigit():
             return "❌ Invalid user ID."
-            
+
         target_id = int(target_id_str)
         from src.telegram.db import db_get_user
+
         target_user = db_get_user(target_id)
         if not target_user:
             return "❌ User not found in database."
         if target_user["status"] != "pending":
-            return f"⚠️ Action already taken. User is currently `{target_user['status']}`."
-            
+            return (
+                f"⚠️ Action already taken. User is currently `{target_user['status']}`."
+            )
+
         if cmd.startswith("/approve_"):
             from src.telegram.db import db_approve_user
+
             db_approve_user(target_id, approved_by=admin_id)
             return f"✅ User `{target_id}` has been fiercely approved."
         else:
             from src.telegram.db import db_ban_user
+
             db_ban_user(target_id, reason="Rejected by admin via chat command")
             return f"🚫 User `{target_id}` has been successfully rejected."
     return None
 
-@router.post("/chat", response_model=TelegramChatResponse, dependencies=[Depends(verify_api_key)])
+
+@router.post(
+    "/chat", response_model=TelegramChatResponse, dependencies=[Depends(verify_api_key)]
+)
 async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTasks):
-    from src.workflows_config import get_workflows_config
+    from src.core import CoreAgent
     from src.telegram.db import (
-        db_get_user, db_register_user, db_approve_user,
-        db_get_profile, db_get_conversation_window,
-        db_save_conversation_turn, db_increment_msg_count,
-        db_get_open_tasks, db_gc_memories
+        db_approve_user,
+        db_gc_memories,
+        db_get_conversation_window,
+        db_get_open_tasks,
+        db_get_profile,
+        db_get_user,
+        db_increment_msg_count,
+        db_register_user,
+        db_save_conversation_turn,
     )
     from src.telegram.memory import (
-        retrieve_relevant_memories, should_extract_memory,
-        should_run_gc, extract_memories_from_text, save_extracted_memories
+        extract_memories_from_text,
+        retrieve_relevant_memories,
+        save_extracted_memories,
+        should_extract_memory,
+        should_run_gc,
     )
     from src.telegram.prompt import build_telegram_system_prompt
-    from src.agent import JarvisAgent
-    
+    from src.workflows_config import get_workflows_config
+
     config = get_workflows_config()
 
     if not config.is_telegram_enabled:
         return TelegramChatResponse(
-            status="disabled", reply="The bot is temporarily disabled.",
-            user_id=req.user_id
+            status="disabled",
+            reply="The bot is temporarily disabled.",
+            user_id=req.user_id,
         )
 
     max_len = config.telegram_max_input_length
@@ -166,7 +195,18 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
         return TelegramChatResponse(
             status="ok",
             reply=f"⚠️ Message too long ({len(req.text)} chars). Maximum: {max_len}.",
-            user_id=req.user_id
+            user_id=req.user_id,
+        )
+
+    from src.core.rate_limit import RateLimitExceeded, check_rate_limit
+
+    try:
+        check_rate_limit(req.user_id)
+    except RateLimitExceeded as e:
+        return TelegramChatResponse(
+            status="error",
+            reply=f"🛑 {str(e)}",
+            user_id=req.user_id,
         )
 
     user = db_get_user(req.user_id)
@@ -177,24 +217,27 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
             db_approve_user(req.user_id)
         else:
             if config.telegram_notify_on_new_user:
-                background_tasks.add_task(_notify_admin_new_user, req.user_id, req.first_name, req.username)
+                background_tasks.add_task(
+                    _notify_admin_new_user, req.user_id, req.first_name, req.username
+                )
             return TelegramChatResponse(
-                status="pending", reply=config.telegram_unauthorized_message,
-                user_id=req.user_id, is_new_user=True
+                status="pending",
+                reply=config.telegram_unauthorized_message,
+                user_id=req.user_id,
+                is_new_user=True,
             )
         user = db_get_user(req.user_id)
 
     elif user["status"] == "pending":
         return TelegramChatResponse(
-            status="pending", reply="Your access request is still pending approval.",
-            user_id=req.user_id
+            status="pending",
+            reply="Your access request is still pending approval.",
+            user_id=req.user_id,
         )
 
     elif user["status"] == "banned":
         logger.info(f"[Telegram] Message from banned user {req.user_id} — silenced.")
-        return TelegramChatResponse(
-            status="banned", reply="", user_id=req.user_id
-        )
+        return TelegramChatResponse(status="banned", reply="", user_id=req.user_id)
 
     cmd_response = _handle_telegram_command(req.text, req.user_id, config)
     if cmd_response is not None:
@@ -206,11 +249,14 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
     msg_count = (user.get("msg_count_total", 0) or 0) + 1
 
     user_profile = db_get_profile(req.user_id)
-    recent_history = db_get_conversation_window(req.user_id, limit=config.telegram_conversation_window)
+    recent_history = db_get_conversation_window(
+        req.user_id, limit=config.telegram_conversation_window
+    )
     relevant_memories = retrieve_relevant_memories(
-        req.user_id, req.text,
+        req.user_id,
+        req.text,
         top_k=config.telegram_max_memories,
-        min_similarity=config.telegram_rag_threshold
+        min_similarity=config.telegram_rag_threshold,
     )
     open_tasks = db_get_open_tasks(req.user_id)
 
@@ -218,45 +264,56 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
         bot_config=config.telegram_config,
         user_profile=user_profile,
         memories=relevant_memories,
-        tasks=open_tasks
+        tasks=open_tasks,
     )
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(recent_history)
     messages.append({"role": "user", "content": req.text})
 
-    local_agent = JarvisAgent()
+    agent = CoreAgent(memory_mode="off", user_id=req.user_id)
 
     try:
-        raw_reply = await asyncio.to_thread(telegram_breaker.call, local_agent.think_with_messages, messages)
+        raw_reply = await asyncio.to_thread(
+            telegram_breaker.call, agent.think_with_context, messages
+        )
     except pybreaker.CircuitBreakerError:
         return TelegramChatResponse(
             status="ok",
             reply="⚠️ Service temporarily unavailable. Please try again in a minute.",
-            user_id=req.user_id
+            user_id=req.user_id,
         )
 
-    background_tasks.add_task(db_save_conversation_turn, req.user_id, req.text, raw_reply)
+    background_tasks.add_task(
+        db_save_conversation_turn, req.user_id, req.text, raw_reply
+    )
 
     if should_extract_memory(req.text, msg_count):
-        tg_cfg = getattr(config, 'telegram_config', {})
+        tg_cfg = getattr(config, "telegram_config", {})
         beh_cfg = tg_cfg.get("behavior", {}) if isinstance(tg_cfg, dict) else {}
         mem_cfg = beh_cfg.get("memory", {})
         _poisoning_on = mem_cfg.get("enable_poisoning_detection", True)
         _risk_thresh = mem_cfg.get("risk_threshold", 0.5)
         _susp_ret = mem_cfg.get("suspicious_retention", 500)
-        
+
         def _do_extraction():
-            mem_agent = JarvisAgent()
-            existing = [{"content": m["content"], "category": m["category"]} for m in relevant_memories]
-            facts = extract_memories_from_text(req.text, existing, mem_agent.call_lightweight)
+            mem_agent = CoreAgent(memory_mode="off", user_id=req.user_id)
+            existing = [
+                {"content": m["content"], "category": m["category"]}
+                for m in relevant_memories
+            ]
+            facts = extract_memories_from_text(
+                req.text, existing, mem_agent.call_lightweight
+            )
             if facts:
                 save_extracted_memories(
-                    req.user_id, facts,
+                    req.user_id,
+                    facts,
                     llm_call_fn=mem_agent.call_lightweight,
                     poisoning_enabled=_poisoning_on,
                     risk_threshold=_risk_thresh,
-                    suspicious_retention=_susp_ret
+                    suspicious_retention=_susp_ret,
                 )
+
         background_tasks.add_task(_do_extraction)
 
     if should_run_gc(msg_count):
@@ -265,6 +322,8 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
     clean_reply = _strip_markdown(raw_reply)
 
     return TelegramChatResponse(
-        status="ok", reply=clean_reply, user_id=req.user_id,
-        memories_used=len(relevant_memories)
+        status="ok",
+        reply=clean_reply,
+        user_id=req.user_id,
+        memories_used=len(relevant_memories),
     )

@@ -2,9 +2,10 @@
 ActionResult e ActionStatus — Risposta strutturata di ogni azione eseguita.
 Fornisce un'interfaccia consistente per il planner e il verifier.
 """
-from dataclasses import dataclass, field
+
+from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Any
+from typing import Any, Optional
 
 
 class ActionStatus(Enum):
@@ -18,6 +19,7 @@ class ActionStatus(Enum):
 @dataclass
 class ActionResult:
     """Risposta strutturata di un'azione. Usata dal planner per decidere il prossimo step."""
+
     status: ActionStatus
     message: str
     data: Optional[Any] = None

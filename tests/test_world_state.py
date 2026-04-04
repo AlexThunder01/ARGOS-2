@@ -1,10 +1,13 @@
 """
 Test del WorldState — verifica il tracking delle azioni e la generazione del contesto.
 """
-import sys, os
+
+import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.world_model.state import WorldState, ActionRecord
+from src.world_model.state import WorldState
 
 
 def test_initial_state():

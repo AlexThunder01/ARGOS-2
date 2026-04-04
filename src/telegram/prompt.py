@@ -5,10 +5,7 @@ Constructs per-user system prompts with RAG context injection.
 
 
 def build_telegram_system_prompt(
-    bot_config: dict,
-    user_profile: dict | None,
-    memories: list[dict],
-    tasks: list[dict]
+    bot_config: dict, user_profile: dict | None, memories: list[dict], tasks: list[dict]
 ) -> str:
     """
     Builds a personalized system prompt for the Telegram chat LLM,
@@ -19,14 +16,18 @@ def build_telegram_system_prompt(
 
     name = identity.get("bot_name", "AI Assistant")
     persona = identity.get("persona", "")
-    language = (user_profile or {}).get("language", behavior.get("default_language", "it"))
-    tone = (user_profile or {}).get("preferred_tone", behavior.get("default_tone", "neutral"))
+    language = (user_profile or {}).get(
+        "language", behavior.get("default_language", "it")
+    )
+    tone = (user_profile or {}).get(
+        "preferred_tone", behavior.get("default_tone", "neutral")
+    )
     display_name = (user_profile or {}).get("display_name", "")
 
     tone_desc = {
-        "formal":  "formal and professional",
-        "casual":  "friendly and informal",
-        "neutral": "balanced and natural"
+        "formal": "formal and professional",
+        "casual": "friendly and informal",
+        "neutral": "balanced and natural",
     }.get(tone, "balanced and natural")
 
     prompt = f"""You are {name}. {persona}
@@ -46,7 +47,7 @@ TONE: {tone_desc}.
     if tasks:
         prompt += "\nUSER'S OPEN TASKS:\n"
         for t in tasks:
-            due = f" (due: {t['due_at']})" if t.get('due_at') else ""
+            due = f" (due: {t['due_at']})" if t.get("due_at") else ""
             prompt += f"- {t['description']}{due}\n"
 
     prompt += """

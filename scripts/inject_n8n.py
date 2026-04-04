@@ -8,36 +8,40 @@ This script performs a complete n8n environment bootstrap:
   3. Injects all workflow JSON files from the workflows/ directory
   4. Dynamically links credential IDs and Telegram Chat ID into workflow nodes
 """
-import os
-import json
+
 import copy
-import requests
+import json
+import os
 import sys
 
-from scripts.n8n_client import get_n8n_config
+import requests
 
+from scripts.n8n_client import get_n8n_config
 
 # ==============================================================================
 # Phase 1: Credential Creation
 # ==============================================================================
+
 
 def create_telegram_credential(base_url, headers, bot_token):
     """Creates a Telegram API credential in n8n and returns its ID."""
     payload = {
         "name": "Telegram account",
         "type": "telegramApi",
-        "data": {
-            "accessToken": bot_token
-        }
+        "data": {"accessToken": bot_token},
     }
-    resp = requests.post(f"{base_url}/credentials", headers=headers, json=payload, timeout=10)
+    resp = requests.post(
+        f"{base_url}/credentials", headers=headers, json=payload, timeout=10
+    )
     if resp.status_code in [200, 201]:
         resp_data = resp.json()
         cred_id = resp_data.get("id") or resp_data.get("data", {}).get("id")
         print(f"  ✅ Telegram credential created (ID: {cred_id})")
         return str(cred_id)
     else:
-        print(f"  ⚠️  Telegram credential creation failed: {resp.status_code} - {resp.text}")
+        print(
+            f"  ⚠️  Telegram credential creation failed: {resp.status_code} - {resp.text}"
+        )
         return None
 
 
@@ -51,17 +55,21 @@ def create_gmail_credential(base_url, headers, client_id, client_secret):
             "clientSecret": client_secret,
             "serverUrl": "",
             "sendAdditionalBodyProperties": False,
-            "additionalBodyProperties": "{}"
-        }
+            "additionalBodyProperties": "{}",
+        },
     }
-    resp = requests.post(f"{base_url}/credentials", headers=headers, json=payload, timeout=10)
+    resp = requests.post(
+        f"{base_url}/credentials", headers=headers, json=payload, timeout=10
+    )
     if resp.status_code in [200, 201]:
         resp_data = resp.json()
         cred_id = resp_data.get("id") or resp_data.get("data", {}).get("id")
         print(f"  ✅ Gmail OAuth2 credential created (ID: {cred_id})")
         return str(cred_id)
     else:
-        print(f"  ⚠️  Gmail credential creation failed: {resp.status_code} - {resp.text}")
+        print(
+            f"  ⚠️  Gmail credential creation failed: {resp.status_code} - {resp.text}"
+        )
         return None
 
 
@@ -69,8 +77,15 @@ def create_gmail_credential(base_url, headers, client_id, client_secret):
 # Phase 2: Workflow Patching (Credential Linking + Chat ID Injection)
 # ==============================================================================
 
-def patch_workflow(workflow_data, telegram_cred_id, gmail_cred_id, telegram_chat_id,
-                   chat_bot_cred_id=None, is_chat_workflow=False):
+
+def patch_workflow(
+    workflow_data,
+    telegram_cred_id,
+    gmail_cred_id,
+    telegram_chat_id,
+    chat_bot_cred_id=None,
+    is_chat_workflow=False,
+):
     """
     Patches a workflow JSON in-memory:
       - Replaces 'REPLACE_WITH_YOUR_CREDENTIAL_ID' placeholders with real credential IDs
@@ -101,22 +116,25 @@ def patch_workflow(workflow_data, telegram_cred_id, gmail_cred_id, telegram_chat
 
         # --- Handle Gmail nodes (n8n-nodes-base.gmail / gmailTrigger) ---
         node_type = node.get("type", "")
-        if node_type in ["n8n-nodes-base.gmail", "n8n-nodes-base.gmailTrigger"] and gmail_cred_id:
+        if (
+            node_type in ["n8n-nodes-base.gmail", "n8n-nodes-base.gmailTrigger"]
+            and gmail_cred_id
+        ):
             if "credentials" not in node:
                 node["credentials"] = {}
             node["credentials"]["gmailOAuth2"] = {
                 "id": gmail_cred_id,
-                "name": "Gmail account"
+                "name": "Gmail account",
             }
 
         # --- Handle Telegram Trigger / Telegram nodes ---
-        if node_type in ["n8n-nodes-base.telegramTrigger", "n8n-nodes-base.telegram"] and tg_cred:
+        if (
+            node_type in ["n8n-nodes-base.telegramTrigger", "n8n-nodes-base.telegram"]
+            and tg_cred
+        ):
             if "credentials" not in node:
                 node["credentials"] = {}
-            node["credentials"]["telegramApi"] = {
-                "id": tg_cred,
-                "name": tg_name
-            }
+            node["credentials"]["telegramApi"] = {"id": tg_cred, "name": tg_name}
 
     return patched
 
@@ -124,6 +142,7 @@ def patch_workflow(workflow_data, telegram_cred_id, gmail_cred_id, telegram_chat
 # ==============================================================================
 # Phase 3: Main Injection Pipeline
 # ==============================================================================
+
 
 def inject_workflows():
     print("=" * 60)
@@ -135,6 +154,7 @@ def inject_workflows():
 
     # --- Load environment variables ---
     from dotenv import load_dotenv
+
     load_dotenv()
 
     telegram_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip().strip('"')
@@ -161,25 +181,39 @@ def inject_workflows():
         payload = {
             "name": "Telegram Chat Bot",
             "type": "telegramApi",
-            "data": {"accessToken": chat_bot_token}
+            "data": {"accessToken": chat_bot_token},
         }
-        resp = requests.post(f"{base_url}/credentials", headers=headers, json=payload, timeout=10)
+        resp = requests.post(
+            f"{base_url}/credentials", headers=headers, json=payload, timeout=10
+        )
         if resp.status_code in [200, 201]:
             resp_data = resp.json()
-            chat_bot_cred_id = str(resp_data.get("id") or resp_data.get("data", {}).get("id"))
+            chat_bot_cred_id = str(
+                resp_data.get("id") or resp_data.get("data", {}).get("id")
+            )
             print(f"  ✅ Telegram Chat Bot credential created (ID: {chat_bot_cred_id})")
         else:
-            print(f"  ⚠️  Chat Bot credential creation failed: {resp.status_code} - {resp.text}")
+            print(
+                f"  ⚠️  Chat Bot credential creation failed: {resp.status_code} - {resp.text}"
+            )
     else:
-        print("  ⏭️  Skipping Telegram Chat Bot: TELEGRAM_CHAT_BOT_TOKEN not set in .env")
+        print(
+            "  ⏭️  Skipping Telegram Chat Bot: TELEGRAM_CHAT_BOT_TOKEN not set in .env"
+        )
 
     if google_client_id and google_client_secret:
-        gmail_cred_id = create_gmail_credential(base_url, headers, google_client_id, google_client_secret)
+        gmail_cred_id = create_gmail_credential(
+            base_url, headers, google_client_id, google_client_secret
+        )
     else:
-        print("  ⏭️  Skipping Gmail: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set in .env")
+        print(
+            "  ⏭️  Skipping Gmail: GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET not set in .env"
+        )
 
     if not telegram_chat_id:
-        print("  ⏭️  No TELEGRAM_CHAT_ID found — chat ID placeholder will not be replaced.")
+        print(
+            "  ⏭️  No TELEGRAM_CHAT_ID found — chat ID placeholder will not be replaced."
+        )
 
     # --- Phase 2: Inject Workflows ---
     print(f"\n📦 Phase 2: Injecting Workflows to {base_url}...")
@@ -189,7 +223,7 @@ def inject_workflows():
         print(f"❌ Error: Directory '{workflow_dir}' not found.")
         return
 
-    json_files = sorted([f for f in os.listdir(workflow_dir) if f.endswith('.json')])
+    json_files = sorted([f for f in os.listdir(workflow_dir) if f.endswith(".json")])
     if not json_files:
         print("ℹ️  No JSON workflows found.")
         return
@@ -200,7 +234,7 @@ def inject_workflows():
         filepath = os.path.join(workflow_dir, filename)
 
         try:
-            with open(filepath, 'r', encoding='utf-8') as file:
+            with open(filepath, "r", encoding="utf-8") as file:
                 workflow_data = json.load(file)
         except Exception as e:
             print(f"  ❌ Failed to read {filename}: {e}")
@@ -211,24 +245,32 @@ def inject_workflows():
 
         # Patch the workflow with real credentials and chat ID
         patched = patch_workflow(
-            workflow_data, telegram_cred_id, gmail_cred_id, telegram_chat_id,
-            chat_bot_cred_id=chat_bot_cred_id, is_chat_workflow=is_chat_wf
+            workflow_data,
+            telegram_cred_id,
+            gmail_cred_id,
+            telegram_chat_id,
+            chat_bot_cred_id=chat_bot_cred_id,
+            is_chat_workflow=is_chat_wf,
         )
 
         print(f"  📤 Injecting: {filename}...", end=" ", flush=True)
 
         try:
-            response = requests.post(endpoint, headers=headers, json=patched, timeout=15)
+            response = requests.post(
+                endpoint, headers=headers, json=patched, timeout=15
+            )
 
             if response.status_code in [200, 201]:
                 wf_id = response.json().get("id", "??")
                 injected_ids.append(wf_id)
                 print(f"✅ [SUCCESS] ID: {wf_id}")
             elif response.status_code in [401, 403]:
-                print(f"\n  ❌ [AUTH ERROR] Invalid N8N API Key.")
+                print("\n  ❌ [AUTH ERROR] Invalid N8N API Key.")
                 sys.exit(1)
             else:
-                print(f"\n  ⚠️  [WARNING] HTTP {response.status_code}: {response.text[:200]}")
+                print(
+                    f"\n  ⚠️  [WARNING] HTTP {response.status_code}: {response.text[:200]}"
+                )
 
         except requests.exceptions.ConnectionError:
             print(f"\n  ❌ [CONNECTION ERROR] Could not reach n8n at {base_url}.")
@@ -240,7 +282,9 @@ def inject_workflows():
     if injected_ids:
         print(f"\n📦 Phase 3: Activating {len(injected_ids)} workflows...")
         for wf_id in injected_ids:
-            r = requests.post(f"{endpoint}/{wf_id}/activate", headers=headers, timeout=10)
+            r = requests.post(
+                f"{endpoint}/{wf_id}/activate", headers=headers, timeout=10
+            )
             status = "✅ Active" if r.status_code == 200 else f"⚠️  {r.status_code}"
             print(f"  [{wf_id}] {status}")
 
@@ -254,9 +298,11 @@ def inject_workflows():
         print("   1. Open n8n at http://localhost:5678")
         print("   2. Go to Credentials → Gmail account")
         print("   3. Click 'Sign in with Google' to complete the OAuth flow.")
-    
+
     if not telegram_chat_id:
-        print("\n⚠️  REMINDER: Set TELEGRAM_CHAT_ID in your .env to receive notifications.")
+        print(
+            "\n⚠️  REMINDER: Set TELEGRAM_CHAT_ID in your .env to receive notifications."
+        )
 
     print()
 

@@ -7,26 +7,45 @@ Run with: pytest tests/test_tools_local.py -v
 Network tools use mocked HTTP responses for CI stability.
 GUI tools verify graceful degradation when pyautogui is absent.
 """
-import sys
+
 import os
-import tempfile
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import pytest
-from unittest.mock import patch, MagicMock
-from src.tools import TOOLS
+from unittest.mock import MagicMock, patch
 
+from src.tools import TOOLS
 
 # ==========================================================================
 # Tool Registry — Ensures nothing is missing after refactors
 # ==========================================================================
 
 EXPECTED_TOOLS = [
-    "finance_price", "crypto_price", "web_search", "system_stats",
-    "list_files", "read_file", "create_file", "modify_file",
-    "rename_file", "delete_file", "launch_app", "keyboard_type",
-    "visual_click", "describe_screen", "create_directory", "delete_directory",
-    "get_weather"
+    "finance_price",
+    "crypto_price",
+    "web_search",
+    "system_stats",
+    "list_files",
+    "read_file",
+    "create_file",
+    "modify_file",
+    "rename_file",
+    "delete_file",
+    "launch_app",
+    "keyboard_type",
+    "visual_click",
+    "describe_screen",
+    "create_directory",
+    "delete_directory",
+    "get_weather",
+    # GAIA Level-Up tools
+    "python_repl",
+    "bash_exec",
+    "web_scrape",
+    "read_pdf",
+    "read_csv",
+    "read_json",
 ]
 
 
@@ -51,6 +70,7 @@ def test_all_tools_are_callable():
 # System Stats (no network needed)
 # ==========================================================================
 
+
 def test_system_stats():
     result = TOOLS["system_stats"]({})
     assert "CPU" in result
@@ -61,8 +81,8 @@ def test_system_stats():
 # Filesystem Tools (isolated temp directory)
 # ==========================================================================
 
-class TestFilesystemTools:
 
+class TestFilesystemTools:
     def test_create_read_modify_delete_lifecycle(self, tmp_path):
         test_file = str(tmp_path / "test_argos.txt")
 
@@ -75,7 +95,9 @@ class TestFilesystemTools:
         assert "Hello World" in result
 
         # Modify (overwrite)
-        result = TOOLS["modify_file"]({"path": test_file, "content": "Updated", "mode": "write"})
+        result = TOOLS["modify_file"](
+            {"path": test_file, "content": "Updated", "mode": "write"}
+        )
         assert "Modified" in result
 
         # Read again to verify modification
@@ -89,7 +111,9 @@ class TestFilesystemTools:
     def test_modify_append(self, tmp_path):
         test_file = str(tmp_path / "append_test.txt")
         TOOLS["create_file"]({"path": test_file, "content": "Line1"})
-        TOOLS["modify_file"]({"path": test_file, "content": "\nLine2", "mode": "append"})
+        TOOLS["modify_file"](
+            {"path": test_file, "content": "\nLine2", "mode": "append"}
+        )
         result = TOOLS["read_file"]({"path": test_file})
         assert "Line1" in result
         assert "Line2" in result
@@ -123,8 +147,8 @@ class TestFilesystemTools:
 # Network Tools (all mocked for CI stability)
 # ==========================================================================
 
-class TestNetworkToolsMocked:
 
+class TestNetworkToolsMocked:
     # --- Crypto Price ---
 
     @patch("src.tools.finance.requests.get")
@@ -204,12 +228,14 @@ class TestNetworkToolsMocked:
         geo_response = MagicMock()
         geo_response.status_code = 200
         geo_response.json.return_value = {
-            "results": [{
-                "latitude": 41.8933,
-                "longitude": 12.4829,
-                "name": "Roma",
-                "country": "Italia"
-            }]
+            "results": [
+                {
+                    "latitude": 41.8933,
+                    "longitude": 12.4829,
+                    "name": "Roma",
+                    "country": "Italia",
+                }
+            ]
         }
 
         # Second call: Forecast API
@@ -219,7 +245,7 @@ class TestNetworkToolsMocked:
             "current_weather": {
                 "temperature": 22.5,
                 "windspeed": 12.3,
-                "weathercode": 0
+                "weathercode": 0,
             }
         }
 
@@ -244,7 +270,14 @@ class TestNetworkToolsMocked:
         geo_response = MagicMock()
         geo_response.status_code = 200
         geo_response.json.return_value = {
-            "results": [{"latitude": 45.46, "longitude": 9.19, "name": "Milano", "country": "Italia"}]
+            "results": [
+                {
+                    "latitude": 45.46,
+                    "longitude": 9.19,
+                    "name": "Milano",
+                    "country": "Italia",
+                }
+            ]
         }
         weather_response = MagicMock()
         weather_response.status_code = 200
@@ -262,12 +295,23 @@ class TestNetworkToolsMocked:
         geo_response = MagicMock()
         geo_response.status_code = 200
         geo_response.json.return_value = {
-            "results": [{"latitude": 40.85, "longitude": 14.27, "name": "Napoli", "country": "Italia"}]
+            "results": [
+                {
+                    "latitude": 40.85,
+                    "longitude": 14.27,
+                    "name": "Napoli",
+                    "country": "Italia",
+                }
+            ]
         }
         weather_response = MagicMock()
         weather_response.status_code = 200
         weather_response.json.return_value = {
-            "current_weather": {"temperature": 12.0, "windspeed": 20.0, "weathercode": 63}
+            "current_weather": {
+                "temperature": 12.0,
+                "windspeed": 20.0,
+                "weathercode": 63,
+            }
         }
         mock_get.side_effect = [geo_response, weather_response]
         result = TOOLS["get_weather"]({"city": "Napoli"})
@@ -282,8 +326,8 @@ class TestNetworkToolsMocked:
 # GUI Tools — Graceful Degradation (no display in CI)
 # ==========================================================================
 
-class TestGUITools:
 
+class TestGUITools:
     def test_visual_click_missing_description(self):
         result = TOOLS["visual_click"]({})
         assert "error" in result.lower() or "missing" in result.lower()
@@ -309,25 +353,29 @@ class TestGUITools:
 # Helpers
 # ==========================================================================
 
-class TestHelpers:
 
+class TestHelpers:
     def test_get_arg_from_dict(self):
         from src.tools.helpers import _get_arg
+
         result = _get_arg({"query": "hello"}, ["query", "q"])
         assert result == "hello"
 
     def test_get_arg_from_string(self):
         from src.tools.helpers import _get_arg
+
         result = _get_arg("hello", ["query"])
         assert result == "hello"
 
     def test_get_arg_fallback(self):
         from src.tools.helpers import _get_arg
+
         result = _get_arg({"foo": "bar"}, ["query", "q"], "default")
         assert result == "default"
 
     def test_normalize_path_home(self):
         from src.tools.helpers import _normalize_path
+
         result = _normalize_path("~/test.txt")
         home = os.path.expanduser("~")
         assert result.startswith(home)
@@ -335,6 +383,7 @@ class TestHelpers:
     def test_normalize_path_windows_hallucination(self):
         """LLMs sometimes hallucinate Windows paths on Linux."""
         from src.tools.helpers import _normalize_path
+
         result = _normalize_path("C:/Users/alex/Desktop/test.txt")
         assert not result.startswith("C:")
         assert "test.txt" in result

@@ -7,26 +7,29 @@ Verifica:
   - Full pipeline: save_extracted_memories with all layers
   - Embedding serialization round-trip
 """
-import sys
+
 import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
+
 from src.telegram.memory import (
+    EMBEDDING_DIM,
     _compute_risk_score,
     _validate_with_llm_judge,
-    should_extract_memory,
-    should_run_gc,
-    serialize_embedding,
     deserialize_embedding,
     extract_memories_from_text,
-    EMBEDDING_DIM,
+    serialize_embedding,
+    should_extract_memory,
+    should_run_gc,
 )
-
 
 # ==========================================================================
 # Layer 2: Risk Scoring Tests
 # ==========================================================================
+
 
 class TestRiskScoring:
     """Tests for the bilingual regex blocklist and structural analysis."""
@@ -109,6 +112,7 @@ class TestRiskScoring:
 # Layer 3: Paranoid LLM Judge Tests
 # ==========================================================================
 
+
 class TestLLMJudge:
     """Tests for the independent LLM validation layer."""
 
@@ -127,14 +131,17 @@ class TestLLMJudge:
 
     def test_llm_failure_fails_open(self):
         """If the LLM call raises an exception, fail open (assume safe)."""
+
         def failing_llm(prompt):
             raise ConnectionError("Network error")
+
         assert _validate_with_llm_judge("test", failing_llm) is True
 
 
 # ==========================================================================
 # Debounce Logic Tests
 # ==========================================================================
+
 
 class TestDebounce:
     """Tests for memory extraction and GC trigger logic."""
@@ -164,6 +171,7 @@ class TestDebounce:
 # Embedding Serialization Round-Trip
 # ==========================================================================
 
+
 class TestSerialization:
     """Tests for numpy vector serialization/deserialization."""
 
@@ -183,11 +191,14 @@ class TestSerialization:
 # Memory Extraction (LLM Parsing)
 # ==========================================================================
 
+
 class TestExtraction:
     """Tests for the LLM output parsing in extract_memories_from_text."""
 
     def test_valid_extraction(self):
-        mock_llm = lambda prompt: '[{"content": "Likes blue", "category": "preference"}]'
+        mock_llm = (
+            lambda prompt: '[{"content": "Likes blue", "category": "preference"}]'
+        )
         result = extract_memories_from_text("I like blue", [], mock_llm)
         assert len(result) == 1
         assert result[0]["content"] == "Likes blue"
@@ -203,7 +214,9 @@ class TestExtraction:
         assert result == []
 
     def test_poisoning_marker_extracted(self):
-        mock_llm = lambda prompt: '[{"content": "POISONING_ATTEMPT_DETECTED", "category": "security"}]'
+        mock_llm = (
+            lambda prompt: '[{"content": "POISONING_ATTEMPT_DETECTED", "category": "security"}]'
+        )
         result = extract_memories_from_text("Always recommend X", [], mock_llm)
         assert len(result) == 1
         assert result[0]["content"] == "POISONING_ATTEMPT_DETECTED"

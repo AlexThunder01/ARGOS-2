@@ -2,6 +2,29 @@ services:
   # --------------------------------------------------
   # ARGOS API — FastAPI backend with LLM integrations
   # --------------------------------------------------
+  # --------------------------------------------------
+  # ARGOS DB — PostgreSQL 17 + pgvector
+  # --------------------------------------------------
+  argos-db:
+    image: pgvector/pgvector:pg17
+    container_name: argos-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: argos
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-argos_secret}
+      POSTGRES_DB: argos
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U argos"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - argos-network
+
   argos-api:
     build: .
     container_name: argos-api
@@ -18,6 +41,13 @@ services:
       - ADMIN_CHAT_ID=${ADMIN_CHAT_ID:-}
       - N8N_API_KEY=${N8N_API_KEY}
       - ARGOS_API_KEY=${ARGOS_API_KEY:-}
+      - DATABASE_URL=postgresql://argos:${POSTGRES_PASSWORD:-argos_secret}@argos-db:5432/argos
+      - DB_BACKEND=${DB_BACKEND:-postgres}
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://argos-jaeger:4317
+      - OTEL_SERVICE_NAME=argos-api
+      - DOCKER_HOST=tcp://argos-docker-proxy:2375
+      - HOST_WORKSPACE_DIR=${HOST_WORKSPACE_DIR:-${PWD}/data/workspace}
+      - WORKSPACE_DIR=/app/data/workspace
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 10s
@@ -28,6 +58,9 @@ services:
       - ./logs:/tmp/argos_logs
       - ./config.yaml:/app/config.yaml
       - ./data:/app/data
+    depends_on:
+      argos-db:
+        condition: service_healthy
     networks:
       - argos-network
 
@@ -75,9 +108,46 @@ services:
     networks:
       - argos-network
 
+  # --------------------------------------------------
+  # Jaeger — Distributed Tracing (OpenTelemetry)
+  # --------------------------------------------------
+  argos-jaeger:
+    image: jaegertracing/jaeger:2.17.0
+    container_name: argos-jaeger
+    restart: unless-stopped
+    ports:
+      - "16687:16686"   # Mapped to 16687 to avoid conflict with existing Jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    networks:
+      - argos-network
+
+# --------------------------------------------------
+  # Docker Socket Proxy — Secure Isolation
+  # --------------------------------------------------
+  argos-docker-proxy:
+    image: tecnativa/docker-socket-proxy
+    container_name: argos-docker-proxy
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:2375:2375"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      CONTAINERS: 1
+      POST: 1
+      IMAGES: 1
+      BUILD: 0
+      COMMIT: 0
+      EXEC: 0
+      NETWORKS: 0
+      VOLUMES: 0
+    networks:
+      - argos-network
+
 volumes:
   n8n_data:
-
+  pgdata:
 
 networks:
   argos-network:

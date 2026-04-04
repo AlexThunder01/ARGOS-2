@@ -1,7 +1,10 @@
 """
 Test del Planner — verifica il parsing dell'output LLM secondo lo schema vincolato.
 """
-import sys, os
+
+import os
+import sys
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.planner.planner import parse_planner_response

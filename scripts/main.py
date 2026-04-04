@@ -1,154 +1,184 @@
 #!/usr/bin/env python3
-import sys
-import os
-import json
-import time
+"""
+ARGOS-2 CLI — Interactive Terminal Interface.
 
-# Aggiunge la root del progetto al path per trovare i moduli (src)
+Provides a rich command-line experience for direct interaction with the
+CoreAgent. Supports three memory modes and voice input.
+
+Usage:
+    python3 scripts/main.py                  # Stateless (default)
+    python3 scripts/main.py --session        # Ephemeral RAM memory
+    python3 scripts/main.py --memory         # Persistent DB memory
+    python3 scripts/main.py --user-id 42     # Custom user ID
+"""
+
+import argparse
+import os
+import sys
+
+# Project root on sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.agent import JarvisAgent
-from src.tools import TOOLS
-from src.voice.voice_manager import speak_tts as speak, init_stt
 from src.config import ENABLE_VOICE
-from src.utils import extract_json, print_banner
-from src.planner.planner import parse_planner_response
-from src.world_model.state import WorldState
-from src.logging.tracer import setup_tracer, log_step, log_decision
+from src.core import CoreAgent
+from src.logging.tracer import setup_tracer
+from src.utils import print_banner
+
+# ==========================================================================
+# CLI Security Gate — Interactive (y/N) Prompt
+# ==========================================================================
+
+
+def cli_confirmation_callback(tool_name: str, tool_input: dict) -> bool:
+    """Prompts the user for authorization before executing a dangerous tool."""
+    print(f"\n{'='*40}")
+    print("⚠️  SECURITY AUTHORIZATION REQUIRED")
+    print(f"   Action: {tool_name.upper()}")
+    print(f"   Data:   {tool_input}")
+    print(f"{'='*40}")
+    choice = input("👉 Authorize execution? (y/N): ").lower().strip()
+    if choice != "y":
+        print("🚫 ACTION DENIED BY USER.")
+        return False
+    return True
+
+
+# ==========================================================================
+# Argument Parser
+# ==========================================================================
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="ARGOS-2 CLI — Interactive Terminal Agent",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Memory Modes:
+  (default)     Stateless — each command is isolated
+  --session     Ephemeral — RAM-only memory for the current session
+  --memory      Persistent — full RAG memory saved to database
+        """,
+    )
+    memory_group = parser.add_mutually_exclusive_group()
+    memory_group.add_argument(
+        "--session",
+        action="store_true",
+        help="Enable ephemeral session memory (RAM-only, cleared on exit)",
+    )
+    memory_group.add_argument(
+        "--memory",
+        action="store_true",
+        help="Enable persistent RAG memory (same database as Telegram)",
+    )
+    parser.add_argument(
+        "--user-id",
+        type=int,
+        default=None,
+        help="Override the auto-generated user ID (default: sha256 hash of $USER)",
+    )
+    parser.add_argument(
+        "--max-steps",
+        type=int,
+        default=int(os.getenv("MAX_TOOL_LOOPS", "10")),
+        help="Maximum tool execution steps per task (default: 10)",
+    )
+    return parser.parse_args()
+
+
+# ==========================================================================
+# Main Loop
+# ==========================================================================
+
 
 def main():
+    args = parse_args()
+
+    # Determine memory mode
+    if args.memory:
+        memory_mode = "persistent"
+    elif args.session:
+        memory_mode = "session"
+    else:
+        memory_mode = "off"
 
     print_banner()
     logger = setup_tracer()
 
+    # Initialize CoreAgent
     try:
-        jarvis = JarvisAgent()
+        agent = CoreAgent(
+            memory_mode=memory_mode,
+            user_id=args.user_id,
+            max_steps=args.max_steps,
+            confirmation_callback=cli_confirmation_callback,
+        )
     except Exception as e:
         logger.error(f"ARGOS startup error: {e}")
         print(f"❌ ARGOS startup error: {e}")
         return
 
-    state = WorldState()
-
-    # Inizializza STT se la voce è abilitata
+    # Voice setup (optional)
     voice_ok = False
     if ENABLE_VOICE:
-        from src.voice.hybrid_input import start_hybrid_listener, stop_hybrid_listener, get_hybrid_input
+        from src.voice.hybrid_input import (
+            get_hybrid_input,
+            start_hybrid_listener,
+            stop_hybrid_listener,
+        )
+
         voice_ok = start_hybrid_listener()
         if not voice_ok:
-            logger.warning("Voice enabled but microphone unavailable, falling back to text input.")
+            logger.warning(
+                "Voice enabled but microphone unavailable, falling back to text input."
+            )
 
-    logger.info(f"\n🤖 Argos ONLINE [Backend: {jarvis.backend}] [Model: {jarvis.model}]")
-    if ENABLE_VOICE: speak("Systems online.")
+    # Status line
+    mode_label = {
+        "off": "Stateless",
+        "session": "Session Memory",
+        "persistent": "Persistent Memory",
+    }
+    logger.info(
+        f"\n🤖 Argos ONLINE [Backend: {agent.backend}] [Model: {agent.model}] "
+        f"[Memory: {mode_label[memory_mode]}]"
+    )
+    if ENABLE_VOICE:
+        from src.voice.voice_manager import speak_tts as speak
 
+        speak("Systems online.")
+
+    # Interactive loop
     while True:
         try:
-            # 1. User Input (Hybrid or Text)
+            # User Input
             if ENABLE_VOICE and voice_ok:
                 user_input = get_hybrid_input("\n👤 You (type or say 'Argos...'): ")
             else:
                 user_input = input("\n👤 You: ")
-                
-            if not user_input: continue
-            if user_input.lower() in ["exit", "quit", "stop"]:
+
+            if not user_input:
+                continue
+            if user_input.lower() in ("exit", "quit", "stop"):
                 logger.info("Session terminated by user.")
                 if ENABLE_VOICE and voice_ok:
                     stop_hybrid_listener()
                 break
 
-            # Update the WorldState with the current task
-            state.reset()
-            state.current_task = user_input
-            jarvis.add_message("user", user_input)
+            # Execute through CoreAgent
+            print("⏳ ...", end="\r")
+            result = agent.run_task(user_input)
+            print(" " * 10, end="\r")
 
-            # 2. Reasoning Loop
-            loop_count = 0
-            while True:
-                print("⏳ ...", end="\r")
-                raw_response = jarvis.think()
-                print(" " * 10, end="\r")
+            # Display result
+            if result.history:
+                for step in result.history:
+                    status = "✅" if step.success else "❌"
+                    print(f"  {status} [{step.tool}] {step.result[:120]}")
 
-                decision = parse_planner_response(raw_response)
-                
-                log_decision(logger, decision.thought, decision.tool or "done", decision.confidence)
+            print(f"🤖 Argos: {result.response}")
 
-                # If the agent has finished execution (final text is outside JSON block)
-                if decision.done:
-                    final_text = decision.response or raw_response
-                    print(f"🤖 Argos: {final_text}")
-                    jarvis.add_message("assistant", raw_response)
-                    logger.debug(f"Final response: {final_text[:150]}")
-                    if ENABLE_VOICE: speak(str(final_text))
-                    break
-
-                tool_name = decision.tool
-                tool_input = decision.tool_input
-
-                # Check if the tool exists
-                if not tool_name or tool_name not in TOOLS:
-                    msg = f"Tool '{tool_name}' unknown."
-                    logger.error(msg)
-                    print(f"❌ Error: {msg}")
-                    break
-
-                # Infinite loop protection
-                max_loops = int(os.getenv("MAX_TOOL_LOOPS", "10"))
-                loop_count += 1
-                if loop_count > max_loops:
-                    msg = f"STOP: Too many automatic actions (limit: {max_loops})."
-                    logger.warning(msg)
-                    print(f"\n🛑 {msg}")
-                    jarvis.add_message("system", f"{msg} Request user input.")
-                    break
-
-                print(f"⚙️  TOOL DETECTED: {tool_name}")
-
-                # --- 🔒 SECURITY GATE 🔒 ---
-                dangerous_tools = [
-                    "create_file", "modify_file", "rename_file", "create_directory",
-                    "delete_directory", "delete_file", "read_file", "visual_click", 
-                    "keyboard_type", "launch_app"
-                ]
-
-                execute = True
-
-                if tool_name in dangerous_tools:
-                    print(f"\n{'='*40}")
-                    print(f"⚠️  SECURITY AUTHORIZATION REQUIRED")
-                    print(f"   Action: {tool_name.upper()}")
-                    print(f"   Data:   {tool_input}")
-                    print(f"{'='*40}")
-                    logger.warning(f"Security Gate: confirmation requested for '{tool_name}' | input={tool_input}")
-
-                    choice = input("👉 Authorize execution? (y/N): ").lower().strip()
-                    if choice != 'y':
-                        print("🚫 ACTION DENIED BY USER.")
-                        logger.info(f"Action '{tool_name}' denied by user.")
-                        execute = False
-                        state.record_action(tool_name, tool_input, "Denied by user.", False)
-                        
-                        # Inject into the reasoning loop that the user blocked the command
-                        jarvis.add_message("assistant", json.dumps({"action": {"tool": tool_name, "input": tool_input}}))
-                        jarvis.add_message("user", "ACTION DENIED BY USER. STOP.")
-                        break
-
-                # Actual execution
-                if execute:
-                    try:
-                        result = TOOLS[tool_name](tool_input)
-                        success = not str(result).startswith(("Error", "Errore"))
-                    except Exception as e:
-                        result = f"Python Tool Error: {e}"
-                        success = False
-
-                    state.record_action(tool_name, tool_input, str(result), success)
-                    log_step(logger, state, tool_name, str(result), success)
-
-                    logger.debug(f"Tool output: {result}")
-
-                    # Feedback to the agent's brain
-                    jarvis.add_message("assistant", json.dumps({"action": {"tool": tool_name, "input": tool_input}}))
-                    jarvis.add_message("user", f"TOOL RESULT: {result}")
+            if ENABLE_VOICE:
+                speak(str(result.response))
 
         except KeyboardInterrupt:
             logger.info("Forced exit (Ctrl+C).")
@@ -157,6 +187,7 @@ def main():
         except Exception as e:
             logger.error(f"Main Loop Error: {e}")
             print(f"❌ Main Loop Error: {e}")
+
 
 if __name__ == "__main__":
     main()

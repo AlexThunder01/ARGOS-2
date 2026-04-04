@@ -4,17 +4,19 @@ la risposta HTTP degli endpoint senza avviare il server reale.
 
 Patches the DB connection to use an in-memory SQLite database.
 """
-import sys
+
 import os
 import sqlite3
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Set env vars BEFORE importing server
 os.environ["ARGOS_API_KEY"] = ""  # Permissive mode for testing
 os.environ["ADMIN_CHAT_ID"] = "12345"
+os.environ["DB_BACKEND"] = "sqlite"
+os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = ""
 
-import pytest
 from unittest.mock import patch
 
 
@@ -29,7 +31,10 @@ def _make_test_db():
 
     migration_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "src", "db", "migrations", "001_telegram_module.py"
+        "src",
+        "db",
+        "migrations",
+        "001_telegram_module.py",
     )
     with open(migration_path) as f:
         content = f.read()
@@ -47,15 +52,14 @@ def _make_test_db():
     return conn
 
 
-# Patch the connection pool and db._get_conn BEFORE importing the app
+# Patch the connection pool BEFORE importing the app
 _test_conn = _make_test_db()
 
 _patcher1 = patch("src.db.connection.get_connection", return_value=_test_conn)
-_patcher2 = patch("src.telegram.db._get_conn", return_value=_test_conn)
 _patcher1.start()
-_patcher2.start()
 
 from fastapi.testclient import TestClient
+
 from api.server import app
 
 client = TestClient(app)
@@ -65,8 +69,8 @@ client = TestClient(app)
 # Health & Status Endpoints
 # ==========================================================================
 
-class TestHealthEndpoints:
 
+class TestHealthEndpoints:
     def test_status_returns_200(self):
         r = client.get("/status")
         assert r.status_code == 200
@@ -83,8 +87,8 @@ class TestHealthEndpoints:
 # Email HITL Endpoints
 # ==========================================================================
 
-class TestEmailEndpoints:
 
+class TestEmailEndpoints:
     def test_consume_nonexistent_returns_404(self):
         r = client.post("/pending_email/nonexistent-id/consume")
         assert r.status_code == 404
@@ -94,8 +98,8 @@ class TestEmailEndpoints:
 # Telegram Endpoint — Basic Validation
 # ==========================================================================
 
-class TestTelegramEndpoint:
 
+class TestTelegramEndpoint:
     def test_missing_fields_returns_422(self):
         """Missing required fields should return 422 Unprocessable Entity."""
         r = client.post("/telegram/chat", json={})

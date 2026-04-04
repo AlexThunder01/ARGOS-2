@@ -10,22 +10,25 @@ questo modulo lo analizza per estrarre:
 - livello di ambiguità
 - necessità di conferma
 """
-import json
+
 import re
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import List
 
 
 @dataclass
 class ParsedIntent:
     """Intent strutturato estratto dal linguaggio naturale."""
-    action: str                          # es. "web_search", "launch_app", "create_file"
+
+    action: str  # es. "web_search", "launch_app", "create_file"
     params: dict = field(default_factory=dict)
-    raw_text: str = ""                   # testo originale trascritto
-    confidence: float = 1.0             # 0.0–1.0
+    raw_text: str = ""  # testo originale trascritto
+    confidence: float = 1.0  # 0.0–1.0
     needs_confirmation: bool = False
     ambiguous: bool = False
-    alternatives: List[str] = field(default_factory=list)  # azioni alternative possibili
+    alternatives: List[str] = field(
+        default_factory=list
+    )  # azioni alternative possibili
 
 
 # Pattern di intenti comuni — regole deterministiche PRIMA dell'LLM
@@ -38,8 +41,10 @@ INTENT_PATTERNS = [
         "params_fn": lambda m: {"app_name": "firefox"},
     },
     {
-        "patterns": [r"cerca\s+(.+?)(?:\s+su(?:l)?\s+(?:internet|web|google))?$",
-                     r"cercare\s+(.+)"],
+        "patterns": [
+            r"cerca\s+(.+?)(?:\s+su(?:l)?\s+(?:internet|web|google))?$",
+            r"cercare\s+(.+)",
+        ],
         "action": "web_search",
         "params_fn": lambda m: {"query": m.group(1).strip()},
     },
@@ -56,19 +61,27 @@ INTENT_PATTERNS = [
         "params_fn": lambda m: {"filename": m.group(1)},
     },
     {
-        "patterns": [r"elimina\s+(?:il\s+)?file\s+(\S+)", r"cancella\s+(?:il\s+)?file\s+(\S+)"],
+        "patterns": [
+            r"elimina\s+(?:il\s+)?file\s+(\S+)",
+            r"cancella\s+(?:il\s+)?file\s+(\S+)",
+        ],
         "action": "delete_file",
         "params_fn": lambda m: {"filename": m.group(1)},
     },
     {
-        "patterns": [r"leggi\s+(?:il\s+)?file\s+(\S+)", r"mostra(?:mi)?\s+(?:il\s+)?file\s+(\S+)"],
+        "patterns": [
+            r"leggi\s+(?:il\s+)?file\s+(\S+)",
+            r"mostra(?:mi)?\s+(?:il\s+)?file\s+(\S+)",
+        ],
         "action": "read_file",
         "params_fn": lambda m: {"filename": m.group(1)},
     },
     {
-        "patterns": [r"(?:mostra(?:mi)?|elenca)\s+(?:i\s+)?file",
-                     r"cosa c'è\s+(?:sul|nel)\s+desktop",
-                     r"lista\s+(?:i\s+)?file"],
+        "patterns": [
+            r"(?:mostra(?:mi)?|elenca)\s+(?:i\s+)?file",
+            r"cosa c'è\s+(?:sul|nel)\s+desktop",
+            r"lista\s+(?:i\s+)?file",
+        ],
         "action": "list_files",
         "params_fn": lambda m: {"path": "."},
     },
@@ -85,8 +98,11 @@ INTENT_PATTERNS = [
     },
     # --- Visione / Schermo ---
     {
-        "patterns": [r"cosa\s+vedi", r"descrivi\s+(?:lo\s+)?schermo",
-                     r"che\s+(?:cosa\s+)?c'è\s+sullo\s+schermo"],
+        "patterns": [
+            r"cosa\s+vedi",
+            r"descrivi\s+(?:lo\s+)?schermo",
+            r"che\s+(?:cosa\s+)?c'è\s+sullo\s+schermo",
+        ],
         "action": "describe_screen",
         "params_fn": lambda m: {"question": "Cosa vedi sullo schermo?"},
     },
@@ -103,20 +119,26 @@ INTENT_PATTERNS = [
 ]
 
 # Azioni che richiedono sempre conferma vocale
-CONFIRM_ACTIONS = {"delete_file", "delete_directory", "modify_file", "visual_click", "keyboard_type"}
+CONFIRM_ACTIONS = {
+    "delete_file",
+    "delete_directory",
+    "modify_file",
+    "visual_click",
+    "keyboard_type",
+}
 
 
 def parse_intent(text: str) -> ParsedIntent:
     """
     Parsa il testo trascritto in un intento strutturato.
-    
+
     Strategia ibrida:
     1. Prova match deterministico (regole regex) — veloce e predicibile
     2. If no match → return generic intent "ask_llm" (da processare dal planner)
-    
+
     Args:
         text: testo trascritto dallo STT
-        
+
     Returns:
         ParsedIntent con azione, parametri e metadata
     """
@@ -130,7 +152,7 @@ def parse_intent(text: str) -> ParsedIntent:
 
     clean = text.strip().lower()
     # Rimuovi punteggiatura finale
-    clean = re.sub(r'[.!?]+$', '', clean).strip()
+    clean = re.sub(r"[.!?]+$", "", clean).strip()
 
     # Cerca match deterministico
     for pattern_group in INTENT_PATTERNS:
@@ -173,5 +195,9 @@ def format_confirmation_prompt(intent: ParsedIntent) -> str:
         "keyboard_type": "scrivere",
     }
     action_desc = action_names.get(intent.action, intent.action)
-    target = intent.params.get("filename") or intent.params.get("description") or intent.params.get("text", "")
+    target = (
+        intent.params.get("filename")
+        or intent.params.get("description")
+        or intent.params.get("text", "")
+    )
     return f"Vuoi che procedo a {action_desc} '{target}'?"

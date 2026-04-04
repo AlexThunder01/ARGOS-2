@@ -2,8 +2,10 @@
 Shared n8n API client configuration.
 Used by inject_n8n.py and clear_n8n.py.
 """
+
 import os
 import sys
+
 from dotenv import load_dotenv
 
 
@@ -26,7 +28,7 @@ def get_n8n_config():
     headers = {
         "X-N8N-API-KEY": api_key,
         "Accept": "application/json",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
     }
 
     return base_url, headers
