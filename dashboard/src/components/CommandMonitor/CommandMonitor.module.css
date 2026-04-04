@@ -1,100 +1,130 @@
-.monitor {
+.sidebar {
+  grid-area: sidebar;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 16px 12px;
   display: flex;
   flex-direction: column;
-  flex: 1;
-  overflow: hidden;
-}
-
-.header {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border-light);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.header h3 {
-  font-family: var(--mono);
-  font-size: 0.9rem;
-  color: var(--cyan-glow);
-  letter-spacing: 0.1em;
-}
-
-.tag {
-  color: #00ff00;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  font-weight: bold;
-  animation: pulse 2s infinite ease-in-out;
-}
-
-.content {
-  padding: 20px;
-  flex: 1;
+  gap: 20px;
   overflow-y: auto;
 }
 
-.errorBox {
-  padding: 16px;
-  background: rgba(255, 74, 74, 0.1);
-  border: 1px solid rgba(255, 74, 74, 0.3);
-  color: #ff4a4a;
-  border-radius: 8px;
-  font-size: 0.85rem;
-  font-family: var(--mono);
-}
-
-.loading {
-  color: var(--text-muted);
-  font-family: var(--mono);
-  text-align: center;
-  font-size: 0.9rem;
-  margin-top: 40px;
-}
-
-.grid {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.card {
-  background: rgba(0, 0, 0, 0.2);
-  border: 1px solid var(--border-light);
-  border-radius: 8px;
-  padding: 12px;
-}
-
-.cardHeader {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--mono);
-  font-size: 0.9rem;
-  color: var(--text-main);
+.sectionLabel {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--text2);
+  text-transform: uppercase;
   margin-bottom: 8px;
 }
 
-.statusUp {
-  width: 8px;
-  height: 8px;
-  background: #00ff00;
-  border-radius: 50%;
-  box-shadow: 0 0 5px #00ff00;
-}
-
-.statusDown {
-  width: 8px;
-  height: 8px;
-  background: #ff4a4a;
-  border-radius: 50%;
-  box-shadow: 0 0 5px #ff4a4a;
-}
-
-.metrics {
+.serviceRow {
   display: flex;
-  gap: 16px;
-  font-family: var(--mono);
-  font-size: 0.8rem;
-  color: var(--text-muted);
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.svcDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.svcDotUp {
+  background: var(--success);
+  box-shadow: 0 0 5px var(--success);
+}
+
+.svcDotWarn {
+  background: var(--warning);
+  box-shadow: 0 0 5px var(--warning);
+}
+
+.svcDotDown {
+  background: var(--danger);
+  box-shadow: 0 0 5px var(--danger);
+}
+
+.svcName {
+  font-size: 11px;
+  color: var(--text2);
+  flex: 1;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.svcBadge {
+  font-size: 9px;
+  border-radius: 99px;
+  padding: 1px 6px;
+  letter-spacing: 0.5px;
+  font-weight: bold;
+}
+
+.up {
+  background: rgba(52,211,153,0.12);
+  color: var(--success);
+  border: 1px solid rgba(52,211,153,0.2);
+}
+
+.warn {
+  background: rgba(251,191,36,0.12);
+  color: var(--warning);
+  border: 1px solid rgba(251,191,36,0.2);
+}
+
+.down {
+  background: rgba(248,113,113,0.12);
+  color: var(--danger);
+  border: 1px solid rgba(248,113,113,0.2);
+}
+
+.miniBarWrap {
+  margin-bottom: 6px;
+}
+
+.miniBarLabel {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text2);
+  margin-bottom: 4px;
+}
+
+.miniBarLabel span {
+  color: var(--text);
+}
+
+.miniBarTrack {
+  height: 4px;
+  background: rgba(255,255,255,0.07);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.miniBarFill {
+  height: 100%;
+  border-radius: 99px;
+}
+
+.sandboxRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text2);
+  line-height: 1.8;
+}
+
+.sandboxRow span:last-child {
+  color: var(--text);
+}
+
+.sandboxOk {
+  color: var(--success) !important;
+}
+
+.sandboxPurple {
+  color: var(--purple) !important;
 }

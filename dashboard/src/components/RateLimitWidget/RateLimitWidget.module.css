@@ -1,81 +1,90 @@
-.widget {
-  display: flex;
-  flex-direction: column;
-}
-
-.header {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border-light);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.header h3 {
-  font-family: var(--mono);
-  font-size: 0.9rem;
-  color: var(--purple-glow);
-  letter-spacing: 0.1em;
-}
-
-.content {
-  padding: 20px;
-}
-
-.errorBox {
-  padding: 16px;
-  background: rgba(255, 74, 74, 0.1);
-  border: 1px solid rgba(255, 74, 74, 0.3);
-  color: #ff4a4a;
-  border-radius: 8px;
-  font-size: 0.85rem;
-  font-family: var(--mono);
-}
-
-.loading {
-  color: var(--text-muted);
-  font-family: var(--mono);
-  text-align: center;
-  font-size: 0.9rem;
-}
-
-.stats {
+.rightPanel {
+  grid-area: panel;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  padding: 16px 12px;
   display: flex;
   flex-direction: column;
   gap: 20px;
+  overflow-y: auto;
 }
 
-.statBlock {
+.sectionLabel {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--text2);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+/* Rate limit donut */
+.donutWrap {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 8px;
 }
 
-.statLabel {
-  font-family: var(--mono);
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  letter-spacing: 0.05em;
+.donutLabels {
+  text-align: center;
 }
 
-.barBg {
-  width: 100%;
-  height: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 4px;
+.donutVal {
+  font-size: 20px;
+  color: var(--cyan);
+  font-weight: 600;
+  font-family: var(--mono);
+}
+
+.donutSub {
+  font-size: 10px;
+  color: var(--text2);
+}
+
+.statRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.statLabel {
+  font-size: 10px;
+  color: var(--text2);
+}
+
+.statVal {
+  font-size: 11px;
+  color: var(--text);
+  font-family: var(--mono);
+}
+
+.statVal.ok { color: var(--success); }
+.statVal.warn { color: var(--warning); }
+.statVal.err { color: var(--danger); }
+
+/* Minibar */
+.miniBarWrap {
+  margin-bottom: 6px;
+}
+
+.miniBarLabel {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text2);
+  margin-bottom: 4px;
+}
+
+.miniBarTrack {
+  height: 4px;
+  background: rgba(255,255,255,0.07);
+  border-radius: 99px;
   overflow: hidden;
 }
 
-.barFill {
+.miniBarFill {
   height: 100%;
-  border-radius: 4px;
-  transition: width 0.5s ease-out, background-color 0.3s;
-  box-shadow: 0 0 10px currentColor;
-}
-
-.statValues {
-  font-family: var(--mono);
-  font-size: 0.85rem;
-  color: var(--text-main);
-  text-align: right;
+  border-radius: 99px;
+  transition: width 0.3s ease;
 }

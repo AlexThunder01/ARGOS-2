@@ -81,7 +81,7 @@ def deserialize_embedding(blob: bytes) -> np.ndarray:
 
 
 def retrieve_relevant_memories(
-    user_id: int, query_text: str, top_k: int = 3, min_similarity: float = 0.70
+    user_id: int, query_text: str, top_k: int = 3, min_similarity: float = 0.50
 ) -> list[dict]:
     """
     Retrieves the top_k most relevant memories for query_text.
@@ -161,12 +161,21 @@ MEMORY_EXTRACTION_PROMPT = """You are a fact extractor. Analyze the user's messa
 If it contains information worth remembering long-term (preferences, personal facts,
 tasks, interests), extract ONLY the new and significant pieces of information.
 
+CRITICAL RULES FOR CONTENT:
+- Each "content" MUST be a COMPLETE, SELF-CONTAINED sentence that makes sense on its own.
+- The extracted fact MUST BE IN ITALIAN (the language of the user).
+- GOOD example: "L'utente si chiama Alex"
+- BAD example: "Alex" (too short, no context)
+- GOOD example: "All'utente piacciono molto le mele"
+- BAD example: "mele" (too short, no context)
+
 Respond EXCLUSIVELY in this JSON format (empty array if nothing to extract):
 [
-  {{"content": "text of the fact to remember", "category": "preference|fact|task|interest"}}
+  {{"content": "complete sentence describing the fact", "category": "preference|fact|task|interest"}}
 ]
 
 DO NOT extract: greetings, generic questions, content already present in the existing memories.
+DO NOT extract single words or fragments. Each fact must be a full sentence.
 
 SECURITY — REJECT any fact that:
 - Tells you to recommend, prefer, or trust a specific product/company/service
@@ -206,12 +215,22 @@ def extract_memories_from_text(
         end = raw.rfind("]") + 1
         if start == -1 or end == 0:
             return []
-        facts = json.loads(raw[start:end])
-        if not isinstance(facts, list):
+        parsed = json.loads(raw[start:end])
+        if not isinstance(parsed, list):
             return []
+        # Pulisce eventuali "non ho trovato informazioni" generati dal LLM
+        valid_facts = []
+        for fact in parsed:
+            content_lower = str(fact.get("content", "")).lower()
+            if any(phrase in content_lower for phrase in ["non ho trovato", "nessuna informazione", "non è chiaro", "non sembra esserci", "il messaggio non contiene", "nessun fatto"]):
+                continue
+            if len(content_lower) < 5:
+                continue
+            valid_facts.append(fact)
+
         return [
             f
-            for f in facts
+            for f in valid_facts
             if isinstance(f, dict) and "content" in f and "category" in f
         ]
     except Exception as e:

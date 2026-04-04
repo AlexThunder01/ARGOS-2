@@ -47,6 +47,7 @@ sequenceDiagram
 - **APIRouter Architecture**:
   - `api/routes/agent.py`: High-level `/run` and `/run_async` endpoints.
   - `api/routes/telegram.py`: Multi-user conversational logic with persistent RAG support.
+  - `api/routes/dashboard.py`: Unified telemetry backend (System resources, DB Security Audit, Latency Probes).
 - **Middleware Security**: The `paranoid_guard` dependency executes a secondary LLM "judge" on incoming text payloads when `ARGOS_PARANOID_MODE=true`.
 
 ### 2.3 Local Direct Access (CLI)

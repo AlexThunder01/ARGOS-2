@@ -30,7 +30,7 @@ def check_rate_limit(user_id: int):
         if DB_BACKEND == "postgres":
             with conn.cursor() as cur:
                 cur.execute(
-                    "DELETE FROM tg_rate_limits WHERE window_start < (NOW() - INTERVAL '2 hours')"
+                    "DELETE FROM tg_rate_limits WHERE window_start::timestamp < (NOW() - INTERVAL '2 hours')"
                 )
         else:
             conn.execute(
@@ -51,7 +51,8 @@ def check_rate_limit(user_id: int):
                         """,
                         (user_id, hour_window),
                     )
-                    hour_hits = cur.fetchone()[0]
+                    row = cur.fetchone()
+                    hour_hits = row.get("hit_count") if isinstance(row, dict) else (row[0] if row else 0)
                     if hour_hits > RATE_LIMIT_PER_HOUR:
                         raise RateLimitExceeded(
                             f"Rate limit orario superato ({RATE_LIMIT_PER_HOUR})"
@@ -69,7 +70,8 @@ def check_rate_limit(user_id: int):
                         """,
                         (user_id, minute_window),
                     )
-                    minute_hits = cur.fetchone()[0]
+                    row = cur.fetchone()
+                    minute_hits = row.get("hit_count") if isinstance(row, dict) else (row[0] if row else 0)
                     if minute_hits > RATE_LIMIT_PER_MINUTE:
                         raise RateLimitExceeded(
                             f"Rate limit al minuto superato ({RATE_LIMIT_PER_MINUTE})"

@@ -19,8 +19,14 @@ export function useSSEChat() {
     const agentMsgId = Date.now() + 1;
     setMessages(prev => [...prev, { id: agentMsgId, role: 'agent', content: '' }]);
 
+    const history = messages.map(m => ({
+        role: m.role,
+        content: m.content
+    }));
+
     await ArgosAPI.startChatStream(
       prompt,
+      history,
       (pkt) => {
         // SSE Packet received
         if (pkt.chunk) {

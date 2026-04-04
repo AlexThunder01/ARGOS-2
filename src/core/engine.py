@@ -360,7 +360,7 @@ class CoreAgent:
             try:
                 from src.core.memory import retrieve_relevant_memories
 
-                return retrieve_relevant_memories(self.user_id, query)
+                return retrieve_relevant_memories(self.user_id, query, top_k=6)
             except Exception as e:
                 logger.warning(f"[CoreAgent] Memory retrieval failed: {e}")
                 return []

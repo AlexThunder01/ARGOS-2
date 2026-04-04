@@ -45,10 +45,12 @@ The "Nervous System" of ARGOS. n8n handles all I/O, secret management, and deter
 - **Integrations**: Direct OAuth2 connections to third-party services.
 
 ### 2. The Command Center: Web Dashboard
-A **React (Vite)** web interface served by FastAPI, featuring:
+A **React (Vite 8)** web interface served by FastAPI, featuring:
 - **SSE Chat Terminal**: Real-time streaming responses from the CoreAgent via `EventSource`.
-- **Docker Monitor**: Live CPU/MEM stats for all running containers (polled via `asyncio.to_thread`).
-- **Rate Limit Widget**: Visual progress bars showing API quota consumption.
+- **Docker Monitor**: Live status for all running containers (polled via `asyncio.to_thread`).
+- **Resource Telemetry**: Live **CPU**, **RAM**, and **DB Pool** tracking via `psutil` integration in Python.
+- **Security Audit Logging**: Visualizes risk average scores and blocked count today by querying `tg_suspicious_memories` directly in PostgreSQL.
+- **Latency Monitoring**: Continuous micro-benchmarking of API-to-DB and Network roundtrips.
 - **Glassmorphism UI**: Dark charcoal + neon cyan design with CSS Modules.
 
 ### 3. The CLI Interface

@@ -137,6 +137,9 @@ Rate limits are enforced atomically via `INSERT ... ON CONFLICT DO UPDATE` (no R
 # Run all tests
 pytest tests/ -v
 
+# Run dashboard-specific telemetry tests
+pytest tests/test_dashboard.py -v
+
 # With coverage report
 pytest tests/ -v --cov=src --cov=api
 ```

@@ -92,6 +92,12 @@ app.include_router(telegram.router)
 app.include_router(admin.router)
 app.include_router(dashboard.router)
 
+
+@app.get("/health", tags=["System"])
+async def health():
+    return {"status": "ok", "timestamp": time.time()}
+
+
 import os
 
 from fastapi.staticfiles import StaticFiles
@@ -100,11 +106,6 @@ if os.path.isdir("dashboard/dist"):
     app.mount(
         "/", StaticFiles(directory="dashboard/dist", html=True), name="dashboard_ui"
     )
-
-
-@app.get("/health", tags=["System"])
-async def health():
-    return {"status": "ok", "timestamp": time.time()}
 
 
 @app.get("/metrics", tags=["System"], dependencies=[Depends(verify_api_key)])

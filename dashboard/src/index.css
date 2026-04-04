@@ -1,23 +1,23 @@
+@import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+
+* { 
+  box-sizing: border-box; 
+  margin: 0; 
+  padding: 0; 
+}
+
 :root {
-  /* Argos Space Vibrant Dark Theme */
-  --bg-dark: #0a0a0f;
-  --bg-card: rgba(20, 20, 28, 0.6);
-  --bg-card-hover: rgba(30, 30, 42, 0.8);
-  
-  --text-main: #f0f0f5;
-  --text-muted: #8b8b9e;
-  
-  --cyan-glow: #00f0ff;
-  --cyan-dim: rgba(0, 240, 255, 0.15);
-  
-  --purple-glow: #8a2be2;
-  --purple-dim: rgba(138, 43, 226, 0.15);
-
-  --border-light: rgba(255, 255, 255, 0.08);
-  --border-glow: rgba(0, 240, 255, 0.4);
-
-  --glass-blur: blur(12px);
-  --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  --bg: #0d0f14;
+  --surface: #141720;
+  --surface2: #1a1e2e;
+  --border: rgba(255,255,255,0.07);
+  --cyan: #00e5ff;
+  --purple: #a78bfa;
+  --text: #e2e8f0;
+  --text2: #8892a4;
+  --danger: #f87171;
+  --success: #34d399;
+  --warning: #fbbf24;
 
   --sans: 'Inter', system-ui, -apple-system, sans-serif;
   --mono: 'Fira Code', 'Courier New', monospace;
@@ -27,65 +27,33 @@ body {
   margin: 0;
   padding: 0;
   font-family: var(--sans);
-  background-color: var(--bg-dark);
-  color: var(--text-main);
-  background-image: 
-    radial-gradient(circle at 15% 50%, var(--purple-dim), transparent 25%),
-    radial-gradient(circle at 85% 30%, var(--cyan-dim), transparent 25%);
-  background-attachment: fixed;
+  background-color: var(--bg);
+  color: var(--text);
   min-height: 100vh;
-  overflow-x: hidden;
-}
-
-* {
-  box-sizing: border-box;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 #root {
-  display: flex;
-  height: 100vh;
   width: 100vw;
-  overflow: hidden;
+  height: 100vh;
+  padding: 20px;
+  display: flex;
 }
 
-/* Glassmorphism Utilities */
-.glass-panel {
-  background: var(--bg-card);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--border-light);
-  border-radius: 16px;
-  box-shadow: var(--glass-shadow);
-  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+/* Custom Webkit Scrollbars for Dark Theme */
+::-webkit-scrollbar { 
+  width: 6px; 
+  height: 6px;
 }
-
-.glass-panel:hover {
-  border-color: rgba(255, 255, 255, 0.15);
+::-webkit-scrollbar-track { 
+  background: transparent; 
 }
-
-/* Typography */
-h1, h2, h3, h4 {
-  margin: 0;
-  font-weight: 600;
-  letter-spacing: -0.02em;
+::-webkit-scrollbar-thumb { 
+  background: rgba(255,255,255,0.1); 
+  border-radius: 99px; 
 }
-
-h1 { font-size: 2rem; }
-h2 { font-size: 1.5rem; color: var(--cyan-glow); }
-p { line-height: 1.6; margin-bottom: 1rem; color: var(--text-muted); }
-
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
+::-webkit-scrollbar-thumb:hover { 
+  background: rgba(255,255,255,0.2); 
 }

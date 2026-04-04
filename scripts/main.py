@@ -148,6 +148,12 @@ def main():
         f"\n🤖 Argos ONLINE [Backend: {agent.backend}] [Model: {agent.model}] "
         f"[Memory: {mode_label[memory_mode]}]"
     )
+    if memory_mode == "persistent":
+        try:
+            from src.telegram.db import db_register_user
+            db_register_user(agent.user_id, username="cli_user")
+        except Exception:
+            pass
     if ENABLE_VOICE:
         from src.voice.voice_manager import speak_tts as speak
 

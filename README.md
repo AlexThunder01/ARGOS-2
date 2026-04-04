@@ -9,7 +9,12 @@ Unlike traditional "chatbots", ARGOS features a **CoreAgent** architecture: a si
 ## ✨ Key Features (v2.2)
 
 - **🧠 Unified CoreAgent Architecture**: A single cognitive engine (`src/core/`) handles all reasoning, planning, and memory. Whether you use the CLI, Telegram, or the Web Dashboard, you're talking to the same "brain."
-- **🖥️ Command Center Dashboard**: A premium React web interface (Vite + Glassmorphism UI) with real-time SSE chat streaming, Docker container monitoring, and Rate Limit tracking.
+- **🖥️ Command Center Dashboard**: A premium React web interface (Vite + Glassmorphism UI) with real-time SSE chat streaming and **unified telemetry**:
+  - **Docker Monitoring**: Live container status and health checks.
+  - **System Resources**: Real-time CPU and RAM utilization (via `psutil`).
+  - **Security Audit**: Live tracking of blocked prompts and risk scores from the database.
+  - **Network Latency**: Instantaneous roundtrip measurements for Ping and DB Query.
+  - **Rate Limit Tracking**: Visualized API quota consumption.
 - **💻 Power-User Linux CLI**: A rich Command Line Interface (`scripts/main.py`) with three memory modes:
   - **Stateless (default)**: Clean slate for every command.
   - **`--session`**: Ephemeral RAM-only memory for the current session.

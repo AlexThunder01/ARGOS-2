@@ -21,13 +21,14 @@ export const ArgosAPI = {
    * quindi passiamo la key in query params o cambiamo approccio (es. fetch streaming).
    * Useremo fetch nativa asincrona così possiamo passare l'API Key negl header.
    */
-  async startChatStream(task, onPkt, onError, onComplete) {
+  async startChatStream(task, history, onPkt, onError, onComplete) {
     try {
         const response = await fetch("/api/chat/stream", {
             method: "POST",
             headers: baseHeaders,
             body: JSON.stringify({
                 task: task,
+                history: history,
                 require_confirmation: false,
                 max_steps: 10
             })
@@ -78,7 +79,7 @@ export const ArgosAPI = {
    */
   async getDockerStats() {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
+    const timeout = setTimeout(() => controller.abort(), 15000);
     try {
       const res = await fetch("/api/stats/docker", { headers: baseHeaders, signal: controller.signal });
       if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
@@ -92,7 +93,7 @@ export const ArgosAPI = {
 
   async getRateLimits() {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000);
+    const timeout = setTimeout(() => controller.abort(), 15000);
     try {
       const res = await fetch("/api/stats/rate_limits", { headers: baseHeaders, signal: controller.signal });
       if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
@@ -102,5 +103,29 @@ export const ArgosAPI = {
     } finally {
       clearTimeout(timeout);
     }
+  },
+
+  async getSystemStats() {
+    const res = await fetch("/api/stats/system", { headers: baseHeaders });
+    if (!res.ok) throw new Error("Failed to fetch system stats");
+    return res.json();
+  },
+
+  async getSecurityStats() {
+    const res = await fetch("/api/stats/security", { headers: baseHeaders });
+    if (!res.ok) throw new Error("Failed to fetch security stats");
+    return res.json();
+  },
+
+  async getLatencyStats() {
+    const res = await fetch("/api/stats/latency", { headers: baseHeaders });
+    if (!res.ok) throw new Error("Failed to fetch latency stats");
+    return res.json();
+  },
+
+  async getConfigStats() {
+    const res = await fetch("/api/stats/config", { headers: baseHeaders });
+    if (!res.ok) throw new Error("Failed to fetch config stats");
+    return res.json();
   }
 };
