@@ -1,15 +1,19 @@
 import asyncio
 import logging
-import sqlite3
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from api.security import verify_api_key
-from src.db.connection import get_connection
+from src.db.connection import DB_BACKEND, get_connection, return_pg_connection
 
 router = APIRouter(tags=["Email HITL"])
 logger = logging.getLogger("argos")
+
+
+def _ph(q: str) -> str:
+    """Convert ?-placeholders to %s for PostgreSQL."""
+    return q.replace("?", "%s") if DB_BACKEND == "postgres" else q
 
 
 class EmailAnalyzeRequest(BaseModel):
@@ -120,18 +124,30 @@ async def store_pending_email(data: dict):
     msg_id = data.get("messageId", "default")
     payload_str = _json.dumps(data, ensure_ascii=False)
 
+    conn = None
     try:
         conn = get_connection()
-        conn.execute(
-            "INSERT OR REPLACE INTO pending_emails (msg_id, payload) VALUES (?, ?)",
-            (msg_id, payload_str),
-        )
+        cursor = conn.cursor()
+        if DB_BACKEND == "postgres":
+            cursor.execute(
+                _ph("INSERT INTO pending_emails (msg_id, payload) VALUES (?, ?) "
+                    "ON CONFLICT (msg_id) DO UPDATE SET payload = EXCLUDED.payload"),
+                (msg_id, payload_str),
+            )
+        else:
+            cursor.execute(
+                "INSERT OR REPLACE INTO pending_emails (msg_id, payload) VALUES (?, ?)",
+                (msg_id, payload_str),
+            )
         conn.commit()
-    except sqlite3.Error as e:
-        logger.error(f"SQLite Write Error: {e}")
+    except Exception as e:
+        logger.error(f"DB Write Error: {e}")
         return {"status": "error", "reason": "database_write_error"}
+    finally:
+        if DB_BACKEND == "postgres" and conn:
+            return_pg_connection(conn)
 
-    logger.info(f"📧 Active Context Queued in SQLite: ID {msg_id}")
+    logger.info(f"📧 Active Context Queued: ID {msg_id}")
     return {"status": "saved", "sender": data.get("sender", "")}
 
 
@@ -141,13 +157,12 @@ async def store_pending_email(data: dict):
 async def consume_pending_email(message_id: str):
     import json as _json
 
+    conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(
-            "SELECT payload FROM pending_emails WHERE msg_id = ?", (message_id,)
-        )
+        cursor.execute(_ph("SELECT payload FROM pending_emails WHERE msg_id = ?"), (message_id,))
         row = cursor.fetchone()
 
         if not row:
@@ -155,12 +170,18 @@ async def consume_pending_email(message_id: str):
                 status_code=404, detail="Email context not found or already consumed."
             )
 
-        data = _json.loads(row[0])
-        cursor.execute("DELETE FROM pending_emails WHERE msg_id = ?", (message_id,))
+        payload = row[0] if not isinstance(row, dict) else row["payload"]
+        data = _json.loads(payload)
+        cursor.execute(_ph("DELETE FROM pending_emails WHERE msg_id = ?"), (message_id,))
         conn.commit()
 
         return {**data, "status": "deleted_and_consumed"}
 
-    except sqlite3.Error as e:
-        logger.error(f"SQLite Read/Delete Error: {e}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"DB Read/Delete Error: {e}")
         raise HTTPException(status_code=500, detail="State architecture failure")
+    finally:
+        if DB_BACKEND == "postgres" and conn:
+            return_pg_connection(conn)

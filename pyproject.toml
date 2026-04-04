@@ -1,2 +1,5 @@
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+[tool.pytest.ini_options.markers]
+integration = "Integration tests that require running external services (n8n, Docker)"

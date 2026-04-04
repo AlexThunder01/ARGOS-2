@@ -16,7 +16,7 @@ import sys
 
 import requests
 
-from scripts.n8n_client import get_n8n_config
+from n8n_client import get_n8n_config
 
 # ==============================================================================
 # Phase 1: Credential Creation
