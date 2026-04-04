@@ -214,14 +214,16 @@ def extract_memories_from_text(
         start = raw.find("[")
         end = raw.rfind("]") + 1
         if start == -1 or end == 0:
-            logger.debug(f"[Memory] LLM returned no JSON array for extraction (raw={raw[:80]!r})")
+            logger.debug(
+                f"[Memory] LLM returned no JSON array for extraction (raw={raw[:80]!r})"
+            )
             return []
         try:
             parsed = json.loads(raw[start:end])
         except json.JSONDecodeError as e:
             logger.warning(
                 f"[Memory] LLM returned malformed JSON — extraction skipped "
-                f"(error={e}, raw={raw[start:start+120]!r})"
+                f"(error={e}, raw={raw[start : start + 120]!r})"
             )
             return []
         if not isinstance(parsed, list):

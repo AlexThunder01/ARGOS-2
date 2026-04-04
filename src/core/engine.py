@@ -428,4 +428,3 @@ class CoreAgent:
 
         # Default: allow (no restrictions configured)
         return True
-

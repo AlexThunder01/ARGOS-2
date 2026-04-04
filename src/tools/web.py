@@ -19,7 +19,7 @@ def _ddgs_search(q: str, max_results: int = 5) -> list[dict]:
         except Exception as exc:
             last_exc = exc
             if attempt < 2:
-                time.sleep(2 ** attempt)  # 1s, 2s
+                time.sleep(2**attempt)  # 1s, 2s
     raise last_exc
 
 
@@ -40,7 +40,10 @@ def _tavily_search(q: str, max_results: int = 5) -> list[dict]:
     )
     resp.raise_for_status()
     data = resp.json()
-    return [{"title": r.get("title", ""), "body": r.get("content", "")} for r in data.get("results", [])]
+    return [
+        {"title": r.get("title", ""), "body": r.get("content", "")}
+        for r in data.get("results", [])
+    ]
 
 
 def web_search_tool(query):

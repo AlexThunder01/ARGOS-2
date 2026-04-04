@@ -6,8 +6,8 @@ Credential creation helpers are tested by mocking requests.post.
 """
 
 import copy
-import sys
 import os
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -26,7 +26,6 @@ from scripts.inject_n8n import (  # noqa: E402
     create_telegram_credential,
     patch_workflow,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -193,7 +192,9 @@ class TestCreateGmailCredential:
         mock_resp.json.return_value = {"id": "gmail_xyz"}
 
         with patch("scripts.inject_n8n.requests.post", return_value=mock_resp):
-            result = create_gmail_credential("http://n8n/api/v1", {}, "CLIENT_ID", "SECRET")
+            result = create_gmail_credential(
+                "http://n8n/api/v1", {}, "CLIENT_ID", "SECRET"
+            )
 
         assert result == "gmail_xyz"
 

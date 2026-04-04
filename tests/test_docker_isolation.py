@@ -49,9 +49,11 @@ class TestPythonReplTool:
     def test_basic_math(self, mock_get_client, tmp_path, monkeypatch):
         monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
         import src.config as cfg
+
         monkeypatch.setattr(cfg, "WORKSPACE_DIR", str(tmp_path))
 
         from src.tools import code_exec
+
         monkeypatch.setattr(code_exec, "WORKSPACE_DIR", str(tmp_path))
 
         from src.tools.code_exec import python_repl_tool
@@ -66,6 +68,7 @@ class TestPythonReplTool:
     def test_network_isolation_enforced(self, mock_get_client, tmp_path, monkeypatch):
         """Verifies that network_mode=none is passed to containers.run."""
         from src.tools import code_exec
+
         monkeypatch.setattr(code_exec, "WORKSPACE_DIR", str(tmp_path))
 
         from src.tools.code_exec import python_repl_tool
@@ -85,6 +88,7 @@ class TestPythonReplTool:
     def test_memory_limit_enforced(self, mock_get_client, tmp_path, monkeypatch):
         """Verifies that mem_limit is passed to containers.run."""
         from src.tools import code_exec
+
         monkeypatch.setattr(code_exec, "WORKSPACE_DIR", str(tmp_path))
 
         from src.tools.code_exec import python_repl_tool
@@ -99,14 +103,19 @@ class TestPythonReplTool:
         assert "mem_limit" in kwargs, "Docker container must have a memory limit set"
 
     @patch("src.tools.code_exec._get_docker_client")
-    def test_nonzero_exit_code_returns_output(self, mock_get_client, tmp_path, monkeypatch):
+    def test_nonzero_exit_code_returns_output(
+        self, mock_get_client, tmp_path, monkeypatch
+    ):
         """A nonzero exit code still returns the captured output (logs)."""
         from src.tools import code_exec
+
         monkeypatch.setattr(code_exec, "WORKSPACE_DIR", str(tmp_path))
 
         from src.tools.code_exec import python_repl_tool
 
-        container = _mock_container(stderr=b"SyntaxError: invalid syntax\n", exit_code=1)
+        container = _mock_container(
+            stderr=b"SyntaxError: invalid syntax\n", exit_code=1
+        )
         mock_get_client.return_value = _mock_docker_client(container)
 
         result = python_repl_tool({"code": "def("})
@@ -119,8 +128,11 @@ class TestPythonReplTool:
         assert result.lower().startswith("error")
 
     @patch("src.tools.code_exec._get_docker_client")
-    def test_docker_unavailable_returns_error(self, mock_get_client, tmp_path, monkeypatch):
+    def test_docker_unavailable_returns_error(
+        self, mock_get_client, tmp_path, monkeypatch
+    ):
         from src.tools import code_exec
+
         monkeypatch.setattr(code_exec, "WORKSPACE_DIR", str(tmp_path))
 
         from src.tools.code_exec import python_repl_tool

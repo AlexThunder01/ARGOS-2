@@ -24,13 +24,14 @@ from src.core.memory import (
     should_extract_memory,
     should_run_gc,
 )
+
+# Re-export security functions that were previously defined here
 from src.core.security import (
     _COMPILED_BLOCKLIST,
     PARANOID_JUDGE_PROMPT,
+    compute_risk_score,
+    validate_with_llm_judge,
 )
-
-# Re-export security functions that were previously defined here
-from src.core.security import compute_risk_score, validate_with_llm_judge
 
 __all__ = [
     "get_embedding",
