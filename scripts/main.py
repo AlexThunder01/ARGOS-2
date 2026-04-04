@@ -82,6 +82,12 @@ Memory Modes:
         default=int(os.getenv("MAX_TOOL_LOOPS", "10")),
         help="Maximum tool execution steps per task (default: 10)",
     )
+    parser.add_argument(
+        "prompt",
+        nargs="*",
+        default=None,
+        help="Optional one-shot prompt (skips interactive loop)",
+    )
     return parser.parse_args()
 
 
@@ -146,6 +152,19 @@ def main():
         from src.voice.voice_manager import speak_tts as speak
 
         speak("Systems online.")
+
+    # One-shot mode: execute prompt and exit
+    if args.prompt:
+        one_shot = " ".join(args.prompt)
+        print("⏳ ...", end="\r")
+        result = agent.run_task(one_shot)
+        print(" " * 10, end="\r")
+        if result.history:
+            for step in result.history:
+                status = "✅" if step.success else "❌"
+                print(f"  {status} [{step.tool}] {step.result[:120]}")
+        print(f"🤖 Argos: {result.response}")
+        return
 
     # Interactive loop
     while True:

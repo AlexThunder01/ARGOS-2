@@ -77,14 +77,30 @@ export const ArgosAPI = {
    * Statistiche Docker e Rate Limit protette
    */
   async getDockerStats() {
-    const res = await fetch("/api/stats/docker", { headers: baseHeaders });
-    if (!res.ok) throw new Error("Failed to fetch Docker stats");
-    return res.json();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      const res = await fetch("/api/stats/docker", { headers: baseHeaders, signal: controller.signal });
+      if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
+      const data = await res.json();
+      if (data.status === "error") throw new Error(data.message || "Unknown docker error");
+      return data;
+    } finally {
+      clearTimeout(timeout);
+    }
   },
 
   async getRateLimits() {
-    const res = await fetch("/api/stats/rate_limits", { headers: baseHeaders });
-    if (!res.ok) throw new Error("Failed to fetch Rate Limits");
-    return res.json();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    try {
+      const res = await fetch("/api/stats/rate_limits", { headers: baseHeaders, signal: controller.signal });
+      if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      return data;
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 };
