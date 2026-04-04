@@ -25,12 +25,13 @@ def _make_test_db():
     return conn
 
 _test_conn = _make_test_db()
-_patcher1 = patch("src.db.connection.get_connection", return_value=_test_conn)
+_patcher1 = patch("api.routes.dashboard.get_connection", return_value=_test_conn)
 _patcher1.start()
 
 from api.server import app
 
 client = TestClient(app)
+
 
 
 class TestDashboardStats:
