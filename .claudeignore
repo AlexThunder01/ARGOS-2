@@ -1,0 +1,22 @@
+.git/
+__pycache__/
+*.pyc
+.venv/
+venv/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Secrets e config locale
+.env
+
+# Runtime data
+logs/
+data/
+workspace/
+
+# Modelli TTS (file enormi)
+Qwen3-TTS-12Hz-1.7B-VoiceDesign/
+Qwen3-TTS-local/
