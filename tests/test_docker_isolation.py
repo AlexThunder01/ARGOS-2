@@ -13,11 +13,15 @@ if __name__ == "__main__":
     print("Test 1: Python REPL (Math)")
     result1 = python_repl_tool({"code": "print(2**10)"})
     print(result1)
-    
+
     print("\nTest 2: Bash Exec (Network restricted)")
-    result2 = bash_exec_tool({"command": "curl -I https://google.com || echo 'Network is isolated!'"})
+    result2 = bash_exec_tool(
+        {"command": "curl -I https://google.com || echo 'Network is isolated!'"}
+    )
     print(result2)
-    
+
     print("\nTest 3: Python REPL (Memory Bomb limiting)")
-    result3 = python_repl_tool({"code": "a = 'x' * 1024 * 1024 * 300\nprint('Done without OOM')"})
+    result3 = python_repl_tool(
+        {"code": "a = 'x' * 1024 * 1024 * 300\nprint('Done without OOM')"}
+    )
     print(result3)

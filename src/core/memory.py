@@ -222,7 +222,17 @@ def extract_memories_from_text(
         valid_facts = []
         for fact in parsed:
             content_lower = str(fact.get("content", "")).lower()
-            if any(phrase in content_lower for phrase in ["non ho trovato", "nessuna informazione", "non è chiaro", "non sembra esserci", "il messaggio non contiene", "nessun fatto"]):
+            if any(
+                phrase in content_lower
+                for phrase in [
+                    "non ho trovato",
+                    "nessuna informazione",
+                    "non è chiaro",
+                    "non sembra esserci",
+                    "il messaggio non contiene",
+                    "nessun fatto",
+                ]
+            ):
                 continue
             if len(content_lower) < 5:
                 continue

@@ -52,7 +52,11 @@ def check_rate_limit(user_id: int):
                         (user_id, hour_window),
                     )
                     row = cur.fetchone()
-                    hour_hits = row.get("hit_count") if isinstance(row, dict) else (row[0] if row else 0)
+                    hour_hits = (
+                        row.get("hit_count")
+                        if isinstance(row, dict)
+                        else (row[0] if row else 0)
+                    )
                     if hour_hits > RATE_LIMIT_PER_HOUR:
                         raise RateLimitExceeded(
                             f"Rate limit orario superato ({RATE_LIMIT_PER_HOUR})"
@@ -71,7 +75,11 @@ def check_rate_limit(user_id: int):
                         (user_id, minute_window),
                     )
                     row = cur.fetchone()
-                    minute_hits = row.get("hit_count") if isinstance(row, dict) else (row[0] if row else 0)
+                    minute_hits = (
+                        row.get("hit_count")
+                        if isinstance(row, dict)
+                        else (row[0] if row else 0)
+                    )
                     if minute_hits > RATE_LIMIT_PER_MINUTE:
                         raise RateLimitExceeded(
                             f"Rate limit al minuto superato ({RATE_LIMIT_PER_MINUTE})"

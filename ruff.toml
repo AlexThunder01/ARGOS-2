@@ -23,6 +23,9 @@ ignore = [
     "W293", # Blank line contains whitespace
 ]
 
+[lint.isort]
+known-first-party = ["src", "api", "tests"]
+
 [format]
 quote-style = "double"
 indent-style = "space"

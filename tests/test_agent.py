@@ -71,8 +71,9 @@ def test_openai_compatible_key_rotation(mock_post, mock_sleep):
 
     agent = JarvisAgent()
     # Mock config to have 2 keys
-    with patch("src.agent.LLM_API_KEY_2", "second_key", create=True), patch(
-        "src.agent.LLM_API_KEY", "first_key", create=True
+    with (
+        patch("src.agent.LLM_API_KEY_2", "second_key", create=True),
+        patch("src.agent.LLM_API_KEY", "first_key", create=True),
     ):
         # We need to mock module-level locals imported in _call_openai_compatible
         pass

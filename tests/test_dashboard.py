@@ -10,19 +10,22 @@ os.environ["ADMIN_CHAT_ID"] = "12345"
 os.environ["DB_BACKEND"] = "sqlite"
 os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = ""
 
-from fastapi.testclient import TestClient
 from unittest.mock import MagicMock, patch
+
+from fastapi.testclient import TestClient
+
 
 def _make_test_db():
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
-    conn.execute('''CREATE TABLE IF NOT EXISTS tg_rate_limits (
+    conn.execute("""CREATE TABLE IF NOT EXISTS tg_rate_limits (
         user_id INTEGER NOT NULL, window_start TEXT NOT NULL, hit_count INTEGER DEFAULT 0,
         PRIMARY KEY (user_id, window_start)
-    )''')
+    )""")
     conn.commit()
     return conn
+
 
 _test_conn = _make_test_db()
 _patcher1 = patch("api.routes.dashboard.get_connection", return_value=_test_conn)
@@ -33,7 +36,6 @@ from api.server import app
 client = TestClient(app)
 
 
-
 class TestDashboardStats:
     def test_rate_limits(self):
         # Insert test data
@@ -42,21 +44,23 @@ class TestDashboardStats:
         import os
 
         from src.config import RATE_LIMIT_PER_HOUR, RATE_LIMIT_PER_MINUTE
-        
+
         linux_user = os.environ.get("USER", "argos")
-        user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)
+        user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (
+            2**31
+        )
 
         now = datetime.datetime.now(datetime.timezone.utc)
         minute_win = now.strftime("%Y-%m-%dT%H:%M:00Z")
         hour_win = now.strftime("%Y-%m-%dT%H:00:00Z")
 
         _test_conn.execute(
-            "INSERT INTO tg_rate_limits (user_id, window_start, hit_count) VALUES (?, ?, ?)", 
-            (user_id, minute_win, 3)
+            "INSERT INTO tg_rate_limits (user_id, window_start, hit_count) VALUES (?, ?, ?)",
+            (user_id, minute_win, 3),
         )
         _test_conn.execute(
-            "INSERT INTO tg_rate_limits (user_id, window_start, hit_count) VALUES (?, ?, ?)", 
-            (user_id, hour_win, 25)
+            "INSERT INTO tg_rate_limits (user_id, window_start, hit_count) VALUES (?, ?, ?)",
+            (user_id, hour_win, 25),
         )
         _test_conn.commit()
 
@@ -73,7 +77,11 @@ class TestDashboardStats:
     @patch("api.routes.dashboard._collect_docker_stats")
     def test_docker_stats(self, mock_collect):
         mock_collect.return_value = {
-            "argos-api": {"state": "running", "image": "api:latest", "health": "healthy"}
+            "argos-api": {
+                "state": "running",
+                "image": "api:latest",
+                "health": "healthy",
+            }
         }
         r = client.get("/api/stats/docker")
         assert r.status_code == 200
@@ -99,13 +107,13 @@ class TestDashboardStats:
         now = datetime.datetime.now(datetime.timezone.utc)
         today = now.strftime("%Y-%m-%d")
 
-        _test_conn.execute('''CREATE TABLE IF NOT EXISTS tg_suspicious_memories (
+        _test_conn.execute("""CREATE TABLE IF NOT EXISTS tg_suspicious_memories (
             id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, content TEXT, 
             category TEXT, risk_score REAL, blocked_by TEXT, created_at TEXT
-        )''')
+        )""")
         _test_conn.execute(
             "INSERT INTO tg_suspicious_memories (user_id, content, risk_score, created_at) VALUES (?, ?, ?, ?)",
-            (1, "bad prompt", 0.9, f"{today} 12:00:00")
+            (1, "bad prompt", 0.9, f"{today} 12:00:00"),
         )
         _test_conn.commit()
 

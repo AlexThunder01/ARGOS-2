@@ -31,11 +31,11 @@ from src.utils import print_banner
 
 def cli_confirmation_callback(tool_name: str, tool_input: dict) -> bool:
     """Prompts the user for authorization before executing a dangerous tool."""
-    print(f"\n{'='*40}")
+    print(f"\n{'=' * 40}")
     print("⚠️  SECURITY AUTHORIZATION REQUIRED")
     print(f"   Action: {tool_name.upper()}")
     print(f"   Data:   {tool_input}")
-    print(f"{'='*40}")
+    print(f"{'=' * 40}")
     choice = input("👉 Authorize execution? (y/N): ").lower().strip()
     if choice != "y":
         print("🚫 ACTION DENIED BY USER.")
@@ -151,6 +151,7 @@ def main():
     if memory_mode == "persistent":
         try:
             from src.telegram.db import db_register_user
+
             db_register_user(agent.user_id, username="cli_user")
         except Exception:
             pass

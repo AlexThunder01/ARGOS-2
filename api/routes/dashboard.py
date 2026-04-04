@@ -18,7 +18,9 @@ def _collect_docker_stats():
     import docker
 
     client = docker.DockerClient(base_url=DOCKER_HOST, timeout=5)
-    containers = [c for c in client.containers.list(all=True) if c.name.startswith("argos-")]
+    containers = [
+        c for c in client.containers.list(all=True) if c.name.startswith("argos-")
+    ]
 
     stats = {}
     for c in containers:
@@ -36,7 +38,9 @@ async def docker_stats():
     Recupera lo stato dei container Docker via thread pool (non blocca l'event loop).
     """
     try:
-        stats = await asyncio.wait_for(asyncio.to_thread(_collect_docker_stats), timeout=8.0)
+        stats = await asyncio.wait_for(
+            asyncio.to_thread(_collect_docker_stats), timeout=8.0
+        )
         return {"status": "ok", "containers": stats}
     except Exception as e:
         logger.error(f"Errore caricamento Docker stats: {e}")
@@ -60,8 +64,11 @@ async def rate_limits():
     try:
         import hashlib
         import os
+
         linux_user = os.environ.get("USER", "argos")
-        user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)
+        user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (
+            2**31
+        )
 
         conn = get_connection()
         cursor = conn.cursor()
@@ -72,14 +79,18 @@ async def rate_limits():
             (user_id, minute_win),
         )
         row = cursor.fetchone()
-        min_used = row.get("hit_count", 0) if isinstance(row, dict) else (row[0] if row else 0)
+        min_used = (
+            row.get("hit_count", 0) if isinstance(row, dict) else (row[0] if row else 0)
+        )
 
         cursor.execute(
             f"SELECT hit_count FROM tg_rate_limits WHERE user_id={placeholder} AND window_start={placeholder}",
             (user_id, hour_win),
         )
         row = cursor.fetchone()
-        hr_used = row.get("hit_count", 0) if isinstance(row, dict) else (row[0] if row else 0)
+        hr_used = (
+            row.get("hit_count", 0) if isinstance(row, dict) else (row[0] if row else 0)
+        )
 
         return {
             "minute": {"used": min_used, "max": RATE_LIMIT_PER_MINUTE},
@@ -98,21 +109,28 @@ async def rate_limits():
 async def system_stats():
     """Ritorna l'uso reale fisso di CPU, RAM e Sandbox info."""
     import os
+
     import psutil
+
     cpu = psutil.cpu_percent(interval=0.1)
     ram = psutil.virtual_memory().percent
-    
+
     # DB Pool mock / approssimativo
     db_pool_txt = "n/a"
     if DB_BACKEND == "postgres":
         from src.db.connection import _pg_pool
+
         if _pg_pool:
-            db_pool_txt = f"{_pg_pool.get_stats()}" if hasattr(_pg_pool, "get_stats") else "active"
+            db_pool_txt = (
+                f"{_pg_pool.get_stats()}"
+                if hasattr(_pg_pool, "get_stats")
+                else "active"
+            )
         else:
             db_pool_txt = "active"
     else:
         db_pool_txt = "local"
-        
+
     isolation = "docker" if os.environ.get("DOCKER_ENV") else "local"
 
     return {
@@ -120,7 +138,7 @@ async def system_stats():
         "ram": ram,
         "db_pool": db_pool_txt,
         "isolation": isolation,
-        "exec_last_run": "OK"
+        "exec_last_run": "OK",
     }
 
 
@@ -128,9 +146,10 @@ async def system_stats():
 async def security_stats():
     """Ritorna stat live sui blocchi per attività sospette."""
     from datetime import datetime, timezone
+
     now = datetime.now(timezone.utc)
     today = now.strftime("%Y-%m-%d")
-    
+
     blocked_count = 0
     avg_score = 0.0
 
@@ -138,13 +157,19 @@ async def security_stats():
     try:
         conn = get_connection()
         cursor = conn.cursor()
-        
+
         # Blocked today
         if DB_BACKEND == "postgres":
-            cursor.execute("SELECT COUNT(*) as c, AVG(risk_score) as a FROM tg_suspicious_memories WHERE DATE(created_at) = %s", (today,))
+            cursor.execute(
+                "SELECT COUNT(*) as c, AVG(risk_score) as a FROM tg_suspicious_memories WHERE DATE(created_at) = %s",
+                (today,),
+            )
         else:
-            cursor.execute("SELECT COUNT(*) as c, AVG(risk_score) as a FROM tg_suspicious_memories WHERE date(created_at) = ?", (today,))
-        
+            cursor.execute(
+                "SELECT COUNT(*) as c, AVG(risk_score) as a FROM tg_suspicious_memories WHERE date(created_at) = ?",
+                (today,),
+            )
+
         row = cursor.fetchone()
         if row:
             blocked_count = row.get("c", 0) if isinstance(row, dict) else row[0]
@@ -154,7 +179,7 @@ async def security_stats():
         return {
             "paranoid_judge": True,
             "blocked_today": blocked_count,
-            "risk_score_avg": round(avg_score, 2)
+            "risk_score_avg": round(avg_score, 2),
         }
     except Exception as e:
         logger.error(f"Errore caricamento security stats: {e}")
@@ -162,6 +187,7 @@ async def security_stats():
     finally:
         if DB_BACKEND == "postgres" and conn:
             from src.db.connection import return_pg_connection
+
             return_pg_connection(conn)
 
 
@@ -169,10 +195,10 @@ async def security_stats():
 async def latency_stats():
     """Misura la latenza istantanea di vari sottosistemi."""
     import time
-    
+
     # 1. Ping locale veloce (o mock se n/a)
     ping_ms = 14
-    
+
     # 2. DB Query #1
     t0 = time.perf_counter()
     conn = None
@@ -185,31 +211,32 @@ async def latency_stats():
     finally:
         if DB_BACKEND == "postgres" and conn:
             from src.db.connection import return_pg_connection
+
             return_pg_connection(conn)
     t1 = time.perf_counter()
     db_ms = int((t1 - t0) * 1000)
-    
+
     # 3. Memory Recall (pgvector ping test pseudo)
     t2 = time.perf_counter()
     # solo una pausa per simulare
     await asyncio.sleep(0.01)
     t3 = time.perf_counter()
     mem_ms = int((t3 - t2) * 1000)
-    
+
     return {
         "ping": f"{ping_ms}ms",
         "db_query": f"{max(1, db_ms)}ms",
         "memory_recall": f"{max(1, mem_ms)}ms",
-        "n8n_trigger": "n/a"
+        "n8n_trigger": "n/a",
     }
+
 
 @router.get("/stats/config", dependencies=[Depends(verify_api_key)])
 async def config_stats():
     from src.config import LLM_MODEL
-    return {
-        "model": LLM_MODEL,
-        "version": "v2.2.0"
-    }
+
+    return {"model": LLM_MODEL, "version": "v2.2.0"}
+
 
 from pydantic import BaseModel
 
@@ -218,6 +245,7 @@ class ChatRequest(BaseModel):
     task: str
     max_steps: int = 10
     history: list[dict] = []  # List of {role, content} from frontend
+
 
 async def sse_agent_stream(task: str, history: list[dict]):
     """
@@ -232,7 +260,7 @@ async def sse_agent_stream(task: str, history: list[dict]):
         agent._llm._init_history()
         for msg in history[-10:]:  # Keep last 10 messages for context
             agent._llm.add_message(msg["role"], msg["content"])
-        
+
         return agent.run_task(task)
 
     yield 'data: {"chunk": "[Pensando...]\\n"}\n\n'
@@ -273,4 +301,6 @@ async def chat_stream(req: ChatRequest):
     except RateLimitExceeded as e:
         raise HTTPException(status_code=429, detail=str(e))
 
-    return StreamingResponse(sse_agent_stream(req.task, req.history), media_type="text/event-stream")
+    return StreamingResponse(
+        sse_agent_stream(req.task, req.history), media_type="text/event-stream"
+    )

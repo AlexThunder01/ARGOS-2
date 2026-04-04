@@ -68,9 +68,10 @@ def patch_db(monkeypatch):
     # Patch directly in the modules that imported it
     import src.core.rate_limit as rl_module
     import src.telegram.db as db_module
+
     monkeypatch.setattr(db_module, "get_connection", lambda: conn)
     monkeypatch.setattr(rl_module, "get_connection", lambda: conn)
-    
+
     # Also patch connection.get_connection just in case
     import src.db.connection as conn_module
 
