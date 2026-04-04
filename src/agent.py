@@ -16,7 +16,7 @@ from src.planner.planner import build_system_prompt_suffix
 from .config import LLM_BACKEND, LLM_MODEL
 
 
-class JarvisAgent:
+class ArgosAgent:
     """Primary autonomous agent class. Manages the system prompt, conversation
     history, and LLM backend dispatch for OpenAI-compatible and Anthropic providers."""
 

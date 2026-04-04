@@ -7,15 +7,29 @@ from fastapi.security import APIKeyHeader
 logger = logging.getLogger("argos")
 
 ARGOS_API_KEY = os.getenv("ARGOS_API_KEY", "").strip()
+# Explicit opt-in required to run without an API key (dev/local only).
+# Set ARGOS_PERMISSIVE_MODE=true in .env to bypass authentication.
+_PERMISSIVE_MODE = os.getenv("ARGOS_PERMISSIVE_MODE", "false").lower() == "true"
+
 api_key_header = APIKeyHeader(name="X-ARGOS-API-KEY", auto_error=False)
 
 
 async def verify_api_key(key: str = Security(api_key_header)):
     if not ARGOS_API_KEY:
-        logger.warning(
-            "⚠️ Permissive mode: ARGOS_API_KEY is not set. API is unprotected!"
+        if _PERMISSIVE_MODE:
+            logger.warning(
+                "⚠️  ARGOS_PERMISSIVE_MODE=true — API is unprotected! "
+                "Set ARGOS_API_KEY before deploying to production."
+            )
+            return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "API key not configured on server. "
+                "Set ARGOS_API_KEY in the environment, or set "
+                "ARGOS_PERMISSIVE_MODE=true for local development only."
+            ),
         )
-        return
     if key != ARGOS_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

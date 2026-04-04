@@ -15,7 +15,7 @@ def crypto_price_tool(coin_id):
         val = r.json().get(coin_id.lower(), {}).get("eur")
         return f"€{val:,.2f}" if val else "Coin not found."
     except Exception as e:
-        return f"API Error: {e}"
+        return f"Error: Crypto API failed — {e}"
 
 
 def finance_price_tool(asset):
@@ -86,4 +86,4 @@ def finance_price_tool(asset):
 
         return f"Price not found for '{ticker}'. Please verify the asset name or ticker symbol."
     except Exception as e:
-        return f"Finance API Error: {e}"
+        return f"Error: Finance API failed — {e}"

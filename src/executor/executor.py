@@ -19,9 +19,9 @@ RETRYABLE_KEYWORDS = [
     "connection",
     "network",
     "rate limit",
-    "api error",
-    "api error",
+    "api failed",
     "connection error",
+    "unreachable",
 ]
 
 # Keywords indicating a permanent error (retry is futile)

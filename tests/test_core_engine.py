@@ -38,7 +38,7 @@ class TestCoreAgentInit:
     def test_init_session_memory(self):
         agent = CoreAgent(memory_mode="session")
         assert agent.memory_mode == "session"
-        assert agent._session_memories == []
+        assert len(agent._session_memories) == 0
 
     def test_init_persistent_memory(self):
         agent = CoreAgent(memory_mode="persistent")

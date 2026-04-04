@@ -11,6 +11,8 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: argos
+      # SECURITY: always set POSTGRES_PASSWORD in your .env file before deploying.
+      # The default 'argos_secret' is for local development only.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-argos_secret}
       POSTGRES_DB: argos
     ports:
@@ -43,7 +45,7 @@ services:
       - ADMIN_CHAT_ID=${ADMIN_CHAT_ID:-}
       - N8N_API_KEY=${N8N_API_KEY}
       - ARGOS_API_KEY=${ARGOS_API_KEY:-}
-      - DATABASE_URL=postgresql://argos:${POSTGRES_PASSWORD:-argos_secret}@argos-db:5432/argos
+      - DATABASE_URL=postgresql://argos:${POSTGRES_PASSWORD:-argos_secret}@argos-db:5432/argos  # set POSTGRES_PASSWORD in .env
       - DB_BACKEND=${DB_BACKEND:-postgres}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://argos-jaeger:4317
       - OTEL_SERVICE_NAME=argos-api

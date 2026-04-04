@@ -214,8 +214,16 @@ def extract_memories_from_text(
         start = raw.find("[")
         end = raw.rfind("]") + 1
         if start == -1 or end == 0:
+            logger.debug(f"[Memory] LLM returned no JSON array for extraction (raw={raw[:80]!r})")
             return []
-        parsed = json.loads(raw[start:end])
+        try:
+            parsed = json.loads(raw[start:end])
+        except json.JSONDecodeError as e:
+            logger.warning(
+                f"[Memory] LLM returned malformed JSON — extraction skipped "
+                f"(error={e}, raw={raw[start:start+120]!r})"
+            )
+            return []
         if not isinstance(parsed, list):
             return []
         # Pulisce eventuali "non ho trovato informazioni" generati dal LLM
@@ -244,7 +252,7 @@ def extract_memories_from_text(
             if isinstance(f, dict) and "content" in f and "category" in f
         ]
     except Exception as e:
-        logger.warning(f"[Memory] Extraction failed: {e}")
+        logger.warning(f"[Memory] Extraction failed unexpectedly: {e}")
         return []
 
 

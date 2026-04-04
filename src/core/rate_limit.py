@@ -123,6 +123,13 @@ def check_rate_limit(user_id: int):
                     )
             conn.commit()
 
+    except Exception:
+        # Roll back any partial writes so hit_count stays consistent
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
     finally:
         if DB_BACKEND == "postgres":
             return_pg_connection(conn)

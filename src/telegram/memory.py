@@ -30,12 +30,7 @@ from src.core.security import (
 )
 
 # Re-export security functions that were previously defined here
-from src.core.security import (
-    compute_risk_score as _compute_risk_score,
-)
-from src.core.security import (
-    validate_with_llm_judge as _validate_with_llm_judge,
-)
+from src.core.security import compute_risk_score, validate_with_llm_judge
 
 __all__ = [
     "get_embedding",
@@ -54,6 +49,6 @@ __all__ = [
     "PARANOID_JUDGE_PROMPT",
     "EMBEDDING_DIM",
     "_COMPILED_BLOCKLIST",
-    "_compute_risk_score",
-    "_validate_with_llm_judge",
+    "compute_risk_score",
+    "validate_with_llm_judge",
 ]

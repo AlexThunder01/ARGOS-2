@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.agent import JarvisAgent
+from src.agent import ArgosAgent
 
 
 @patch("src.agent.requests.post")
@@ -18,7 +18,7 @@ def test_call_openai_compatible(mock_post):
     mock_post.return_value = mock_response
 
     # Setup agent
-    agent = JarvisAgent()
+    agent = ArgosAgent()
     agent.backend = "openai-compatible"
     agent.add_message("user", "Hello")
 
@@ -40,7 +40,7 @@ def test_call_anthropic(mock_post):
     mock_response.json.return_value = {"content": [{"text": "Hello Anthropic!"}]}
     mock_post.return_value = mock_response
 
-    agent = JarvisAgent()
+    agent = ArgosAgent()
     agent.backend = "anthropic"
     agent.add_message("user", "Hi")
 
@@ -69,7 +69,7 @@ def test_openai_compatible_key_rotation(mock_post, mock_sleep):
 
     mock_post.side_effect = [call_1, call_2]
 
-    agent = JarvisAgent()
+    agent = ArgosAgent()
     # Mock config to have 2 keys
     with (
         patch("src.agent.LLM_API_KEY_2", "second_key", create=True),

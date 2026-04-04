@@ -16,24 +16,24 @@ from dataclasses import dataclass
 from typing import Optional
 
 PLANNER_RESPONSE_SCHEMA = """
-FORMATO RISPOSTA OBBLIGATORIO — usa SEMPRE uno di questi due formati:
+MANDATORY RESPONSE FORMAT — ALWAYS use one of these two JSON structures:
 
-1. Se devi eseguire un'azione:
+1. To execute a tool action:
 {
-  "thought": "<ragionamento brevissimo>",
-  "action": {"tool": "<nome_tool>", "input": <parametri>},
+  "thought": "<brief internal reasoning>",
+  "action": {"tool": "<tool_name>", "input": <parameters>},
   "confidence": <0.0-1.0>,
   "done": false
 }
 
-2. Se hai terminato o vuoi rispondere all'utente:
+2. To reply to the user or signal completion:
 {
-  "thought": "<motivazione>",
-  "response": "<tua risposta in italiano>",
+  "thought": "<motivation>",
+  "response": "<your response — use the same language the user wrote in>",
   "done": true
 }
 
-NON scrivere MAI testo al di fuori del JSON.
+NEVER write any text outside the JSON block.
 """
 
 

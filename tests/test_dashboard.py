@@ -5,7 +5,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Set env vars BEFORE importing server
-os.environ["ARGOS_API_KEY"] = ""  # Permissive mode for testing
+os.environ["ARGOS_API_KEY"] = ""  # No key — rely on permissive mode below
+os.environ["ARGOS_PERMISSIVE_MODE"] = "true"  # Required for keyless test client
 os.environ["ADMIN_CHAT_ID"] = "12345"
 os.environ["DB_BACKEND"] = "sqlite"
 os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = ""

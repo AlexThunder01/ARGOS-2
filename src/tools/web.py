@@ -5,6 +5,44 @@ import psutil
 from .helpers import _get_arg
 
 
+def _ddgs_search(q: str, max_results: int = 5) -> list[dict]:
+    """Attempts a DuckDuckGo search with up to 2 retries on transient failure."""
+    import time
+
+    from ddgs import DDGS
+
+    last_exc = None
+    for attempt in range(3):
+        try:
+            results = DDGS().text(query=q, max_results=max_results, region="it-it")
+            return results or []
+        except Exception as exc:
+            last_exc = exc
+            if attempt < 2:
+                time.sleep(2 ** attempt)  # 1s, 2s
+    raise last_exc
+
+
+def _tavily_search(q: str, max_results: int = 5) -> list[dict]:
+    """Fallback search via Tavily API (requires TAVILY_API_KEY env var)."""
+    import os
+
+    import requests
+
+    api_key = os.environ.get("TAVILY_API_KEY", "")
+    if not api_key:
+        raise ValueError("TAVILY_API_KEY not set")
+
+    resp = requests.post(
+        "https://api.tavily.com/search",
+        json={"api_key": api_key, "query": q, "max_results": max_results},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    return [{"title": r.get("title", ""), "body": r.get("content", "")} for r in data.get("results", [])]
+
+
 def web_search_tool(query):
     q = _get_arg(query, ["query", "q", "search", "text", "search_query", "keywords"])
     if not q and isinstance(query, dict):
@@ -14,19 +52,34 @@ def web_search_tool(query):
         q = query
     if not q:
         return "Error: No search query specified."
+
+    results = None
+    last_error = None
+
+    # Primary: DuckDuckGo with retry
     try:
-        from ddgs import DDGS
-
-        results = DDGS().text(query=q, max_results=5, region="it-it")
-        if not results:
-            return "No results found. DO NOT fabricate data under any circumstances. Inform the user that the search returned no results."
-
-        output = []
-        for r in results:
-            output.append(f"--- {r['title']} ---\n{r['body']}\n")
-        return "\n".join(output)
+        results = _ddgs_search(q)
     except Exception as e:
-        return f"Search Error: {e}. The search servers are unreachable or the API has changed. DO NOT fabricate any information. Inform the user that a technical error occurred."
+        last_error = e
+
+    # Fallback: Tavily (only if TAVILY_API_KEY is configured)
+    if not results:
+        try:
+            results = _tavily_search(q)
+        except Exception:
+            pass  # Tavily also failed or not configured
+
+    if not results:
+        return (
+            f"Error: Search failed — {last_error}. "
+            "The search servers are unreachable or the API has changed. "
+            "DO NOT fabricate any information. Inform the user that a technical error occurred."
+        )
+
+    output = []
+    for r in results:
+        output.append(f"--- {r['title']} ---\n{r['body']}\n")
+    return "\n".join(output)
 
 
 def system_stats_tool(_):
@@ -101,4 +154,4 @@ def get_weather_tool(query):
             f"Weather in {place_name} ({country}): {desc}, {temp}°C, Wind: {wind}km/h"
         )
     except Exception as e:
-        return f"Weather API Error: {e}"
+        return f"Error: Weather API failed — {e}"

@@ -72,21 +72,32 @@ async def rate_limits():
 
         conn = get_connection()
         cursor = conn.cursor()
-        placeholder = "%s" if DB_BACKEND == "postgres" else "?"
 
-        cursor.execute(
-            f"SELECT hit_count FROM tg_rate_limits WHERE user_id={placeholder} AND window_start={placeholder}",
-            (user_id, minute_win),
-        )
+        if DB_BACKEND == "postgres":
+            cursor.execute(
+                "SELECT hit_count FROM tg_rate_limits WHERE user_id=%s AND window_start=%s",
+                (user_id, minute_win),
+            )
+        else:
+            cursor.execute(
+                "SELECT hit_count FROM tg_rate_limits WHERE user_id=? AND window_start=?",
+                (user_id, minute_win),
+            )
         row = cursor.fetchone()
         min_used = (
             row.get("hit_count", 0) if isinstance(row, dict) else (row[0] if row else 0)
         )
 
-        cursor.execute(
-            f"SELECT hit_count FROM tg_rate_limits WHERE user_id={placeholder} AND window_start={placeholder}",
-            (user_id, hour_win),
-        )
+        if DB_BACKEND == "postgres":
+            cursor.execute(
+                "SELECT hit_count FROM tg_rate_limits WHERE user_id=%s AND window_start=%s",
+                (user_id, hour_win),
+            )
+        else:
+            cursor.execute(
+                "SELECT hit_count FROM tg_rate_limits WHERE user_id=? AND window_start=?",
+                (user_id, hour_win),
+            )
         row = cursor.fetchone()
         hr_used = (
             row.get("hit_count", 0) if isinstance(row, dict) else (row[0] if row else 0)
@@ -206,8 +217,8 @@ async def latency_stats():
         conn = get_connection()
         cursor = conn.cursor()
         cursor.execute("SELECT 1")
-    except:
-        pass
+    except Exception as e:
+        logger.warning(f"[Dashboard] DB latency check failed: {e}")
     finally:
         if DB_BACKEND == "postgres" and conn:
             from src.db.connection import return_pg_connection
@@ -293,10 +304,11 @@ async def sse_agent_stream(task: str, history: list[dict], user_id: int):
             yield f"data: {packet}\n\n"
             await asyncio.sleep(0.02)
 
-        yield "data: [DONE]\n\n"
     except Exception as e:
         err = json.dumps({"chunk": f"\\n\\n[ERRORE]: {str(e)}"})
         yield f"data: {err}\n\n"
+    finally:
+        # Always send the termination marker so clients are never left hanging
         yield "data: [DONE]\n\n"
 
 
@@ -305,7 +317,11 @@ async def chat_stream(req: ChatRequest):
     import hashlib
     import os
 
+    from api.middleware.paranoid import check_paranoid
     from src.core.rate_limit import RateLimitExceeded, check_rate_limit
+
+    # Security: run paranoid pipeline before anything else
+    await check_paranoid(req.task)
 
     linux_user = os.environ.get("USER", "argos")
     user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)

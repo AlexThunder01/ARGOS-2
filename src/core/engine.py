@@ -15,10 +15,12 @@ import hashlib
 import json
 import logging
 import os
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from src.agent import JarvisAgent
+from src.agent import ArgosAgent
+from src.core.memory import EXTRACT_MIN_LENGTH
 from src.executor.executor import execute_with_retry
 from src.logging.otel import get_tracer
 from src.logging.tracer import log_decision, log_step
@@ -111,10 +113,10 @@ class CoreAgent:
             ) % (2**31)
 
         # LLM provider (wraps Groq/OpenAI/Anthropic)
-        self._llm = JarvisAgent()
+        self._llm = ArgosAgent()
 
-        # Session memory (RAM-only, cleared on exit)
-        self._session_memories: list[dict] = []
+        # Session memory (RAM-only, cleared on exit). Bounded to prevent OOM on long sessions.
+        self._session_memories: deque[dict] = deque(maxlen=500)
 
         # Dangerous tools that require confirmation
         self._dangerous_tools = {
@@ -427,6 +429,3 @@ class CoreAgent:
         # Default: allow (no restrictions configured)
         return True
 
-
-# Import the constant for session memory extraction
-from src.core.memory import EXTRACT_MIN_LENGTH
