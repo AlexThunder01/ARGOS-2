@@ -260,6 +260,7 @@ async def sse_agent_stream(task: str, history: list[dict], user_id: int):
         # Load user profile and inject display name into system prompt
         try:
             from src.telegram.db import db_get_profile
+
             profile = db_get_profile(user_id)
             if profile and profile.get("display_name"):
                 agent._llm.system_prompt += (
@@ -316,14 +317,16 @@ async def chat_stream(req: ChatRequest):
 
     # Detect and persist user name if mentioned in this message
     import re
+
     name_match = re.search(
-        r'(?:mi chiamo|il mio nome è|chiamami|my name is|sono)\s+([A-Z][a-zA-Zà-ú]+)',
+        r"(?:mi chiamo|il mio nome è|chiamami|my name is|sono)\s+([A-Z][a-zA-Zà-ú]+)",
         req.task,
         re.IGNORECASE,
     )
     if name_match:
         try:
             from src.telegram.db import db_update_profile
+
             db_update_profile(user_id, display_name=name_match.group(1).capitalize())
         except Exception:
             pass

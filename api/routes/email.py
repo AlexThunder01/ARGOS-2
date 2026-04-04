@@ -130,8 +130,10 @@ async def store_pending_email(data: dict):
         cursor = conn.cursor()
         if DB_BACKEND == "postgres":
             cursor.execute(
-                _ph("INSERT INTO pending_emails (msg_id, payload) VALUES (?, ?) "
-                    "ON CONFLICT (msg_id) DO UPDATE SET payload = EXCLUDED.payload"),
+                _ph(
+                    "INSERT INTO pending_emails (msg_id, payload) VALUES (?, ?) "
+                    "ON CONFLICT (msg_id) DO UPDATE SET payload = EXCLUDED.payload"
+                ),
                 (msg_id, payload_str),
             )
         else:
@@ -162,7 +164,9 @@ async def consume_pending_email(message_id: str):
         conn = get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(_ph("SELECT payload FROM pending_emails WHERE msg_id = ?"), (message_id,))
+        cursor.execute(
+            _ph("SELECT payload FROM pending_emails WHERE msg_id = ?"), (message_id,)
+        )
         row = cursor.fetchone()
 
         if not row:
@@ -172,7 +176,9 @@ async def consume_pending_email(message_id: str):
 
         payload = row[0] if not isinstance(row, dict) else row["payload"]
         data = _json.loads(payload)
-        cursor.execute(_ph("DELETE FROM pending_emails WHERE msg_id = ?"), (message_id,))
+        cursor.execute(
+            _ph("DELETE FROM pending_emails WHERE msg_id = ?"), (message_id,)
+        )
         conn.commit()
 
         return {**data, "status": "deleted_and_consumed"}
