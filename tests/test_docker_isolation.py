@@ -4,7 +4,7 @@ os.environ["DOCKER_HOST"] = "tcp://127.0.0.1:2375"
 os.environ["HOST_WORKSPACE_DIR"] = os.path.abspath("./workspace")
 os.environ["WORKSPACE_DIR"] = os.path.abspath("./workspace")
 
-from src.tools.code_exec import python_repl_tool, bash_exec_tool
+from src.tools.code_exec import python_repl_tool, bash_exec_tool  # noqa: I001
 
 os.environ["DOCKER_HOST"] = "tcp://127.0.0.1:2375"
 os.environ["HOST_WORKSPACE_DIR"] = os.path.abspath("./data/workspace")

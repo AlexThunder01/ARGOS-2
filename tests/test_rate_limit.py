@@ -1,8 +1,6 @@
 import pytest
-from src.core.rate_limit import check_rate_limit, RateLimitExceeded
 
-# Import the test fixture
-from tests.test_db import patch_db
+from src.core.rate_limit import RateLimitExceeded, check_rate_limit
 
 def test_rate_limit_exceeded(patch_db, monkeypatch):
     # Setup test limit

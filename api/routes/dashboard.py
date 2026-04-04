@@ -58,8 +58,8 @@ async def rate_limits():
 
     conn = None
     try:
-        import os
         import hashlib
+        import os
         linux_user = os.environ.get("USER", "argos")
         user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)
 
@@ -97,8 +97,8 @@ async def rate_limits():
 @router.get("/stats/system", dependencies=[Depends(verify_api_key)])
 async def system_stats():
     """Ritorna l'uso reale fisso di CPU, RAM e Sandbox info."""
-    import psutil
     import os
+    import psutil
     cpu = psutil.cpu_percent(interval=0.1)
     ram = psutil.virtual_memory().percent
     
@@ -260,10 +260,11 @@ async def sse_agent_stream(task: str, history: list[dict]):
 
 @router.post("/chat/stream", dependencies=[Depends(verify_api_key)])
 async def chat_stream(req: ChatRequest):
-    from src.core.rate_limit import RateLimitExceeded, check_rate_limit
-    import os
     import hashlib
-    
+    import os
+
+    from src.core.rate_limit import RateLimitExceeded, check_rate_limit
+
     linux_user = os.environ.get("USER", "argos")
     user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)
 

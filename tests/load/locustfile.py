@@ -1,6 +1,7 @@
-import random
 import os
-from locust import HttpUser, task, between
+import random
+
+from locust import HttpUser, between, task
 
 # Read API Key from environment to easily switch (or default to test_key)
 API_KEY = os.getenv("ARGOS_API_KEY", "test_key")

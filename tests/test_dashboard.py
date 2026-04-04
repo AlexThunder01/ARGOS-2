@@ -10,8 +10,8 @@ os.environ["ADMIN_CHAT_ID"] = "12345"
 os.environ["DB_BACKEND"] = "sqlite"
 os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = ""
 
-from unittest.mock import patch, MagicMock
 from fastapi.testclient import TestClient
+from unittest.mock import MagicMock, patch
 
 def _make_test_db():
     conn = sqlite3.connect(":memory:", check_same_thread=False)
@@ -38,8 +38,10 @@ class TestDashboardStats:
     def test_rate_limits(self):
         # Insert test data
         import datetime
+        import hashlib
+        import os
+
         from src.config import RATE_LIMIT_PER_HOUR, RATE_LIMIT_PER_MINUTE
-        import os, hashlib
         
         linux_user = os.environ.get("USER", "argos")
         user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)
@@ -93,8 +95,7 @@ class TestDashboardStats:
 
     def test_security_stats(self):
         import datetime
-        from src.config import RATE_LIMIT_PER_HOUR, RATE_LIMIT_PER_MINUTE
-        
+
         now = datetime.datetime.now(datetime.timezone.utc)
         today = now.strftime("%Y-%m-%d")
 

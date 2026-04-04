@@ -30,4 +30,4 @@ jobs:
         
     - name: Run Pytest suite with coverage
       run: |
-        pytest tests/ -v --cov=src --cov=api --cov-report=term-missing --cov-fail-under=30
+        python -m pytest tests/ -v --cov=src --cov=api --cov-report=term-missing --cov-fail-under=30
