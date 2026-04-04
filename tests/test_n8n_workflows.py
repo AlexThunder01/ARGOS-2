@@ -14,6 +14,7 @@ In caso di fallimento stampa:
 
 import os
 import time
+
 import pytest
 import requests
 
@@ -74,7 +75,9 @@ def _headers() -> dict:
 
 
 def _get(path: str, params: dict | None = None) -> dict:
-    r = requests.get(f"{N8N_BASE}/api/v1{path}", headers=_headers(), params=params, timeout=10)
+    r = requests.get(
+        f"{N8N_BASE}/api/v1{path}", headers=_headers(), params=params, timeout=10
+    )
     r.raise_for_status()
     return r.json()
 
@@ -94,7 +97,7 @@ def _get_execution_detail(exec_id: str) -> dict:
 
 def _format_node_failure(node_name: str, run_data: dict, error: dict | None) -> str:
     """Build a human-readable failure report for a node."""
-    lines = [f"\n{'='*60}", f"  FAILED NODE: {node_name}", f"{'='*60}"]
+    lines = [f"\n{'=' * 60}", f"  FAILED NODE: {node_name}", f"{'=' * 60}"]
 
     node_run = run_data.get(node_name)
     if node_run:
@@ -111,13 +114,19 @@ def _format_node_failure(node_name: str, run_data: dict, error: dict | None) -> 
         input_data = run.get("inputOverride") or {}
         if input_data:
             import json
-            lines.append(f"  Input data : {json.dumps(input_data, indent=4, ensure_ascii=False)[:800]}")
+
+            lines.append(
+                f"  Input data : {json.dumps(input_data, indent=4, ensure_ascii=False)[:800]}"
+            )
 
         # Output data
         output = run.get("data", {}).get("main", [[]])
         if output and output[0]:
             import json
-            lines.append(f"  Output     : {json.dumps(output[0][0].get('json', {}), indent=4, ensure_ascii=False)[:800]}")
+
+            lines.append(
+                f"  Output     : {json.dumps(output[0][0].get('json', {}), indent=4, ensure_ascii=False)[:800]}"
+            )
 
     if error:
         lines.append(f"  Error name : {error.get('name', '?')}")
@@ -129,9 +138,12 @@ def _format_node_failure(node_name: str, run_data: dict, error: dict | None) -> 
         ctx = error.get("context", {})
         if ctx:
             import json
+
             req = ctx.get("request", {})
             if req:
-                lines.append(f"  Request    : {json.dumps({'method': req.get('method'), 'uri': req.get('uri'), 'body': req.get('body')}, indent=4, ensure_ascii=False)[:600]}")
+                lines.append(
+                    f"  Request    : {json.dumps({'method': req.get('method'), 'uri': req.get('uri'), 'body': req.get('body')}, indent=4, ensure_ascii=False)[:600]}"
+                )
 
     return "\n".join(lines)
 
@@ -148,7 +160,7 @@ def pytest_generate_tests(metafunc):
 
     try:
         workflows = _get_workflows()
-    except Exception as e:
+    except Exception:
         metafunc.parametrize("workflow", [], ids=[])
         return
 
@@ -177,7 +189,9 @@ def test_workflow_executions(workflow: dict):
     executions = _get_executions(wf_id)
 
     if not executions:
-        pytest.skip(f"No executions found for workflow '{wf_name}' — trigger it at least once.")
+        pytest.skip(
+            f"No executions found for workflow '{wf_name}' — trigger it at least once."
+        )
 
     failures: list[str] = []
 

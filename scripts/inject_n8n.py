@@ -15,7 +15,6 @@ import os
 import sys
 
 import requests
-
 from n8n_client import get_n8n_config
 
 # ==============================================================================
