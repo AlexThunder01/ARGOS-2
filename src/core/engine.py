@@ -106,7 +106,9 @@ class CoreAgent:
 
         # Tool filtering: when set, only these tools are exposed to the LLM
         if allowed_tools is not None:
-            self._available_tools = {k: v for k, v in TOOLS.items() if k in allowed_tools}
+            self._available_tools = {
+                k: v for k, v in TOOLS.items() if k in allowed_tools
+            }
         else:
             self._available_tools = TOOLS
 
@@ -502,7 +504,7 @@ class CoreAgent:
 
         # Build the replacement block
         lines = [
-            "        AVAILABLE TOOLS (the names below must be used in \"action\" -> \"tool\" and \"input\"):"
+            '        AVAILABLE TOOLS (the names below must be used in "action" -> "tool" and "input"):'
         ]
         for cat_key, cat_label in self._CATEGORY_ORDER:
             if cat_key in grouped:
@@ -517,7 +519,10 @@ class CoreAgent:
         # (injected by build_system_prompt_suffix).
         pattern = r"AVAILABLE TOOLS.*?(?=MANDATORY RESPONSE FORMAT)"
         self._llm.system_prompt = re.sub(
-            pattern, new_tools_block.strip() + "\n\n        ", self._llm.system_prompt, flags=re.DOTALL
+            pattern,
+            new_tools_block.strip() + "\n\n        ",
+            self._llm.system_prompt,
+            flags=re.DOTALL,
         )
 
         # Re-init history so the new prompt takes effect
@@ -526,4 +531,3 @@ class CoreAgent:
         logger.info(
             f"[CoreAgent] System prompt rewritten: {len(self._available_tools)} tools exposed to LLM"
         )
-

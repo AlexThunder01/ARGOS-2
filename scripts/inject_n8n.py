@@ -30,10 +30,14 @@ def wait_for_n8n(base_url, headers, retries=30, delay=3):
                 return
         except requests.exceptions.ConnectionError:
             pass
-        print(f"  [{attempt}/{retries}] Not ready yet, retrying in {delay}s...", flush=True)
+        print(
+            f"  [{attempt}/{retries}] Not ready yet, retrying in {delay}s...",
+            flush=True,
+        )
         time.sleep(delay)
     print("❌ n8n did not become ready in time. Aborting.")
     sys.exit(1)
+
 
 # ==============================================================================
 # Phase 1: Credential Creation

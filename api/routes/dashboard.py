@@ -257,15 +257,17 @@ async def tools_stats():
     tools_list = []
     for name in TOOLS:
         meta = TOOL_METADATA.get(name, {})
-        tools_list.append({
-            "name": name,
-            "label": meta.get("label", name),
-            "icon": meta.get("icon", "🔧"),
-            "category": meta.get("category", "other"),
-            "risk": meta.get("risk", "unknown"),
-            "description": meta.get("description", ""),
-            "dashboard_enabled": name in DASHBOARD_TOOLS_WHITELIST,
-        })
+        tools_list.append(
+            {
+                "name": name,
+                "label": meta.get("label", name),
+                "icon": meta.get("icon", "🔧"),
+                "category": meta.get("category", "other"),
+                "risk": meta.get("risk", "unknown"),
+                "description": meta.get("description", ""),
+                "dashboard_enabled": name in DASHBOARD_TOOLS_WHITELIST,
+            }
+        )
 
     enabled_count = sum(1 for t in tools_list if t["dashboard_enabled"])
     return {
@@ -306,7 +308,11 @@ async def sse_agent_stream(task: str, history: list[dict], user_id: int):
             from src.telegram.db import db_get_profile
 
             profile = db_get_profile(user_id)
-            if profile and profile.get("display_name") and profile["display_name"].strip():
+            if (
+                profile
+                and profile.get("display_name")
+                and profile["display_name"].strip()
+            ):
                 agent._llm.system_prompt += (
                     f"\n\nUSER NAME: The user's name is '{profile['display_name']}'. "
                     "Always address them by this name."
