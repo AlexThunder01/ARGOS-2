@@ -13,6 +13,7 @@ In caso di fallimento stampa:
 """
 
 import os
+
 os.environ["DB_BACKEND"] = "sqlite"
 
 import time

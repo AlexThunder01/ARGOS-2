@@ -6,6 +6,7 @@ in-memory SQLite database — no real DB required, no test pollution.
 """
 
 import os
+
 os.environ["DB_BACKEND"] = "sqlite"
 
 import sqlite3
