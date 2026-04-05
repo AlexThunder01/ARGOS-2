@@ -1,12 +1,9 @@
 .sidebar {
-  grid-area: sidebar;
   background: var(--surface);
-  border-right: 1px solid var(--border);
   padding: 16px 12px;
   display: flex;
   flex-direction: column;
   gap: 20px;
-  overflow-y: auto;
 }
 
 .sectionLabel {

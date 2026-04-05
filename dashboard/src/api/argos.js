@@ -127,5 +127,11 @@ export const ArgosAPI = {
     const res = await fetch("/api/stats/config", { headers: baseHeaders });
     if (!res.ok) throw new Error("Failed to fetch config stats");
     return res.json();
+  },
+
+  async getToolsStats() {
+    const res = await fetch("/api/stats/tools", { headers: baseHeaders });
+    if (!res.ok) throw new Error("Failed to fetch tools stats");
+    return res.json();
   }
 };

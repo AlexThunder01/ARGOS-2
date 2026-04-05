@@ -3,6 +3,7 @@ import { useSSEChat } from './hooks/useSSEChat';
 import ChatTerminal from './components/ChatTerminal/ChatTerminal';
 import CommandMonitor from './components/CommandMonitor/CommandMonitor';
 import RateLimitWidget from './components/RateLimitWidget/RateLimitWidget';
+import ToolsPanel from './components/ToolsPanel/ToolsPanel';
 import { ArgosAPI } from './api/argos';
 import styles from './App.module.css';
 
@@ -26,8 +27,11 @@ function App() {
         <div className={styles.topbarMetric}>Model <span>{config.model}</span></div>
       </div>
       
-      {/* Sidebar - Docker/Infrastructure */}
-      <CommandMonitor />
+      {/* Sidebar - Docker/Infrastructure + Tools */}
+      <div className={styles.sidebarWrap}>
+        <CommandMonitor />
+        <ToolsPanel />
+      </div>
       
       {/* Center - Terminal/Chat */}
       <ChatTerminal 

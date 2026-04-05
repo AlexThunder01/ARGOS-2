@@ -7,7 +7,7 @@
   max-width: 1600px;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: 220px 1fr 200px;
+  grid-template-columns: 240px 1fr 200px;
   grid-template-rows: 48px 1fr;
   grid-template-areas: 
     "topbar topbar topbar"
@@ -16,6 +16,16 @@
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--border);
+}
+
+.sidebarWrap {
+  grid-area: sidebar;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .topbar {

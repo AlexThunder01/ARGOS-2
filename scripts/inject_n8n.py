@@ -13,9 +13,27 @@ import copy
 import json
 import os
 import sys
+import time
 
 import requests
 from n8n_client import get_n8n_config
+
+
+def wait_for_n8n(base_url, headers, retries=30, delay=3):
+    """Polls n8n until it responds or times out."""
+    print(f"  ⏳ Waiting for n8n at {base_url}...", flush=True)
+    for attempt in range(1, retries + 1):
+        try:
+            r = requests.get(f"{base_url}/workflows", headers=headers, timeout=5)
+            if r.status_code < 500:
+                print(f"  ✅ n8n is ready (HTTP {r.status_code})")
+                return
+        except requests.exceptions.ConnectionError:
+            pass
+        print(f"  [{attempt}/{retries}] Not ready yet, retrying in {delay}s...", flush=True)
+        time.sleep(delay)
+    print("❌ n8n did not become ready in time. Aborting.")
+    sys.exit(1)
 
 # ==============================================================================
 # Phase 1: Credential Creation
@@ -149,6 +167,7 @@ def inject_workflows():
     print("=" * 60)
 
     base_url, headers = get_n8n_config()
+    wait_for_n8n(base_url, headers)
     endpoint = f"{base_url}/workflows"
 
     # --- Load environment variables ---

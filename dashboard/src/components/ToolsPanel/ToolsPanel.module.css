@@ -1,0 +1,214 @@
+.panel {
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.title {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  color: var(--text2);
+  text-transform: uppercase;
+}
+
+.badge {
+  font-size: 9px;
+  font-family: var(--mono);
+  color: var(--cyan);
+  background: rgba(0, 229, 255, 0.08);
+  border: 1px solid rgba(0, 229, 255, 0.2);
+  border-radius: 99px;
+  padding: 2px 8px;
+}
+
+/* Summary bar */
+.summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.summaryItem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text2);
+}
+
+.summaryDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.summaryDot.active {
+  background: var(--success);
+  box-shadow: 0 0 4px var(--success);
+}
+
+.summaryDot.blocked {
+  background: var(--danger);
+  box-shadow: 0 0 4px rgba(248, 113, 113, 0.3);
+}
+
+.summaryCount {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Category groups */
+.categoryGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.categoryLabel {
+  font-size: 8px;
+  letter-spacing: 1.2px;
+  color: var(--text2);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  opacity: 0.7;
+}
+
+.toolGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+/* Individual tool chip */
+.toolChip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  font-family: var(--mono);
+  padding: 3px 7px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition: all 0.2s ease;
+  cursor: default;
+  position: relative;
+}
+
+.toolChip.enabled {
+  background: rgba(52, 211, 153, 0.06);
+  border-color: rgba(52, 211, 153, 0.15);
+  color: var(--success);
+}
+
+.toolChip.enabled:hover {
+  background: rgba(52, 211, 153, 0.12);
+  border-color: rgba(52, 211, 153, 0.3);
+  transform: translateY(-1px);
+}
+
+.toolChip.blocked {
+  background: rgba(248, 113, 113, 0.04);
+  border-color: rgba(248, 113, 113, 0.1);
+  color: var(--text2);
+  opacity: 0.5;
+}
+
+.toolChip.blocked:hover {
+  opacity: 0.8;
+}
+
+.toolIcon {
+  font-size: 11px;
+  line-height: 1;
+}
+
+.toolName {
+  white-space: nowrap;
+}
+
+/* Risk indicators */
+.riskDot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  margin-left: 2px;
+  flex-shrink: 0;
+}
+
+.riskDot.none     { background: var(--success); }
+.riskDot.low      { background: var(--cyan); }
+.riskDot.medium   { background: var(--warning); }
+.riskDot.high     { background: var(--danger); }
+.riskDot.critical { background: #ef4444; box-shadow: 0 0 4px rgba(239, 68, 68, 0.4); }
+
+/* Tooltip */
+.tooltip {
+  display: none;
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 9px;
+  color: var(--text);
+  white-space: nowrap;
+  z-index: 100;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+}
+
+.toolChip:hover .tooltip {
+  display: block;
+}
+
+/* Loading state */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  font-size: 10px;
+  color: var(--text2);
+}
+
+.spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(255,255,255,0.1);
+  border-top-color: var(--cyan);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-right: 8px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Progress bar */
+.progressWrap {
+  height: 3px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--cyan), var(--success));
+  border-radius: 99px;
+  transition: width 0.5s ease;
+}

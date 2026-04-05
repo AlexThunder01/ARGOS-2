@@ -60,3 +60,62 @@ TOOLS = {
     "read_csv": read_csv_tool,
     "read_json": read_json_tool,
 }
+
+# ──────────────────────────────────────────────────────────────────────
+# Dashboard Tool Whitelist — Only safe, read-only or sandboxed tools
+# are allowed when the request originates from the web dashboard.
+# ──────────────────────────────────────────────────────────────────────
+DASHBOARD_TOOLS_WHITELIST: set[str] = {
+    # Read-only web/data
+    "web_search",
+    "web_scrape",
+    "crypto_price",
+    "finance_price",
+    "get_weather",
+    # Monitoring
+    "system_stats",
+    # Document analysis (read-only)
+    "read_pdf",
+    "read_csv",
+    "read_json",
+    # Sandboxed execution (Docker isolated)
+    "python_repl",
+    "bash_exec",
+    # File browsing (read-only)
+    "list_files",
+    "read_file",
+}
+
+# ──────────────────────────────────────────────────────────────────────
+# Tool Metadata — Used by the dashboard Tools Panel widget
+# ──────────────────────────────────────────────────────────────────────
+TOOL_METADATA: dict[str, dict] = {
+    "list_files":      {"category": "filesystem",  "icon": "📂", "label": "List Files",      "risk": "low",    "description": "Lists files in a directory"},
+    "read_file":       {"category": "filesystem",  "icon": "📄", "label": "Read File",       "risk": "low",    "description": "Reads text content from a file"},
+    "create_file":     {"category": "filesystem",  "icon": "✏️",  "label": "Create File",     "risk": "high",   "description": "Creates a new file on disk"},
+    "modify_file":     {"category": "filesystem",  "icon": "🔧", "label": "Modify File",     "risk": "high",   "description": "Overwrites or appends to a file"},
+    "rename_file":     {"category": "filesystem",  "icon": "🏷️",  "label": "Rename File",     "risk": "high",   "description": "Renames a file or directory"},
+    "delete_file":     {"category": "filesystem",  "icon": "🗑️",  "label": "Delete File",     "risk": "critical","description": "Deletes a file permanently"},
+    "create_directory":{"category": "filesystem",  "icon": "📁", "label": "Create Directory", "risk": "high",   "description": "Creates a new directory"},
+    "delete_directory":{"category": "filesystem",  "icon": "💥", "label": "Delete Directory", "risk": "critical","description": "Recursively deletes a directory"},
+    "web_search":      {"category": "web",         "icon": "🔍", "label": "Web Search",      "risk": "none",   "description": "DuckDuckGo / Tavily web search"},
+    "web_scrape":      {"category": "web",         "icon": "🌐", "label": "Web Scrape",      "risk": "none",   "description": "Extracts text from a web page"},
+    "crypto_price":    {"category": "finance",     "icon": "₿",  "label": "Crypto Price",    "risk": "none",   "description": "Real-time crypto prices (CoinGecko)"},
+    "finance_price":   {"category": "finance",     "icon": "📈", "label": "Finance Price",   "risk": "none",   "description": "Stocks & commodities (Yahoo Finance)"},
+    "get_weather":     {"category": "web",         "icon": "🌤️",  "label": "Weather",         "risk": "none",   "description": "Weather forecast (Open-Meteo)"},
+    "system_stats":    {"category": "system",      "icon": "📊", "label": "System Stats",    "risk": "none",   "description": "CPU & RAM usage via psutil"},
+    "launch_app":      {"category": "system",      "icon": "🚀", "label": "Launch App",      "risk": "critical","description": "Launches a process on the host"},
+    "keyboard_type":   {"category": "gui",         "icon": "⌨️",  "label": "Keyboard Type",   "risk": "critical","description": "Types text via pyautogui + OCR"},
+    "visual_click":    {"category": "gui",         "icon": "🖱️",  "label": "Visual Click",    "risk": "critical","description": "Clicks screen elements via vision"},
+    "describe_screen": {"category": "gui",         "icon": "👁️",  "label": "Describe Screen", "risk": "medium", "description": "Describes screen content via VLM"},
+    "python_repl":     {"category": "code",        "icon": "🐍", "label": "Python REPL",     "risk": "medium", "description": "Executes Python in Docker sandbox"},
+    "bash_exec":       {"category": "code",        "icon": "🖥️",  "label": "Bash Exec",       "risk": "medium", "description": "Executes Bash in Docker sandbox"},
+    "read_pdf":        {"category": "documents",   "icon": "📑", "label": "Read PDF",        "risk": "none",   "description": "Extracts text from PDF files"},
+    "read_csv":        {"category": "documents",   "icon": "📊", "label": "Read CSV",        "risk": "none",   "description": "Parses and formats CSV data"},
+    "read_json":       {"category": "documents",   "icon": "📋", "label": "Read JSON",       "risk": "none",   "description": "Pretty-prints JSON files"},
+}
+
+def get_dashboard_tools() -> dict:
+    """Returns only the tools allowed on the web dashboard."""
+    return {k: v for k, v in TOOLS.items() if k in DASHBOARD_TOOLS_WHITELIST}
+

@@ -225,13 +225,10 @@ class ArgosAgent:
     def think_with_messages(self, messages: list[dict]) -> str:
         """Executes a single LLM inference with an externally-provided message history.
         Used by the Telegram chat module where each user has their own context."""
-        try:
-            if self.backend == "anthropic":
-                return self._call_anthropic(messages, temperature=0.3)
-            else:
-                return self._call_openai_compatible(messages, temperature=0.3)
-        except Exception as e:
-            return f"LLM Error: {e}"
+        if self.backend == "anthropic":
+            return self._call_anthropic(messages, temperature=0.3)
+        else:
+            return self._call_openai_compatible(messages, temperature=0.3)
 
     def call_lightweight(self, prompt: str) -> str:
         """Calls a lightweight model for structured extraction tasks (memory extraction)."""

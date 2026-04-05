@@ -17,7 +17,7 @@ import logging
 import os
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Callable, Optional, Set
 
 from src.agent import ArgosAgent
 from src.core.memory import EXTRACT_MIN_LENGTH
@@ -92,6 +92,7 @@ class CoreAgent:
         max_steps: int = 10,
         require_confirmation: bool = False,
         confirmation_callback: Optional[Callable] = None,
+        allowed_tools: Optional[Set[str]] = None,
     ):
         if memory_mode not in MEMORY_MODES:
             raise ValueError(
@@ -102,6 +103,12 @@ class CoreAgent:
         self.max_steps = max_steps
         self.require_confirmation = require_confirmation
         self.confirmation_callback = confirmation_callback
+
+        # Tool filtering: when set, only these tools are exposed to the LLM
+        if allowed_tools is not None:
+            self._available_tools = {k: v for k, v in TOOLS.items() if k in allowed_tools}
+        else:
+            self._available_tools = TOOLS
 
         # Resolve user ID
         if user_id is not None:
@@ -138,7 +145,7 @@ class CoreAgent:
         logger.info(
             f"[CoreAgent] Initialized | memory={memory_mode} | "
             f"user_id={self.user_id} | backend={self._llm.backend} | "
-            f"model={self._llm.model}"
+            f"model={self._llm.model} | tools={len(self._available_tools)}/{len(TOOLS)}"
         )
 
     # --- Public Properties ---
@@ -223,9 +230,9 @@ class CoreAgent:
                 tool_name = decision.tool
                 tool_input = decision.tool_input
 
-                # Unknown tool
-                if not tool_name or tool_name not in TOOLS:
-                    final_response = f"Unknown tool: '{tool_name}'"
+                # Unknown tool or not allowed
+                if not tool_name or tool_name not in self._available_tools:
+                    final_response = f"Unknown or restricted tool: '{tool_name}'"
                     logger.error(f"[CoreAgent] {final_response}")
                     break
 
@@ -257,7 +264,7 @@ class CoreAgent:
                     attributes={"tool.name": tool_name, "tool.step": step_num + 1},
                 ) as tool_span:
                     action_result = execute_with_retry(
-                        TOOLS[tool_name], tool_input, tool_name
+                        self._available_tools[tool_name], tool_input, tool_name
                     )
                     tool_span.set_attribute("tool.success", action_result.success)
                     tool_span.set_attribute(

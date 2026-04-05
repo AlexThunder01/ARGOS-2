@@ -279,7 +279,14 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
     except pybreaker.CircuitBreakerError:
         return TelegramChatResponse(
             status="ok",
-            reply="⚠️ Service temporarily unavailable. Please try again in a minute.",
+            reply="⚠️ Servizio temporaneamente non disponibile. Riprova tra un minuto.",
+            user_id=req.user_id,
+        )
+    except Exception as e:
+        logger.error(f"[Telegram] LLM call failed for user {req.user_id}: {e}")
+        return TelegramChatResponse(
+            status="ok",
+            reply="⚠️ Non riesco a connettermi al servizio AI in questo momento. Riprova tra qualche secondo.",
             user_id=req.user_id,
         )
 

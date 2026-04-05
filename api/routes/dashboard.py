@@ -249,6 +249,33 @@ async def config_stats():
     return {"model": LLM_MODEL, "version": "v2.2.0"}
 
 
+@router.get("/stats/tools", dependencies=[Depends(verify_api_key)])
+async def tools_stats():
+    """Returns the full tool catalog with metadata and dashboard availability."""
+    from src.tools import DASHBOARD_TOOLS_WHITELIST, TOOL_METADATA, TOOLS
+
+    tools_list = []
+    for name in TOOLS:
+        meta = TOOL_METADATA.get(name, {})
+        tools_list.append({
+            "name": name,
+            "label": meta.get("label", name),
+            "icon": meta.get("icon", "🔧"),
+            "category": meta.get("category", "other"),
+            "risk": meta.get("risk", "unknown"),
+            "description": meta.get("description", ""),
+            "dashboard_enabled": name in DASHBOARD_TOOLS_WHITELIST,
+        })
+
+    enabled_count = sum(1 for t in tools_list if t["dashboard_enabled"])
+    return {
+        "total": len(tools_list),
+        "dashboard_enabled": enabled_count,
+        "dashboard_blocked": len(tools_list) - enabled_count,
+        "tools": tools_list,
+    }
+
+
 from pydantic import BaseModel
 
 
@@ -264,9 +291,15 @@ async def sse_agent_stream(task: str, history: list[dict], user_id: int):
     Usiamo un trucco per catturare lo stream del CoreAgent.
     """
     from src.core import CoreAgent
+    from src.tools import DASHBOARD_TOOLS_WHITELIST
 
     def _run_agent():
-        agent = CoreAgent(memory_mode="persistent", max_steps=10, user_id=user_id)
+        agent = CoreAgent(
+            memory_mode="persistent",
+            max_steps=10,
+            user_id=user_id,
+            allowed_tools=DASHBOARD_TOOLS_WHITELIST,
+        )
 
         # Load user profile and inject display name into system prompt
         try:
