@@ -6,11 +6,12 @@ in-memory SQLite database — no real DB required, no test pollution.
 """
 
 import os
+os.environ["DB_BACKEND"] = "sqlite"
+
 import sqlite3
 
 import pytest
 
-os.environ.setdefault("DB_BACKEND", "sqlite")
 os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 
 

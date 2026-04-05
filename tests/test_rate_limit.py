@@ -1,3 +1,6 @@
+import os
+os.environ["DB_BACKEND"] = "sqlite"
+
 import pytest
 
 from src.core.rate_limit import RateLimitExceeded, check_rate_limit
