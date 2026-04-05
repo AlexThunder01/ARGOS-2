@@ -25,7 +25,7 @@ from src.executor.executor import execute_with_retry
 from src.logging.otel import get_tracer
 from src.logging.tracer import log_decision, log_step
 from src.planner.planner import parse_planner_response
-from src.tools import TOOLS
+from src.tools import TOOL_METADATA, TOOLS
 from src.world_model.state import WorldState
 
 logger = logging.getLogger("argos")
@@ -121,6 +121,10 @@ class CoreAgent:
 
         # LLM provider (wraps Groq/OpenAI/Anthropic)
         self._llm = ArgosAgent()
+
+        # --- Rewrite system prompt to reflect only available tools ---
+        if allowed_tools is not None:
+            self._rewrite_tool_prompt()
 
         # Session memory (RAM-only, cleared on exit). Bounded to prevent OOM on long sessions.
         self._session_memories: deque[dict] = deque(maxlen=500)
@@ -435,3 +439,91 @@ class CoreAgent:
 
         # Default: allow (no restrictions configured)
         return True
+
+    # ==========================================================================
+    # System Prompt Rewriting (Private)
+    # ==========================================================================
+
+    # Tool input examples for the system prompt (keyed by tool name)
+    _TOOL_INPUT_EXAMPLES: dict[str, str] = {
+        "describe_screen": '{{"question": "..."}}',
+        "visual_click": '{{"description": "element description", "click_type": "left/right/double"}}',
+        "launch_app": '{{"app_name": "firefox"}}',
+        "system_stats": "(no input needed)",
+        "keyboard_type": '{{"text": "text to type", "at_element": "visual description", "press_enter": true}}',
+        "list_files": '{{"path": "."}}',
+        "read_file": '{{"filename": "..."}}',
+        "create_file": '{{"filename": "...", "content": "..."}}',
+        "modify_file": '{{"filename": "...", "content": "...", "mode": "write/append"}}',
+        "rename_file": '{{"old_name": "...", "new_name": "..."}}',
+        "delete_file": '{{"filename": "..."}}',
+        "create_directory": '{{"name": "directory_name"}}',
+        "delete_directory": '{{"name": "directory_name"}}',
+        "web_search": '{{"query": "search query"}}',
+        "web_scrape": '{{"url": "https://example.com/page"}}',
+        "crypto_price": '{{"coin": "bitcoin"}}',
+        "finance_price": '{{"asset": "gold"}}',
+        "get_weather": '{{"location": "Rome"}}',
+        "python_repl": '{{"code": "print(2+2)"}}',
+        "bash_exec": '{{"command": "ls -la"}}',
+        "read_pdf": '{{"filename": "report.pdf"}}',
+        "read_csv": '{{"filename": "data.csv", "rows": 10}}',
+        "read_json": '{{"filename": "config.json"}}',
+    }
+
+    # Category display order and labels
+    _CATEGORY_ORDER = [
+        ("web", "WEB & DATA"),
+        ("finance", "FINANCE"),
+        ("documents", "DOCUMENT PARSING"),
+        ("code", "CODE EXECUTION"),
+        ("system", "SYSTEM"),
+        ("filesystem", "FILE SYSTEM"),
+        ("gui", "VISION"),
+    ]
+
+    def _rewrite_tool_prompt(self):
+        """
+        Rewrites the AVAILABLE TOOLS section in the LLM system prompt
+        to reflect only the tools actually available (self._available_tools).
+
+        This prevents the LLM from hallucinating actions with blocked tools.
+        """
+        import re
+
+        # Build dynamic tool listing from available tools, grouped by category
+        grouped: dict[str, list[str]] = {}
+        for name in self._available_tools:
+            meta = TOOL_METADATA.get(name, {})
+            cat = meta.get("category", "other")
+            example = self._TOOL_INPUT_EXAMPLES.get(name, "")
+            line = f"        - {name}: {example}" if example else f"        - {name}"
+            grouped.setdefault(cat, []).append(line)
+
+        # Build the replacement block
+        lines = [
+            "        AVAILABLE TOOLS (the names below must be used in \"action\" -> \"tool\" and \"input\"):"
+        ]
+        for cat_key, cat_label in self._CATEGORY_ORDER:
+            if cat_key in grouped:
+                lines.append(f"        --- {cat_label} ---")
+                lines.extend(grouped[cat_key])
+                lines.append("")  # blank line between categories
+
+        new_tools_block = "\n".join(lines)
+
+        # Replace the hardcoded AVAILABLE TOOLS section in the system prompt.
+        # The section starts with "AVAILABLE TOOLS" and ends before "MANDATORY RESPONSE FORMAT"
+        # (injected by build_system_prompt_suffix).
+        pattern = r"AVAILABLE TOOLS.*?(?=MANDATORY RESPONSE FORMAT)"
+        self._llm.system_prompt = re.sub(
+            pattern, new_tools_block.strip() + "\n\n        ", self._llm.system_prompt, flags=re.DOTALL
+        )
+
+        # Re-init history so the new prompt takes effect
+        self._llm._init_history()
+
+        logger.info(
+            f"[CoreAgent] System prompt rewritten: {len(self._available_tools)} tools exposed to LLM"
+        )
+

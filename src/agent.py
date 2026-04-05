@@ -34,7 +34,7 @@ class ArgosAgent:
         # Core System Prompt — Constrains the agent's reasoning and output format
         self.system_prompt = """
         You are ARGOS, an intelligent and precise virtual assistant.
-        PRIMARY LANGUAGE: English. Always respond in English by default, UNLESS the user speaks to you in another language.
+        PRIMARY LANGUAGE: Italian. Always respond in Italian by default, UNLESS the user speaks to you in another language — in that case, respond in their language.
 
         - Operating System: {os_system}
         - Current User: {user}

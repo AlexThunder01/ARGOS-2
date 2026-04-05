@@ -306,7 +306,7 @@ async def sse_agent_stream(task: str, history: list[dict], user_id: int):
             from src.telegram.db import db_get_profile
 
             profile = db_get_profile(user_id)
-            if profile and profile.get("display_name"):
+            if profile and profile.get("display_name") and profile["display_name"].strip():
                 agent._llm.system_prompt += (
                     f"\n\nUSER NAME: The user's name is '{profile['display_name']}'. "
                     "Always address them by this name."
@@ -367,16 +367,33 @@ async def chat_stream(req: ChatRequest):
     # Detect and persist user name if mentioned in this message
     import re
 
-    name_match = re.search(
-        r"(?:mi chiamo|il mio nome è|chiamami|my name is|sono)\s+([A-Z][a-zA-Zà-ú]+)",
+    # Step 1: Check if user is CORRECTING a wrong name ("non mi chiamo X")
+    negation_match = re.search(
+        r"(?:non mi chiamo|non sono|don't call me|not my name)",
         req.task,
         re.IGNORECASE,
     )
-    if name_match:
+
+    # Step 2: Detect the actual name with broader patterns
+    name_match = re.search(
+        r"(?:mi chiamo|il mio nome è|chiamami|my name is|sono|I'm|i am)\s+([A-ZÀ-Ú][a-zA-Zà-ú]+)",
+        req.task,
+        re.IGNORECASE,
+    )
+
+    if name_match and not negation_match:
         try:
             from src.telegram.db import db_update_profile
 
             db_update_profile(user_id, display_name=name_match.group(1).capitalize())
+        except Exception:
+            pass
+    elif negation_match:
+        # User is saying "non mi chiamo X" — clear the wrong name
+        try:
+            from src.telegram.db import db_update_profile
+
+            db_update_profile(user_id, display_name="")
         except Exception:
             pass
 
