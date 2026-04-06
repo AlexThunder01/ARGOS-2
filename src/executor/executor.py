@@ -1,12 +1,18 @@
 """
 Executor — Esegue i tool con retry automatico, timeout e classificazione degli errori.
+
+Accetta ToolSpec invece di un callable grezzo: l'input viene validato tramite
+lo schema Pydantic prima dell'esecuzione.
 """
 
 import logging
 import time
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from src.actions.base import ActionResult, ActionStatus
+
+if TYPE_CHECKING:
+    from src.tools.spec import ToolSpec
 
 logger = logging.getLogger("argos")
 
@@ -45,50 +51,64 @@ def _classify_error(message: str) -> bool:
         return False
     if any(kw in msg_lower for kw in RETRYABLE_KEYWORDS):
         return True
-    # Default: considera l'eccezione Python come temporanea
     return True
 
 
 def execute_with_retry(
-    tool_fn: Callable,
+    spec_or_fn: "ToolSpec | Callable",
     tool_input: Any,
     tool_name: str = "unknown",
     max_retries: int = MAX_RETRIES,
 ) -> ActionResult:
     """
-    Esegue un tool con retry automatico in caso di errori temporanei.
+    Valida l'input tramite ToolSpec.validate_input() ed esegue il tool con retry
+    automatico in caso di errori temporanei.
+
+    Args:
+        spec_or_fn: ToolSpec (preferred) or bare callable (backward compat).
+        tool_input: Input grezzo dal LLM (dict, str, o None).
+        tool_name: Name for logging (ignored if spec_or_fn is a ToolSpec).
+        max_retries: Numero massimo di tentativi.
 
     Returns:
-        ActionResult con status SUCCESS, FAILED o RETRYING.
+        ActionResult con status SUCCESS o FAILED.
     """
+    # Support both ToolSpec objects and plain callables (used in tests)
+    if hasattr(spec_or_fn, "executor"):
+        spec = spec_or_fn
+        validated = spec.validate_input(tool_input)
+        executor_fn = spec.executor
+        name = spec.name
+    else:
+        validated = tool_input
+        executor_fn = spec_or_fn
+        name = tool_name
+
     last_error = ""
 
     for attempt in range(1, max_retries + 1):
         try:
-            result = tool_fn(tool_input)
+            result = executor_fn(validated)
             result_str = str(result)
 
-            # Check if the return string is a recognized error
             if result_str.startswith(("Error", "Errore")):
                 is_retryable = _classify_error(result_str)
                 if is_retryable and attempt < max_retries:
                     wait = RETRY_DELAY_BASE * attempt
                     logger.warning(
-                        f"[{tool_name}] Attempt {attempt}/{max_retries} → transient error. "
+                        f"[{name}] Attempt {attempt}/{max_retries} → transient error. "
                         f"Waiting {wait:.1f}s... ({result_str[:80]})"
                     )
                     time.sleep(wait)
                     last_error = result_str
                     continue
                 else:
-                    # Fatal error or retries exhausted
                     return ActionResult(
                         status=ActionStatus.FAILED,
                         message=result_str,
                         should_retry=False,
                     )
 
-            # Successo
             return ActionResult(
                 status=ActionStatus.SUCCESS,
                 message=result_str,
@@ -99,12 +119,12 @@ def execute_with_retry(
             if attempt < max_retries:
                 wait = RETRY_DELAY_BASE * attempt
                 logger.warning(
-                    f"[{tool_name}] Eccezione tentativo {attempt}/{max_retries}: {e} "
+                    f"[{name}] Exception attempt {attempt}/{max_retries}: {e} "
                     f"— Retry in {wait:.1f}s"
                 )
                 time.sleep(wait)
             else:
-                logger.error(f"[{tool_name}] Failed after {max_retries} attempts: {e}")
+                logger.error(f"[{name}] Failed after {max_retries} attempts: {e}")
 
     return ActionResult(
         status=ActionStatus.FAILED,

@@ -4,6 +4,13 @@ ARGOS-2 Core — Unified Cognitive Engine.
 CoreAgent is the single brain shared by all interfaces (CLI, API, Telegram).
 It orchestrates: LLM reasoning → Planning → Tool execution → Memory → Security.
 
+New in this version:
+- Hook system: PreToolUse/PostToolUse/PostToolUseFailure hooks fire around every tool call.
+- Diminishing returns detection: loop stops early if LLM responses shrink for 3 steps.
+- Permission audit trail: every authorize_tool decision is logged to JSONL.
+- Context memoization: git status injected once per session, not rebuilt every step.
+- Session hooks: SESSION_START / SESSION_END fire at task boundaries.
+
 Usage:
     from src.core import CoreAgent
 
@@ -15,20 +22,79 @@ import hashlib
 import json
 import logging
 import os
+import subprocess
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Callable, Optional, Set
+from datetime import datetime
+from pathlib import Path
+from typing import Callable, Generator, Optional, Set
 
 from src.agent import ArgosAgent
 from src.core.memory import EXTRACT_MIN_LENGTH
 from src.executor.executor import execute_with_retry
+from src.hooks.registry import HOOK_REGISTRY, HookEvent
 from src.logging.otel import get_tracer
 from src.logging.tracer import log_decision, log_step
 from src.planner.planner import parse_planner_response
-from src.tools import TOOL_METADATA, TOOLS
+from src.tools.registry import REGISTRY
+from src.tools.spec import ToolSpec
 from src.world_model.state import WorldState
 
 logger = logging.getLogger("argos")
+
+# ── Diminishing returns constants ──────────────────────────────────────────
+# If LLM response length drops below this for DIMINISHING_STEPS consecutive
+# steps, we consider the loop to be spinning and stop early.
+DIMINISHING_THRESHOLD = 120   # characters
+DIMINISHING_STEPS = 3
+
+# ── Permission audit log ───────────────────────────────────────────────────
+_AUDIT_PATH = Path(os.getenv("ARGOS_PERMISSION_AUDIT", "logs/argos_permissions.jsonl"))
+
+
+def _log_permission_decision(
+    tool_name: str,
+    tool_input: dict,
+    decision: str,         # "allowed" | "denied_auto" | "denied_user" | "denied_hook"
+    risk: str,
+    source: str,           # "safe" | "api_auto" | "callback" | "hook" | "default"
+) -> None:
+    """Appende una riga JSONL al permission audit log."""
+    try:
+        _AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "ts": datetime.utcnow().isoformat(),
+            "tool": tool_name,
+            "risk": risk,
+            "decision": decision,
+            "source": source,
+            "input_preview": json.dumps(tool_input or {}, ensure_ascii=False)[:200],
+        }
+        with open(_AUDIT_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.debug(f"[PermissionAudit] Write failed: {e}")
+
+
+# ── Context memoization ────────────────────────────────────────────────────
+
+def _get_git_context(max_chars: int = 500) -> Optional[str]:
+    """Returns a compact git status string, or None if not in a git repo."""
+    try:
+        branch = subprocess.check_output(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            stderr=subprocess.DEVNULL, timeout=3,
+        ).decode().strip()
+        status = subprocess.check_output(
+            ["git", "status", "--short"],
+            stderr=subprocess.DEVNULL, timeout=3,
+        ).decode().strip()
+        result = f"Git branch: {branch}"
+        if status:
+            result += f"\nChanged files:\n{status}"
+        return result[:max_chars]
+    except Exception:
+        return None
 
 
 # ==========================================================================
@@ -66,6 +132,27 @@ class TaskResult:
 
 MEMORY_MODES = ("off", "session", "persistent")
 
+# ── TF-IDF for session memory ──────────────────────────────────────────────
+try:
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine
+
+    _SKLEARN_AVAILABLE = True
+except ImportError:
+    _SKLEARN_AVAILABLE = False
+
+
+def _tfidf_similarity(query: str, documents: list[str]) -> list[float]:
+    if not _SKLEARN_AVAILABLE or not documents:
+        return [0.0] * len(documents)
+    try:
+        corpus = documents + [query]
+        vec = TfidfVectorizer(min_df=1).fit_transform(corpus)
+        scores = sklearn_cosine(vec[-1], vec[:-1]).flatten()
+        return scores.tolist()
+    except Exception:
+        return [0.0] * len(documents)
+
 
 # ==========================================================================
 # CoreAgent — The Unified Brain
@@ -83,6 +170,8 @@ class CoreAgent:
         require_confirmation: If True, dangerous tools are auto-blocked (API mode).
         confirmation_callback: Optional function(tool_name, tool_input) -> bool.
                                Used by CLI to prompt the user for authorization.
+        allowed_tools: If set, only these tool names are exposed to the LLM.
+        inject_git_context: If True, injects git branch/status into context once per task.
     """
 
     def __init__(
@@ -93,6 +182,7 @@ class CoreAgent:
         require_confirmation: bool = False,
         confirmation_callback: Optional[Callable] = None,
         allowed_tools: Optional[Set[str]] = None,
+        inject_git_context: bool = True,
     ):
         if memory_mode not in MEMORY_MODES:
             raise ValueError(
@@ -103,55 +193,38 @@ class CoreAgent:
         self.max_steps = max_steps
         self.require_confirmation = require_confirmation
         self.confirmation_callback = confirmation_callback
+        self.inject_git_context = inject_git_context
 
-        # Tool filtering: when set, only these tools are exposed to the LLM
-        if allowed_tools is not None:
-            self._available_tools = {
-                k: v for k, v in TOOLS.items() if k in allowed_tools
-            }
-        else:
-            self._available_tools = TOOLS
+        # Build filtered or full ToolSpec registry
+        active_registry = (
+            REGISTRY.filter(allowed_tools) if allowed_tools is not None else REGISTRY
+        )
+        self._available_tools: dict[str, ToolSpec] = {
+            name: active_registry[name] for name in active_registry.names()
+        }
 
         # Resolve user ID
         if user_id is not None:
             self.user_id = user_id
         else:
             linux_user = os.environ.get("USER", "argos")
-            self.user_id = int(
-                hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16
-            ) % (2**31)
+            self.user_id = (
+                int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)
+            )
 
-        # LLM provider (wraps Groq/OpenAI/Anthropic)
-        self._llm = ArgosAgent()
+        # LLM provider — receives filtered registry so prompt matches available tools
+        self._llm = ArgosAgent(registry=active_registry)
 
-        # --- Rewrite system prompt to reflect only available tools ---
-        if allowed_tools is not None:
-            self._rewrite_tool_prompt()
-
-        # Session memory (RAM-only, cleared on exit). Bounded to prevent OOM on long sessions.
+        # Session memory (RAM-only, cleared on exit)
         self._session_memories: deque[dict] = deque(maxlen=500)
 
-        # Dangerous tools that require confirmation
-        self._dangerous_tools = {
-            "create_file",
-            "modify_file",
-            "rename_file",
-            "create_directory",
-            "delete_directory",
-            "delete_file",
-            "read_file",
-            "visual_click",
-            "keyboard_type",
-            "launch_app",
-            "python_repl",
-            "bash_exec",
-            "read_pdf",
-        }
+        # Context cache: computed once per task, cleared between tasks
+        self._git_context_cache: Optional[str] = None
 
         logger.info(
             f"[CoreAgent] Initialized | memory={memory_mode} | "
             f"user_id={self.user_id} | backend={self._llm.backend} | "
-            f"model={self._llm.model} | tools={len(self._available_tools)}/{len(TOOLS)}"
+            f"model={self._llm.model} | tools={len(self._available_tools)}/{len(REGISTRY)}"
         )
 
     # --- Public Properties ---
@@ -171,13 +244,26 @@ class CoreAgent:
     def run_task(self, task: str) -> TaskResult:
         """
         Executes a natural language task through the full cognitive pipeline:
-        1. Retrieve relevant memories (if enabled)
-        2. LLM reasoning loop (think → plan → execute → observe)
-        3. Extract new memories (if enabled)
+        1. SESSION_START hook
+        2. Context memoization (git status injected once)
+        3. Retrieve relevant memories (if enabled)
+        4. LLM reasoning loop with:
+           - PreToolUse hooks (can block execution)
+           - PostToolUse / PostToolUseFailure hooks
+           - Diminishing returns early stop
+        5. Extract new memories (if enabled)
+        6. SESSION_END hook
 
         Returns a TaskResult with the final response and execution history.
         """
         tracer = get_tracer()
+
+        # ── SESSION_START ──────────────────────────────────────────────────
+        HOOK_REGISTRY.fire_session(
+            HookEvent.SESSION_START,
+            task=task,
+            user_id=self.user_id,
+        )
 
         with tracer.start_as_current_span(
             "core.run_task",
@@ -190,15 +276,32 @@ class CoreAgent:
             state = WorldState()
             state.current_task = task
 
-            # --- Phase 1: Memory Retrieval ---
+            # ── Phase 1: Context Memoization ──────────────────────────────
+            if self.inject_git_context and self._git_context_cache is None:
+                self._git_context_cache = _get_git_context()
+
+            # ── Phase 2: Memory Retrieval ──────────────────────────────────
             with tracer.start_as_current_span("core.retrieve_memories") as mem_span:
                 relevant_memories = self._retrieve_memories(task)
                 mem_span.set_attribute("memories.count", len(relevant_memories))
 
-            # --- Phase 2: Build context and initialize LLM history ---
+            # ── Phase 3: Build LLM context ────────────────────────────────
             self._llm._init_history()
 
-            # Inject memories into context if available
+            # Inject git context once (memoized)
+            if self._git_context_cache:
+                self._llm.add_message(
+                    "system",
+                    f"CURRENT WORKSPACE STATE:\n{self._git_context_cache}",
+                )
+
+            # Inject current date
+            self._llm.add_message(
+                "system",
+                f"Today's date: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            )
+
+            # Inject relevant memories
             if relevant_memories:
                 memory_context = "\n".join(
                     f"- [{m['category']}] {m['content']}" for m in relevant_memories
@@ -210,9 +313,10 @@ class CoreAgent:
 
             self._llm.add_message("user", task)
 
-            # --- Phase 3: Reasoning Loop ---
-            step_records = []
+            # ── Phase 4: Reasoning Loop ───────────────────────────────────
+            step_records: list[StepRecord] = []
             final_response = ""
+            response_lengths: deque[int] = deque(maxlen=DIMINISHING_STEPS)
 
             for step_num in range(self.max_steps):
                 raw = self._llm.think()
@@ -224,26 +328,51 @@ class CoreAgent:
                     decision.confidence,
                 )
 
-                # Agent decided it's done
+                # ── Diminishing returns detection ──────────────────────────
+                response_lengths.append(len(raw))
+                if (
+                    len(response_lengths) == DIMINISHING_STEPS
+                    and all(l < DIMINISHING_THRESHOLD for l in response_lengths)
+                    and not decision.done
+                ):
+                    logger.warning(
+                        f"[CoreAgent] Diminishing returns detected after {step_num + 1} steps "
+                        f"(lengths={list(response_lengths)}). Stopping loop."
+                    )
+                    final_response = decision.response or raw
+                    root_span.set_attribute("stop_reason", "diminishing_returns")
+                    break
+
                 if decision.done:
                     final_response = decision.response or raw
-                    logger.info(
-                        f"[CoreAgent] Task completed in {step_num + 1} step(s)."
-                    )
+                    logger.info(f"[CoreAgent] Task completed in {step_num + 1} step(s).")
                     root_span.set_attribute("steps.total", step_num + 1)
                     break
 
                 tool_name = decision.tool
                 tool_input = decision.tool_input
 
-                # Unknown tool or not allowed
                 if not tool_name or tool_name not in self._available_tools:
                     final_response = f"Unknown or restricted tool: '{tool_name}'"
                     logger.error(f"[CoreAgent] {final_response}")
                     break
 
-                # --- Security Gate ---
-                if not self._authorize_tool(tool_name, tool_input):
+                spec = self._available_tools[tool_name]
+
+                # ── PreToolUse hooks ───────────────────────────────────────
+                pre_result = HOOK_REGISTRY.fire_pre_tool(tool_name, tool_input or {})
+                if not pre_result.allowed:
+                    final_response = f"Action '{tool_name}' blocked by hook: {pre_result.block_reason}"
+                    logger.warning(f"[CoreAgent] {final_response}")
+                    self._llm.add_message(
+                        "assistant",
+                        json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
+                    )
+                    self._llm.add_message("user", f"ACTION BLOCKED: {pre_result.block_reason}")
+                    break
+
+                # ── Security Gate (with audit trail) ──────────────────────
+                if not self._authorize_tool(spec, tool_input):
                     final_response = f"Action '{tool_name}' denied."
                     state.record_action(tool_name, tool_input, "Denied by user.", False)
                     step_records.append(
@@ -257,36 +386,34 @@ class CoreAgent:
                     )
                     self._llm.add_message(
                         "assistant",
-                        json.dumps(
-                            {"action": {"tool": tool_name, "input": tool_input}}
-                        ),
+                        json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
                     )
                     self._llm.add_message("user", "ACTION DENIED BY USER. STOP.")
                     break
 
-                # --- Execute Tool (with OTel span) ---
+                # ── Execute Tool ───────────────────────────────────────────
                 with tracer.start_as_current_span(
                     "core.tool_execution",
                     attributes={"tool.name": tool_name, "tool.step": step_num + 1},
                 ) as tool_span:
-                    action_result = execute_with_retry(
-                        self._available_tools[tool_name], tool_input, tool_name
-                    )
+                    action_result = execute_with_retry(spec, tool_input)
                     tool_span.set_attribute("tool.success", action_result.success)
                     tool_span.set_attribute(
                         "tool.result_preview", action_result.message[:200]
                     )
 
+                # ── PostToolUse hooks ──────────────────────────────────────
+                HOOK_REGISTRY.fire_post_tool(
+                    tool_name=tool_name,
+                    tool_input=tool_input or {},
+                    result=action_result.message,
+                    success=action_result.success,
+                )
+
                 state.record_action(
                     tool_name, tool_input, action_result.message, action_result.success
                 )
-                log_step(
-                    logger,
-                    state,
-                    tool_name,
-                    action_result.message,
-                    action_result.success,
-                )
+                log_step(logger, state, tool_name, action_result.message, action_result.success)
 
                 step_records.append(
                     StepRecord(
@@ -299,34 +426,33 @@ class CoreAgent:
                     )
                 )
 
-                # Feed result back to LLM
                 self._llm.add_message(
                     "assistant",
                     json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
                 )
                 self._llm.add_message("user", f"TOOL RESULT: {action_result.message}")
 
-                if action_result.success:
-                    final_response = action_result.message
-                else:
-                    final_response = f"Step failure: {action_result.message}"
+                final_response = (
+                    action_result.message
+                    if action_result.success
+                    else f"Step failure: {action_result.message}"
+                )
 
-            # --- Phase 4: Memory Extraction (post-task) ---
+            # ── Phase 5: Memory Extraction ────────────────────────────────
             if self.memory_mode != "off" and final_response:
                 with tracer.start_as_current_span("core.extract_memories"):
                     self._maybe_extract_memories(task, relevant_memories)
 
-            root_span.set_attribute(
-                "result.success",
-                not final_response.startswith(
-                    ("Step failure", "Unknown tool", "Action")
-                ),
-            )
+            # Invalidate git cache so next task gets a fresh snapshot
+            self._git_context_cache = None
 
-            return TaskResult(
-                success=not final_response.startswith(
-                    ("Step failure", "Unknown tool", "Action")
-                ),
+            success = not final_response.startswith(
+                ("Step failure", "Unknown tool", "Action", "Blocked")
+            )
+            root_span.set_attribute("result.success", success)
+
+            task_result = TaskResult(
+                success=success,
                 task=task,
                 response=final_response,
                 steps_executed=state.step_count,
@@ -334,19 +460,40 @@ class CoreAgent:
                 memories_used=len(relevant_memories),
             )
 
+        # ── SESSION_END ────────────────────────────────────────────────────
+        HOOK_REGISTRY.fire_session(
+            HookEvent.SESSION_END,
+            task=task,
+            result=task_result,
+        )
+
+        return task_result
+
+    # ==========================================================================
+    # Streaming Entry Point
+    # ==========================================================================
+
+    def run_task_stream(self, task: str) -> Generator[str, None, None]:
+        """
+        Streaming variant for single-turn, no-tool queries.
+        Yields LLM text chunks as they arrive (SSE / CLI live output).
+        """
+        self._llm._init_history()
+        if self.inject_git_context:
+            ctx = _get_git_context()
+            if ctx:
+                self._llm.add_message("system", f"CURRENT WORKSPACE STATE:\n{ctx}")
+        self._llm.add_message("user", task)
+        yield from self._llm.think_stream()
+
     # ==========================================================================
     # Telegram-Specific Entry Point
     # ==========================================================================
 
     def think_with_context(self, messages: list[dict]) -> str:
-        """
-        Executes a single LLM inference with an externally-provided message history.
-        Used by the Telegram chat module where each user has their own sliding-window context.
-        """
         return self._llm.think_with_messages(messages)
 
     def call_lightweight(self, prompt: str) -> str:
-        """Calls a lightweight model for structured extraction tasks."""
         return self._llm.call_lightweight(prompt)
 
     # ==========================================================================
@@ -354,47 +501,42 @@ class CoreAgent:
     # ==========================================================================
 
     def _retrieve_memories(self, query: str) -> list[dict]:
-        """Retrieves relevant memories based on the current memory mode."""
         if self.memory_mode == "off":
             return []
-
         if self.memory_mode == "session":
-            # Simple keyword matching for session memories (no embeddings needed)
-            query_lower = query.lower()
-            return [
-                m
-                for m in self._session_memories
-                if any(
-                    word in m["content"].lower()
-                    for word in query_lower.split()
-                    if len(word) > 3
-                )
-            ][:3]
-
+            return self._retrieve_session_memories(query)
         if self.memory_mode == "persistent":
             try:
                 from src.core.memory import retrieve_relevant_memories
-
                 return retrieve_relevant_memories(self.user_id, query, top_k=6)
             except Exception as e:
                 logger.warning(f"[CoreAgent] Memory retrieval failed: {e}")
                 return []
-
         return []
 
+    def _retrieve_session_memories(self, query: str, top_k: int = 3) -> list[dict]:
+        if not self._session_memories:
+            return []
+        memories = list(self._session_memories)
+        documents = [m["content"] for m in memories]
+        if _SKLEARN_AVAILABLE:
+            scores = _tfidf_similarity(query, documents)
+            scored = sorted(zip(scores, memories), key=lambda x: x[0], reverse=True)
+            return [m for score, m in scored[:top_k] if score > 0.05]
+        else:
+            query_words = {w for w in query.lower().split() if len(w) > 3}
+            return [
+                m for m in memories
+                if any(w in m["content"].lower() for w in query_words)
+            ][:top_k]
+
     def _maybe_extract_memories(self, user_message: str, existing_memories: list[dict]):
-        """Extracts and stores new memories from the conversation if conditions are met."""
         if self.memory_mode == "session":
-            # For session mode, just store raw facts in RAM
             if len(user_message) > EXTRACT_MIN_LENGTH:
                 self._session_memories.append(
-                    {
-                        "content": user_message[:200],
-                        "category": "fact",
-                    }
+                    {"content": user_message[:200], "category": "fact"}
                 )
             return
-
         if self.memory_mode == "persistent":
             try:
                 from src.core.memory import (
@@ -402,8 +544,6 @@ class CoreAgent:
                     save_extracted_memories,
                     should_extract_memory,
                 )
-
-                # Use a simple heuristic: extract every time for CLI (no msg_count tracking)
                 if should_extract_memory(user_message, 5):
                     facts = extract_memories_from_text(
                         user_message, existing_memories, self._llm.call_lightweight
@@ -419,115 +559,51 @@ class CoreAgent:
     # Security Gate (Private)
     # ==========================================================================
 
-    def _authorize_tool(self, tool_name: str, tool_input: dict) -> bool:
+    def _authorize_tool(self, spec_or_name, tool_input: dict) -> bool:
         """
         Checks if a tool execution should proceed.
-        - API mode: auto-blocks if require_confirmation is True
-        - CLI mode: calls the confirmation_callback for user approval
-        """
-        if tool_name not in self._dangerous_tools:
-            return True  # Safe tools always allowed
+        Logs every decision to the permission audit trail.
 
-        # API mode: auto-block dangerous tools when flag is set
+        Args:
+            spec_or_name: ToolSpec instance or tool name string (backward compat).
+        """
+        if isinstance(spec_or_name, str):
+            spec = self._available_tools.get(spec_or_name) or REGISTRY.get(spec_or_name)
+            if spec is None:
+                _log_permission_decision(
+                    str(spec_or_name), tool_input or {}, "denied_auto", "unknown", "not_found"
+                )
+                return False
+        else:
+            spec = spec_or_name
+
+        # ── Safe tools: always allowed ──
+        if not spec.requires_confirmation():
+            _log_permission_decision(spec.name, tool_input or {}, "allowed", spec.risk, "safe")
+            return True
+
+        # ── API mode: auto-block ──
         if self.require_confirmation:
             logger.warning(
-                f"[CoreAgent] Auto-blocked '{tool_name}' (require_confirmation=True)"
+                f"[CoreAgent] Auto-blocked '{spec.name}' (risk={spec.risk})"
+            )
+            _log_permission_decision(
+                spec.name, tool_input or {}, "denied_auto", spec.risk, "api_auto"
             )
             return False
 
-        # CLI mode: ask the user
+        # ── CLI mode: ask the user ──
         if self.confirmation_callback:
-            return self.confirmation_callback(tool_name, tool_input)
+            allowed = self.confirmation_callback(spec.name, tool_input)
+            _log_permission_decision(
+                spec.name,
+                tool_input or {},
+                "allowed" if allowed else "denied_user",
+                spec.risk,
+                "callback",
+            )
+            return allowed
 
-        # Default: allow (no restrictions configured)
+        # ── Default: allow ──
+        _log_permission_decision(spec.name, tool_input or {}, "allowed", spec.risk, "default")
         return True
-
-    # ==========================================================================
-    # System Prompt Rewriting (Private)
-    # ==========================================================================
-
-    # Tool input examples for the system prompt (keyed by tool name)
-    _TOOL_INPUT_EXAMPLES: dict[str, str] = {
-        "describe_screen": '{{"question": "..."}}',
-        "visual_click": '{{"description": "element description", "click_type": "left/right/double"}}',
-        "launch_app": '{{"app_name": "firefox"}}',
-        "system_stats": "(no input needed)",
-        "keyboard_type": '{{"text": "text to type", "at_element": "visual description", "press_enter": true}}',
-        "list_files": '{{"path": "."}}',
-        "read_file": '{{"filename": "..."}}',
-        "create_file": '{{"filename": "...", "content": "..."}}',
-        "modify_file": '{{"filename": "...", "content": "...", "mode": "write/append"}}',
-        "rename_file": '{{"old_name": "...", "new_name": "..."}}',
-        "delete_file": '{{"filename": "..."}}',
-        "create_directory": '{{"name": "directory_name"}}',
-        "delete_directory": '{{"name": "directory_name"}}',
-        "web_search": '{{"query": "search query"}}',
-        "web_scrape": '{{"url": "https://example.com/page"}}',
-        "crypto_price": '{{"coin": "bitcoin"}}',
-        "finance_price": '{{"asset": "gold"}}',
-        "get_weather": '{{"location": "Rome"}}',
-        "python_repl": '{{"code": "print(2+2)"}}',
-        "bash_exec": '{{"command": "ls -la"}}',
-        "read_pdf": '{{"filename": "report.pdf"}}',
-        "read_csv": '{{"filename": "data.csv", "rows": 10}}',
-        "read_json": '{{"filename": "config.json"}}',
-    }
-
-    # Category display order and labels
-    _CATEGORY_ORDER = [
-        ("web", "WEB & DATA"),
-        ("finance", "FINANCE"),
-        ("documents", "DOCUMENT PARSING"),
-        ("code", "CODE EXECUTION"),
-        ("system", "SYSTEM"),
-        ("filesystem", "FILE SYSTEM"),
-        ("gui", "VISION"),
-    ]
-
-    def _rewrite_tool_prompt(self):
-        """
-        Rewrites the AVAILABLE TOOLS section in the LLM system prompt
-        to reflect only the tools actually available (self._available_tools).
-
-        This prevents the LLM from hallucinating actions with blocked tools.
-        """
-        import re
-
-        # Build dynamic tool listing from available tools, grouped by category
-        grouped: dict[str, list[str]] = {}
-        for name in self._available_tools:
-            meta = TOOL_METADATA.get(name, {})
-            cat = meta.get("category", "other")
-            example = self._TOOL_INPUT_EXAMPLES.get(name, "")
-            line = f"        - {name}: {example}" if example else f"        - {name}"
-            grouped.setdefault(cat, []).append(line)
-
-        # Build the replacement block
-        lines = [
-            '        AVAILABLE TOOLS (the names below must be used in "action" -> "tool" and "input"):'
-        ]
-        for cat_key, cat_label in self._CATEGORY_ORDER:
-            if cat_key in grouped:
-                lines.append(f"        --- {cat_label} ---")
-                lines.extend(grouped[cat_key])
-                lines.append("")  # blank line between categories
-
-        new_tools_block = "\n".join(lines)
-
-        # Replace the hardcoded AVAILABLE TOOLS section in the system prompt.
-        # The section starts with "AVAILABLE TOOLS" and ends before "MANDATORY RESPONSE FORMAT"
-        # (injected by build_system_prompt_suffix).
-        pattern = r"AVAILABLE TOOLS.*?(?=MANDATORY RESPONSE FORMAT)"
-        self._llm.system_prompt = re.sub(
-            pattern,
-            new_tools_block.strip() + "\n\n        ",
-            self._llm.system_prompt,
-            flags=re.DOTALL,
-        )
-
-        # Re-init history so the new prompt takes effect
-        self._llm._init_history()
-
-        logger.info(
-            f"[CoreAgent] System prompt rewritten: {len(self._available_tools)} tools exposed to LLM"
-        )

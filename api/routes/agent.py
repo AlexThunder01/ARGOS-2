@@ -3,16 +3,21 @@ ARGOS-2 API — Agent Task Execution Routes.
 
 Provides /run (synchronous) and /run_async (webhook-based) endpoints
 for executing natural language tasks through the CoreAgent.
+
+Idempotence: /run_async accepts an optional Idempotency-Key header.
+If the same key is submitted twice, the second request returns the
+cached job_id immediately without spawning a new execution.
 """
 
 import asyncio
 import logging
 import uuid
-from typing import List
+from threading import Lock
+from typing import List, Optional
 
 import pybreaker
 import requests
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from api.security import verify_api_key
@@ -23,6 +28,12 @@ router = APIRouter(tags=["Agent"])
 logger = logging.getLogger("argos")
 
 llm_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
+
+# ── Idempotency store ──────────────────────────────────────────────────────
+# Maps idempotency_key → job_id for deduplication of async requests.
+# In-memory: resets on server restart (acceptable for short-lived jobs).
+_idempotency_store: dict[str, str] = {}
+_idempotency_lock = Lock()
 
 
 # ==========================================================================
@@ -52,6 +63,7 @@ class AsyncAcceptedResponse(BaseModel):
     status: str
     job_id: str
     message: str
+    deduplicated: bool = False  # True if this job_id was already in flight
 
 
 class StepRecord(BaseModel):
@@ -212,15 +224,40 @@ async def run_task(req: TaskRequest):
     status_code=202,
     dependencies=[Depends(verify_api_key)],
 )
-async def run_task_async(req: TaskAsyncRequest, background_tasks: BackgroundTasks):
+async def run_task_async(
+    req: TaskAsyncRequest,
+    background_tasks: BackgroundTasks,
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+):
     from src.core.rate_limit import RateLimitExceeded, check_rate_limit
 
     try:
-        check_rate_limit(0)  # 0 is standard for REST API access
+        check_rate_limit(0)
     except RateLimitExceeded as e:
         raise HTTPException(status_code=429, detail=str(e))
 
+    # ── Idempotency check ──────────────────────────────────────────────────
+    if idempotency_key:
+        with _idempotency_lock:
+            if idempotency_key in _idempotency_store:
+                existing_job_id = _idempotency_store[idempotency_key]
+                logger.info(
+                    f"[Idempotency] Duplicate request for key '{idempotency_key}' "
+                    f"→ returning existing job_id={existing_job_id}"
+                )
+                return AsyncAcceptedResponse(
+                    status="accepted",
+                    job_id=existing_job_id,
+                    message="Duplicate request detected. Returning existing job.",
+                    deduplicated=True,
+                )
+
     job_id = str(uuid.uuid4())[:8]
+
+    # Store idempotency key before spawning background task
+    if idempotency_key:
+        with _idempotency_lock:
+            _idempotency_store[idempotency_key] = job_id
 
     background_tasks.add_task(
         _run_task_async_worker,

@@ -37,6 +37,9 @@ docker==7.1.0
 psycopg[binary]==3.3.3
 psycopg_pool==3.3.0
 
+# --- Semantic Memory (TF-IDF for session memory retrieval) ---
+scikit-learn==1.6.1
+
 # --- Observability (OpenTelemetry + Jaeger) ---
 opentelemetry-api==1.40.0
 opentelemetry-sdk==1.40.0
