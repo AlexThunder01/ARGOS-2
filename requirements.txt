@@ -1,5 +1,6 @@
 # --- Core Network & Environment ---
 requests==2.33.1
+httpx==0.28.1
 python-dotenv==1.2.2
 
 # --- Image Processing & Vision ---

@@ -18,6 +18,7 @@ Usage:
     result = agent.run_task("List files in the current directory")
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -25,8 +26,9 @@ import os
 import subprocess
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from threading import Lock
 from typing import Callable, Generator, Optional, Set
 
 from src.agent import ArgosAgent
@@ -42,6 +44,12 @@ from src.world_model.state import WorldState
 
 logger = logging.getLogger("argos")
 
+# ── Filesystem-mutating tools that invalidate git context mid-task ─────────
+_FILESYSTEM_MUTATING_TOOLS: frozenset[str] = frozenset({
+    "create_file", "modify_file", "rename_file", "delete_file",
+    "create_directory", "delete_directory",
+})
+
 # ── Diminishing returns constants ──────────────────────────────────────────
 # If LLM response length drops below this for DIMINISHING_STEPS consecutive
 # steps, we consider the loop to be spinning and stop early.
@@ -50,6 +58,7 @@ DIMINISHING_STEPS = 3
 
 # ── Permission audit log ───────────────────────────────────────────────────
 _AUDIT_PATH = Path(os.getenv("ARGOS_PERMISSION_AUDIT", "logs/argos_permissions.jsonl"))
+_AUDIT_LOCK = Lock()  # Protegge da race condition su scritture concorrenti
 
 
 def _log_permission_decision(
@@ -63,15 +72,17 @@ def _log_permission_decision(
     try:
         _AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
         entry = {
-            "ts": datetime.utcnow().isoformat(),
+            "ts": datetime.now(timezone.utc).isoformat(),
             "tool": tool_name,
             "risk": risk,
             "decision": decision,
             "source": source,
             "input_preview": json.dumps(tool_input or {}, ensure_ascii=False)[:200],
         }
-        with open(_AUDIT_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        line = json.dumps(entry, ensure_ascii=False) + "\n"
+        with _AUDIT_LOCK:
+            with open(_AUDIT_PATH, "a", encoding="utf-8") as f:
+                f.write(line)
     except Exception as e:
         logger.debug(f"[PermissionAudit] Write failed: {e}")
 
@@ -410,6 +421,19 @@ class CoreAgent:
                     success=action_result.success,
                 )
 
+                # ── Git context refresh after filesystem mutations ──────────
+                if (
+                    action_result.success
+                    and tool_name in _FILESYSTEM_MUTATING_TOOLS
+                    and self.inject_git_context
+                ):
+                    self._git_context_cache = _get_git_context()
+                    if self._git_context_cache:
+                        self._llm.add_message(
+                            "system",
+                            f"WORKSPACE STATE UPDATED:\n{self._git_context_cache}",
+                        )
+
                 state.record_action(
                     tool_name, tool_input, action_result.message, action_result.success
                 )
@@ -467,6 +491,218 @@ class CoreAgent:
             result=task_result,
         )
 
+        return task_result
+
+    # ==========================================================================
+    # Async Entry Point (FastAPI — non-blocking)
+    # ==========================================================================
+
+    async def run_task_async(self, task: str) -> TaskResult:
+        """
+        Fully async variant of run_task().
+
+        LLM calls use httpx.AsyncClient (think_async), so the FastAPI event
+        loop is never blocked.  Sync tool executors are offloaded via
+        asyncio.to_thread() so they don't block either.
+
+        The logic mirrors run_task() exactly; keep both in sync when adding
+        new features to the reasoning loop.
+        """
+        tracer = get_tracer()
+
+        # ── SESSION_START ──────────────────────────────────────────────────
+        HOOK_REGISTRY.fire_session(HookEvent.SESSION_START, task=task, user_id=self.user_id)
+
+        with tracer.start_as_current_span(
+            "core.run_task_async",
+            attributes={"task": task[:200], "user_id": self.user_id, "memory_mode": self.memory_mode},
+        ) as root_span:
+            state = WorldState()
+            state.current_task = task
+
+            # ── Context memoization ────────────────────────────────────────
+            if self.inject_git_context and self._git_context_cache is None:
+                self._git_context_cache = await asyncio.to_thread(_get_git_context)
+
+            # ── Memory retrieval ───────────────────────────────────────────
+            with tracer.start_as_current_span("core.retrieve_memories") as mem_span:
+                relevant_memories = self._retrieve_memories(task)
+                mem_span.set_attribute("memories.count", len(relevant_memories))
+
+            # ── Build LLM context ──────────────────────────────────────────
+            self._llm._init_history()
+
+            if self._git_context_cache:
+                self._llm.add_message(
+                    "system", f"CURRENT WORKSPACE STATE:\n{self._git_context_cache}"
+                )
+            self._llm.add_message(
+                "system", f"Today's date: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            )
+            if relevant_memories:
+                memory_context = "\n".join(
+                    f"- [{m['category']}] {m['content']}" for m in relevant_memories
+                )
+                self._llm.add_message(
+                    "system",
+                    f"THINGS YOU KNOW ABOUT THE USER (use when relevant):\n{memory_context}",
+                )
+            self._llm.add_message("user", task)
+
+            # ── Reasoning loop ─────────────────────────────────────────────
+            step_records: list[StepRecord] = []
+            final_response = ""
+            response_lengths: deque[int] = deque(maxlen=DIMINISHING_STEPS)
+
+            for step_num in range(self.max_steps):
+                raw = await self._llm.think_async()
+                decision = parse_planner_response(raw)
+                log_decision(logger, decision.thought, decision.tool or "done", decision.confidence)
+
+                # Diminishing returns
+                response_lengths.append(len(raw))
+                if (
+                    len(response_lengths) == DIMINISHING_STEPS
+                    and all(l < DIMINISHING_THRESHOLD for l in response_lengths)
+                    and not decision.done
+                ):
+                    logger.warning(
+                        f"[CoreAgent/async] Diminishing returns after {step_num + 1} steps "
+                        f"(lengths={list(response_lengths)}). Stopping."
+                    )
+                    final_response = decision.response or raw
+                    root_span.set_attribute("stop_reason", "diminishing_returns")
+                    break
+
+                if decision.done:
+                    final_response = decision.response or raw
+                    logger.info(f"[CoreAgent/async] Completed in {step_num + 1} step(s).")
+                    root_span.set_attribute("steps.total", step_num + 1)
+                    break
+
+                tool_name = decision.tool
+                tool_input = decision.tool_input
+
+                if not tool_name or tool_name not in self._available_tools:
+                    final_response = f"Unknown or restricted tool: '{tool_name}'"
+                    logger.error(f"[CoreAgent/async] {final_response}")
+                    break
+
+                spec = self._available_tools[tool_name]
+
+                # PreToolUse hooks
+                pre_result = HOOK_REGISTRY.fire_pre_tool(tool_name, tool_input or {})
+                if not pre_result.allowed:
+                    final_response = f"Action '{tool_name}' blocked by hook: {pre_result.block_reason}"
+                    logger.warning(f"[CoreAgent/async] {final_response}")
+                    self._llm.add_message(
+                        "assistant",
+                        json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
+                    )
+                    self._llm.add_message("user", f"ACTION BLOCKED: {pre_result.block_reason}")
+                    break
+
+                # Security gate
+                if not self._authorize_tool(spec, tool_input):
+                    final_response = f"Action '{tool_name}' denied."
+                    state.record_action(tool_name, tool_input, "Denied by user.", False)
+                    step_records.append(
+                        StepRecord(
+                            step=state.step_count,
+                            tool=tool_name,
+                            tool_input=tool_input or {},
+                            result="Denied by user.",
+                            success=False,
+                        )
+                    )
+                    self._llm.add_message(
+                        "assistant",
+                        json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
+                    )
+                    self._llm.add_message("user", "ACTION DENIED BY USER. STOP.")
+                    break
+
+                # Execute tool in thread (sync executors must not block event loop)
+                with tracer.start_as_current_span(
+                    "core.tool_execution",
+                    attributes={"tool.name": tool_name, "tool.step": step_num + 1},
+                ) as tool_span:
+                    action_result = await asyncio.to_thread(
+                        execute_with_retry, spec, tool_input
+                    )
+                    tool_span.set_attribute("tool.success", action_result.success)
+                    tool_span.set_attribute("tool.result_preview", action_result.message[:200])
+
+                # PostToolUse hooks
+                HOOK_REGISTRY.fire_post_tool(
+                    tool_name=tool_name,
+                    tool_input=tool_input or {},
+                    result=action_result.message,
+                    success=action_result.success,
+                )
+
+                # Git context refresh after filesystem mutations
+                if (
+                    action_result.success
+                    and tool_name in _FILESYSTEM_MUTATING_TOOLS
+                    and self.inject_git_context
+                ):
+                    self._git_context_cache = await asyncio.to_thread(_get_git_context)
+                    if self._git_context_cache:
+                        self._llm.add_message(
+                            "system",
+                            f"WORKSPACE STATE UPDATED:\n{self._git_context_cache}",
+                        )
+
+                state.record_action(tool_name, tool_input, action_result.message, action_result.success)
+                log_step(logger, state, tool_name, action_result.message, action_result.success)
+
+                step_records.append(
+                    StepRecord(
+                        step=state.step_count,
+                        tool=tool_name,
+                        tool_input=tool_input or {},
+                        result=action_result.message[:500],
+                        success=action_result.success,
+                        timestamp=state.action_history[-1].timestamp,
+                    )
+                )
+
+                self._llm.add_message(
+                    "assistant",
+                    json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
+                )
+                self._llm.add_message("user", f"TOOL RESULT: {action_result.message}")
+
+                final_response = (
+                    action_result.message
+                    if action_result.success
+                    else f"Step failure: {action_result.message}"
+                )
+
+            # Memory extraction
+            if self.memory_mode != "off" and final_response:
+                with tracer.start_as_current_span("core.extract_memories"):
+                    self._maybe_extract_memories(task, relevant_memories)
+
+            self._git_context_cache = None
+
+            success = not final_response.startswith(
+                ("Step failure", "Unknown tool", "Action", "Blocked")
+            )
+            root_span.set_attribute("result.success", success)
+
+            task_result = TaskResult(
+                success=success,
+                task=task,
+                response=final_response,
+                steps_executed=state.step_count,
+                history=step_records,
+                memories_used=len(relevant_memories),
+            )
+
+        # SESSION_END
+        HOOK_REGISTRY.fire_session(HookEvent.SESSION_END, task=task, result=task_result)
         return task_result
 
     # ==========================================================================

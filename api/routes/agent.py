@@ -96,16 +96,85 @@ class StatusResponse(BaseModel):
 # ==========================================================================
 
 
-def _run_task_sync(
-    task: str, require_confirmation: bool, max_steps: int
-) -> TaskResponse:
-    """Executes a task synchronously via the CoreAgent."""
-    agent = CoreAgent(
+def _make_agent(require_confirmation: bool, max_steps: int) -> CoreAgent:
+    return CoreAgent(
         memory_mode="off",
         require_confirmation=require_confirmation,
         max_steps=max_steps,
     )
 
+
+def _task_result_to_response(result, agent: CoreAgent, task: str) -> TaskResponse:
+    step_records = [
+        StepRecord(
+            step=s.step,
+            tool=s.tool,
+            result=s.result[:200],
+            success=s.success,
+            timestamp=s.timestamp,
+        )
+        for s in result.history
+    ]
+    return TaskResponse(
+        success=result.success,
+        task=task,
+        steps_executed=result.steps_executed,
+        result=result.response,
+        history=step_records,
+        backend=agent.backend,
+        model=agent.model,
+    )
+
+
+async def _run_task_async_core(
+    task: str, require_confirmation: bool, max_steps: int
+) -> TaskResponse:
+    """
+    Executes a task via the async CoreAgent (non-blocking httpx LLM calls).
+
+    pybreaker.CircuitBreaker.call() is sync-only; we manually honour the
+    breaker's open state and delegate success/failure tracking to it via a
+    thread so we don't block the event loop.
+    """
+    agent = _make_agent(require_confirmation, max_steps)
+
+    # Honour open circuit without blocking
+    if llm_breaker.current_state == pybreaker.STATE_OPEN:
+        return TaskResponse(
+            success=False,
+            task=task,
+            steps_executed=0,
+            result="LLM Service unavailable (Circuit Breaker OPEN)",
+            history=[],
+            backend=agent.backend,
+            model=agent.model,
+        )
+
+    try:
+        result = await agent.run_task_async(task)
+        # Record success so the breaker can close from HALF_OPEN
+        await asyncio.to_thread(llm_breaker.call, lambda: None)
+    except pybreaker.CircuitBreakerError:
+        return TaskResponse(
+            success=False,
+            task=task,
+            steps_executed=0,
+            result="LLM Service unavailable (Circuit Breaker OPEN)",
+            history=[],
+            backend=agent.backend,
+            model=agent.model,
+        )
+    except Exception:
+        raise
+
+    return _task_result_to_response(result, agent, task)
+
+
+def _run_task_sync(
+    task: str, require_confirmation: bool, max_steps: int
+) -> TaskResponse:
+    """Sync fallback — used only by the webhook background worker."""
+    agent = _make_agent(require_confirmation, max_steps)
     try:
         result = llm_breaker.call(agent.run_task, task)
     except pybreaker.CircuitBreakerError:
@@ -118,27 +187,7 @@ def _run_task_sync(
             backend=agent.backend,
             model=agent.model,
         )
-
-    step_records = [
-        StepRecord(
-            step=s.step,
-            tool=s.tool,
-            result=s.result[:200],
-            success=s.success,
-            timestamp=s.timestamp,
-        )
-        for s in result.history
-    ]
-
-    return TaskResponse(
-        success=result.success,
-        task=task,
-        steps_executed=result.steps_executed,
-        result=result.response,
-        history=step_records,
-        backend=agent.backend,
-        model=agent.model,
-    )
+    return _task_result_to_response(result, agent, task)
 
 
 def _run_task_async_worker(
@@ -208,9 +257,7 @@ async def run_task(req: TaskRequest):
         raise HTTPException(status_code=429, detail=str(e))
 
     try:
-        return await asyncio.to_thread(
-            _run_task_sync, req.task, req.require_confirmation, req.max_steps
-        )
+        return await _run_task_async_core(req.task, req.require_confirmation, req.max_steps)
     except HTTPException:
         raise
     except Exception as e:
