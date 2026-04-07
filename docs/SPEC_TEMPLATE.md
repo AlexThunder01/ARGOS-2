@@ -19,7 +19,7 @@
 | `tests/...` | aggiungere test |
 
 ## Vincoli e regole
-<!-- Regole architetturali da rispettare. Copia quelle rilevanti da CLAUDE.md. -->
+<!-- Regole architetturali da rispettare. Copia quelle rilevanti dalle agent instructions. -->
 
 - [ ] Nessun metadata hardcoded fuori da `ToolSpec`
 - [ ] Nessun mock del DB nei test
