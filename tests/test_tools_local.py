@@ -139,7 +139,9 @@ class TestFilesystemTools:
         assert "📂" in result
 
     def test_read_nonexistent_file(self, tmp_path):
-        result = TOOLS["read_file"]({"path": str(tmp_path / "this_file_does_not_exist.txt")})
+        result = TOOLS["read_file"](
+            {"path": str(tmp_path / "this_file_does_not_exist.txt")}
+        )
         assert "not found" in result.lower()
 
     def test_rename_file(self, tmp_path):
