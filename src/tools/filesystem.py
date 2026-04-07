@@ -11,7 +11,10 @@ def list_files_tool(inp):
     if raw_path in [".", "DESKTOP", None]:
         target = _get_desktop_path()
     else:
-        target = _normalize_path(raw_path)
+        try:
+            target = _normalize_path(raw_path)
+        except ValueError as e:
+            return f"Error: {e}"
 
     if not os.path.exists(target):
         return f"Error: '{target}' does not exist."
@@ -25,7 +28,10 @@ def list_files_tool(inp):
 
 def read_file_tool(inp):
     fname = _get_arg(inp, ["filename", "path", "file"])
-    path = _normalize_path(fname)
+    try:
+        path = _normalize_path(fname)
+    except ValueError as e:
+        return f"Error: {e}"
     if not os.path.exists(path):
         return "File not found."
     if os.path.isdir(path):
@@ -41,7 +47,10 @@ def create_file_tool(inp):
     fname = _get_arg(inp, ["filename", "path", "name"], "untitled.txt")
     if "." not in fname:
         fname += ".txt"
-    path = _normalize_path(fname)
+    try:
+        path = _normalize_path(fname)
+    except ValueError as e:
+        return f"Error: {e}"
 
     content = inp.get("content", "") if isinstance(inp, dict) else ""
 
@@ -60,7 +69,10 @@ def create_directory_tool(inp):
     if not name:
         return "Error: Please specify a directory name."
 
-    path = _normalize_path(name)
+    try:
+        path = _normalize_path(name)
+    except ValueError as e:
+        return f"Error: {e}"
 
     if os.path.exists(path):
         return f"⚠️ Directory or file '{os.path.basename(path)}' already exists."
@@ -77,7 +89,10 @@ def delete_directory_tool(inp):
     if not name:
         return "Error: Please specify the directory name to delete."
 
-    path = _normalize_path(name)
+    try:
+        path = _normalize_path(name)
+    except ValueError as e:
+        return f"Error: {e}"
 
     if not os.path.exists(path):
         return f"Error: Directory '{path}' does not exist."
@@ -96,7 +111,10 @@ def modify_file_tool(inp):
     if not fname:
         return "Error: Please specify the filename to modify."
 
-    path = _normalize_path(fname)
+    try:
+        path = _normalize_path(fname)
+    except ValueError as e:
+        return f"Error: {e}"
     if not os.path.exists(path):
         return "Error: File not found."
 
@@ -121,8 +139,11 @@ def rename_file_tool(inp):
     if not old or not new:
         return "Error: Both 'old_name' and 'new_name' are required."
 
-    p_old = _normalize_path(old)
-    p_new = _normalize_path(new)
+    try:
+        p_old = _normalize_path(old)
+        p_new = _normalize_path(new)
+    except ValueError as e:
+        return f"Error: {e}"
 
     if not os.path.exists(p_old):
         return f"Error: '{old}' not found."
@@ -138,7 +159,10 @@ def rename_file_tool(inp):
 
 def delete_file_tool(inp):
     fname = _get_arg(inp, ["filename", "path", "file"])
-    path = _normalize_path(fname)
+    try:
+        path = _normalize_path(fname)
+    except ValueError as e:
+        return f"Error: {e}"
     if not os.path.exists(path):
         return "File not found."
     try:

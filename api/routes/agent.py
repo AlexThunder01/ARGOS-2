@@ -10,7 +10,9 @@ cached job_id immediately without spawning a new execution.
 """
 
 import asyncio
+import ipaddress
 import logging
+import urllib.parse
 import uuid
 from threading import Lock
 from typing import List, Optional
@@ -34,6 +36,76 @@ llm_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
 # In-memory: resets on server restart (acceptable for short-lived jobs).
 _idempotency_store: dict[str, str] = {}
 _idempotency_lock = Lock()
+
+# ── Agent cache ────────────────────────────────────────────────────────────
+# CoreAgent construction rebuilds the ToolSpec registry and ArgosAgent on
+# every call.  Since memory_mode="off" agents are stateless between tasks,
+# we cache them by (require_confirmation, max_steps).
+# Bounded to _AGENT_CACHE_MAX entries to prevent unbounded memory growth.
+_AGENT_CACHE_MAX = 32
+_agent_cache: dict[tuple, "CoreAgent"] = {}
+_agent_cache_lock = Lock()
+
+
+def _get_agent(require_confirmation: bool, max_steps: int) -> "CoreAgent":
+    key = (require_confirmation, max_steps)
+    with _agent_cache_lock:
+        if key not in _agent_cache:
+            if len(_agent_cache) >= _AGENT_CACHE_MAX:
+                # Evict the oldest entry (insertion-order dict, Python 3.7+)
+                oldest_key = next(iter(_agent_cache))
+                del _agent_cache[oldest_key]
+            _agent_cache[key] = CoreAgent(
+                memory_mode="off",
+                require_confirmation=require_confirmation,
+                max_steps=max_steps,
+            )
+    return _agent_cache[key]
+
+
+# ── SSRF guard ─────────────────────────────────────────────────────────────
+
+_SSRF_BLOCKED_HOSTS = frozenset({"localhost", "0.0.0.0"})
+
+
+def _validate_webhook_url(url: str) -> None:
+    """
+    Raises ValueError if the URL targets a loopback, private, link-local,
+    or otherwise non-public address (SSRF prevention).
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception as exc:
+        raise ValueError(f"Invalid webhook URL: {exc}") from exc
+
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(
+            f"Webhook URL must use http or https, got: {parsed.scheme!r}"
+        )
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise ValueError("Webhook URL has no hostname.")
+
+    if hostname.lower() in _SSRF_BLOCKED_HOSTS:
+        raise ValueError(f"Webhook URL targets a blocked hostname: {hostname}")
+
+    try:
+        addr = ipaddress.ip_address(hostname)
+        if (
+            addr.is_private
+            or addr.is_loopback
+            or addr.is_link_local
+            or addr.is_reserved
+            or addr.is_multicast
+        ):
+            raise ValueError(
+                f"Webhook URL targets a non-public IP address: {hostname}"
+            )
+    except ValueError as exc:
+        if "Webhook URL targets" in str(exc):
+            raise
+        # hostname is a domain name, not an IP literal — allow it
 
 
 # ==========================================================================
@@ -96,12 +168,6 @@ class StatusResponse(BaseModel):
 # ==========================================================================
 
 
-def _make_agent(require_confirmation: bool, max_steps: int) -> CoreAgent:
-    return CoreAgent(
-        memory_mode="off",
-        require_confirmation=require_confirmation,
-        max_steps=max_steps,
-    )
 
 
 def _task_result_to_response(result, agent: CoreAgent, task: str) -> TaskResponse:
@@ -136,7 +202,7 @@ async def _run_task_async_core(
     breaker's open state and delegate success/failure tracking to it via a
     thread so we don't block the event loop.
     """
-    agent = _make_agent(require_confirmation, max_steps)
+    agent = _get_agent(require_confirmation, max_steps)
 
     # Honour open circuit without blocking
     if llm_breaker.current_state == pybreaker.STATE_OPEN:
@@ -174,7 +240,7 @@ def _run_task_sync(
     task: str, require_confirmation: bool, max_steps: int
 ) -> TaskResponse:
     """Sync fallback — used only by the webhook background worker."""
-    agent = _make_agent(require_confirmation, max_steps)
+    agent = _get_agent(require_confirmation, max_steps)
     try:
         result = llm_breaker.call(agent.run_task, task)
     except pybreaker.CircuitBreakerError:
@@ -226,8 +292,8 @@ def _run_task_async_worker(
                 },
                 timeout=5,
             )
-        except:
-            pass
+        except Exception:
+            logger.warning(f"[Job {job_id}] Failed to deliver error payload to webhook.")
 
 
 # ==========================================================================
@@ -282,6 +348,12 @@ async def run_task_async(
         check_rate_limit(0)
     except RateLimitExceeded as e:
         raise HTTPException(status_code=429, detail=str(e))
+
+    # ── SSRF guard ─────────────────────────────────────────────────────────
+    try:
+        _validate_webhook_url(req.webhook_url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid webhook_url: {e}")
 
     # ── Idempotency check ──────────────────────────────────────────────────
     if idempotency_key:

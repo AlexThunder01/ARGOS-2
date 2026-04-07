@@ -45,6 +45,7 @@ class ToolSpec:
     icon: str
     label: str
     dashboard_allowed: bool = False
+    group: Optional[str] = None  # "coding" | "research" | "automation" | None (tutti)
 
     def prompt_example(self) -> str:
         """Genera il JSON di esempio per il system prompt dal Pydantic schema."""
@@ -148,6 +149,29 @@ class ToolRegistry:
         """Restituisce un nuovo registry con solo i tool specificati."""
         return ToolRegistry([s for s in self._specs.values() if s.name in allowed])
 
+    def filter_by_group(self, group: str) -> "ToolRegistry":
+        """
+        Restituisce un nuovo registry filtrato per gruppo.
+
+        Gruppi predefiniti:
+          - "coding"     → filesystem + code
+          - "research"   → web + finance + documents
+          - "automation" → gui + system
+
+        I tool senza `group` assegnato sono inclusi SEMPRE (tool di base).
+        """
+        _GROUP_CATEGORIES: dict[str, set[str]] = {
+            "coding": {"filesystem", "code"},
+            "research": {"web", "finance", "documents"},
+            "automation": {"gui", "system"},
+        }
+        allowed_categories = _GROUP_CATEGORIES.get(group, set())
+        filtered = [
+            s for s in self._specs.values()
+            if s.group is None or s.category in allowed_categories
+        ]
+        return ToolRegistry(filtered)
+
     def as_tools_dict(self) -> dict[str, Callable]:
         """Backward compat: {name: executor_fn}."""
         return {name: spec.executor for name, spec in self._specs.items()}
@@ -160,13 +184,49 @@ class ToolRegistry:
         """Nomi dei tool con dashboard_allowed=True."""
         return {name for name, spec in self._specs.items() if spec.dashboard_allowed}
 
-    def build_prompt_block(self) -> str:
+    def select_for_query(self, query: str, top_k: int = 12) -> "ToolRegistry":
+        """
+        Returns a filtered ToolRegistry with the top_k tools most relevant to query,
+        ranked by TF-IDF cosine similarity on (name + description + category).
+        Falls back to the full registry if sklearn is unavailable or top_k >= len.
+        """
+        if len(self._specs) <= top_k:
+            return self
+
+        try:
+            from sklearn.feature_extraction.text import TfidfVectorizer
+            from sklearn.metrics.pairwise import cosine_similarity
+        except ImportError:
+            return self
+
+        names = list(self._specs.keys())
+        corpus = [
+            f"{s.name} {s.description} {s.category}"
+            for s in self._specs.values()
+        ]
+
+        try:
+            all_texts = corpus + [query]
+            vec = TfidfVectorizer(min_df=1).fit_transform(all_texts)
+            scores = cosine_similarity(vec[-1], vec[:-1]).flatten()
+            top_indices = scores.argsort()[-top_k:][::-1]
+            selected = {names[i] for i in top_indices}
+            return self.filter(selected)
+        except Exception:
+            return self
+
+    def build_prompt_block(self, group: Optional[str] = None) -> str:
         """
         Genera il blocco AVAILABLE TOOLS per il system prompt, raggruppato per categoria.
         Questa è l'unica fonte di verità: nessun testo hardcoded altrove.
+
+        Args:
+            group: Se specificato, include solo i tool del gruppo dato
+                   ("coding", "research", "automation"). None = tutti.
         """
+        registry = self.filter_by_group(group) if group else self
         grouped: dict[str, list[str]] = {}
-        for spec in self._specs.values():
+        for spec in registry._specs.values():
             example = spec.prompt_example()
             if example == "(no input needed)":
                 line = f"        - {spec.name}"

@@ -192,6 +192,48 @@ User message:
 {user_message}"""
 
 
+def _extract_json_array(text: str) -> list | None:
+    """
+    Extracts the first well-formed JSON array from an LLM response using
+    bracket counting, avoiding the rfind(']') trap where trailing text
+    shifts the end index to the wrong closing bracket.
+    Returns the parsed list, or None if no valid array is found.
+    """
+    start = text.find("[")
+    if start == -1:
+        return None
+    depth = 0
+    in_string = False
+    escape_next = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\" and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[start : i + 1])
+                except json.JSONDecodeError as e:
+                    logger.warning(
+                        f"[Memory] Malformed JSON array — extraction skipped "
+                        f"(error={e}, raw={text[start : start + 120]!r})"
+                    )
+                    return None
+    return None
+
+
 def extract_memories_from_text(
     user_message: str, existing_memories: list[dict], llm_call_fn
 ) -> list[dict]:
@@ -210,20 +252,10 @@ def extract_memories_from_text(
 
     try:
         raw = llm_call_fn(prompt)
-        # Attempt to parse JSON from response
-        start = raw.find("[")
-        end = raw.rfind("]") + 1
-        if start == -1 or end == 0:
+        parsed = _extract_json_array(raw)
+        if parsed is None:
             logger.debug(
                 f"[Memory] LLM returned no JSON array for extraction (raw={raw[:80]!r})"
-            )
-            return []
-        try:
-            parsed = json.loads(raw[start:end])
-        except json.JSONDecodeError as e:
-            logger.warning(
-                f"[Memory] LLM returned malformed JSON — extraction skipped "
-                f"(error={e}, raw={raw[start : start + 120]!r})"
             )
             return []
         if not isinstance(parsed, list):

@@ -180,6 +180,7 @@ REGISTRY = ToolRegistry(
             icon="📂",
             label="List Files",
             dashboard_allowed=True,
+            group="coding",
         ),
         ToolSpec(
             name="read_file",
@@ -191,6 +192,7 @@ REGISTRY = ToolRegistry(
             icon="📄",
             label="Read File",
             dashboard_allowed=True,
+            group="coding",
         ),
         ToolSpec(
             name="create_file",
@@ -201,6 +203,7 @@ REGISTRY = ToolRegistry(
             category="filesystem",
             icon="✏️",
             label="Create File",
+            group="coding",
         ),
         ToolSpec(
             name="modify_file",
@@ -211,6 +214,7 @@ REGISTRY = ToolRegistry(
             category="filesystem",
             icon="🔧",
             label="Modify File",
+            group="coding",
         ),
         ToolSpec(
             name="rename_file",
@@ -221,6 +225,7 @@ REGISTRY = ToolRegistry(
             category="filesystem",
             icon="🏷️",
             label="Rename File",
+            group="coding",
         ),
         ToolSpec(
             name="delete_file",
@@ -231,6 +236,7 @@ REGISTRY = ToolRegistry(
             category="filesystem",
             icon="🗑️",
             label="Delete File",
+            group="coding",
         ),
         ToolSpec(
             name="create_directory",
@@ -241,6 +247,7 @@ REGISTRY = ToolRegistry(
             category="filesystem",
             icon="📁",
             label="Create Directory",
+            group="coding",
         ),
         ToolSpec(
             name="delete_directory",
@@ -251,6 +258,7 @@ REGISTRY = ToolRegistry(
             category="filesystem",
             icon="💥",
             label="Delete Directory",
+            group="coding",
         ),
         # ── Web ─────────────────────────────────────────────────────────────
         ToolSpec(
@@ -263,6 +271,7 @@ REGISTRY = ToolRegistry(
             icon="🔍",
             label="Web Search",
             dashboard_allowed=True,
+            group="research",
         ),
         ToolSpec(
             name="web_scrape",
@@ -274,6 +283,7 @@ REGISTRY = ToolRegistry(
             icon="🌐",
             label="Web Scrape",
             dashboard_allowed=True,
+            group="research",
         ),
         ToolSpec(
             name="get_weather",
@@ -285,6 +295,7 @@ REGISTRY = ToolRegistry(
             icon="🌤️",
             label="Weather",
             dashboard_allowed=True,
+            group="research",
         ),
         # ── Finance ─────────────────────────────────────────────────────────
         ToolSpec(
@@ -297,6 +308,7 @@ REGISTRY = ToolRegistry(
             icon="₿",
             label="Crypto Price",
             dashboard_allowed=True,
+            group="research",
         ),
         ToolSpec(
             name="finance_price",
@@ -308,6 +320,7 @@ REGISTRY = ToolRegistry(
             icon="📈",
             label="Finance Price",
             dashboard_allowed=True,
+            group="research",
         ),
         # ── System ──────────────────────────────────────────────────────────
         ToolSpec(
@@ -320,6 +333,7 @@ REGISTRY = ToolRegistry(
             icon="📊",
             label="System Stats",
             dashboard_allowed=True,
+            group="automation",
         ),
         ToolSpec(
             name="launch_app",
@@ -330,6 +344,7 @@ REGISTRY = ToolRegistry(
             category="system",
             icon="🚀",
             label="Launch App",
+            group="automation",
         ),
         # ── GUI ─────────────────────────────────────────────────────────────
         ToolSpec(
@@ -341,6 +356,7 @@ REGISTRY = ToolRegistry(
             category="gui",
             icon="⌨️",
             label="Keyboard Type",
+            group="automation",
         ),
         ToolSpec(
             name="visual_click",
@@ -351,6 +367,7 @@ REGISTRY = ToolRegistry(
             category="gui",
             icon="🖱️",
             label="Visual Click",
+            group="automation",
         ),
         ToolSpec(
             name="describe_screen",
@@ -361,6 +378,7 @@ REGISTRY = ToolRegistry(
             category="gui",
             icon="👁️",
             label="Describe Screen",
+            group="automation",
         ),
         # ── Code ────────────────────────────────────────────────────────────
         ToolSpec(
@@ -373,6 +391,7 @@ REGISTRY = ToolRegistry(
             icon="🐍",
             label="Python REPL",
             dashboard_allowed=True,
+            group="coding",
         ),
         ToolSpec(
             name="bash_exec",
@@ -384,6 +403,7 @@ REGISTRY = ToolRegistry(
             icon="🖥️",
             label="Bash Exec",
             dashboard_allowed=True,
+            group="coding",
         ),
         # ── Documents ───────────────────────────────────────────────────────
         ToolSpec(
@@ -396,6 +416,7 @@ REGISTRY = ToolRegistry(
             icon="📑",
             label="Read PDF",
             dashboard_allowed=True,
+            group="research",
         ),
         ToolSpec(
             name="read_csv",
@@ -407,6 +428,7 @@ REGISTRY = ToolRegistry(
             icon="📊",
             label="Read CSV",
             dashboard_allowed=True,
+            group="research",
         ),
         ToolSpec(
             name="read_json",
@@ -418,6 +440,7 @@ REGISTRY = ToolRegistry(
             icon="📋",
             label="Read JSON",
             dashboard_allowed=True,
+            group="research",
         ),
     ]
 )

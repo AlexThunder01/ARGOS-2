@@ -108,7 +108,7 @@ def keyboard_type_tool(inp):
                         stderr=subprocess.DEVNULL,
                     )
                     time.sleep(0.8)
-                except:
+                except Exception:
                     pass
                 break
 

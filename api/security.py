@@ -1,3 +1,4 @@
+import hmac
 import logging
 import os
 
@@ -10,6 +11,13 @@ ARGOS_API_KEY = os.getenv("ARGOS_API_KEY", "").strip()
 # Explicit opt-in required to run without an API key (dev/local only).
 # Set ARGOS_PERMISSIVE_MODE=true in .env to bypass authentication.
 _PERMISSIVE_MODE = os.getenv("ARGOS_PERMISSIVE_MODE", "false").lower() == "true"
+
+if _PERMISSIVE_MODE:
+    logger.warning(
+        "⚠️  ARGOS_PERMISSIVE_MODE=true — API authentication is DISABLED. "
+        "This setting is for local development only. "
+        "Never use it in production."
+    )
 
 api_key_header = APIKeyHeader(name="X-ARGOS-API-KEY", auto_error=False)
 
@@ -30,7 +38,7 @@ async def verify_api_key(key: str = Security(api_key_header)):
                 "ARGOS_PERMISSIVE_MODE=true for local development only."
             ),
         )
-    if key != ARGOS_API_KEY:
+    if not hmac.compare_digest(key or "", ARGOS_API_KEY):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Unauthorized: Invalid or missing API Key",

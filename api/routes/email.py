@@ -1,25 +1,28 @@
 import asyncio
+import json
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from api.security import verify_api_key
-from src.db.connection import DB_BACKEND, get_connection, return_pg_connection
+from src.db.connection import DB_BACKEND, get_connection, ph, return_pg_connection
 
 router = APIRouter(tags=["Email HITL"])
 logger = logging.getLogger("argos")
-
-
-def _ph(q: str) -> str:
-    """Convert ?-placeholders to %s for PostgreSQL."""
-    return q.replace("?", "%s") if DB_BACKEND == "postgres" else q
 
 
 class EmailAnalyzeRequest(BaseModel):
     sender: str
     subject: str
     body: str
+
+
+class _EmailAnalysis(BaseModel):
+    priority: Literal["high", "medium", "low", "spam"]
+    summary: str
+    draft: str
 
 
 @router.post("/analyze_email", dependencies=[Depends(verify_api_key)])
@@ -37,31 +40,35 @@ async def analyze_email(req: EmailAnalyzeRequest):
         }
 
     for pattern in config.ignore_senders:
-        regex_pattern = pattern.replace("*", ".*")
+        # Escape the pattern first, then restore the glob wildcard as .*
+        regex_pattern = re.escape(pattern).replace(r"\*", ".*")
         if re.search(regex_pattern, req.sender, re.IGNORECASE):
             logger.info(
                 f"🚫 Email ignored: sender {req.sender} matches blacklist pattern {pattern}"
             )
             return {"status": "ignored", "reason": "sender_blacklisted"}
 
-    prompt = f"""Analyze the following email. Respond EXACTLY in this textual format (DO NOT use JSON):
-
-PRIORITY: [high/medium/low/spam]
-SUMMARY: [summarize the sender's request in 1-2 sentences. If spam, write 'Spam detected.']
-DRAFT RESPONSE:
-[draft a polite response in the SAME LANGUAGE as the original email. Tone: {config.tone_of_voice}. End the response with: {config.custom_signature}. If spam, write 'ignored'.]
-
-### GREETING & PERSONA INSTRUCTIONS:
-1. You are responding on behalf of the owner of this inbox. Speak natively in the first person.
-2. ALWAYS greet the sender by their actual Name if available.
-3. NEVER address the sender by their raw email address.
-4. If no human name is found, use a generic polite greeting without a name.
-
-"""
+    lang_instruction = ""
     if config.allowed_languages:
-        prompt += f"IMPORTANT: Only process this if the email is primarily in one of these languages: {', '.join(config.allowed_languages)}. If not, set PRIORITY: low and DRAFT RESPONSE: ignored.\n\n"
+        lang_instruction = (
+            f"IMPORTANT: Only process this if the email is primarily in one of these "
+            f"languages: {', '.join(config.allowed_languages)}. "
+            f'If not, set priority to "low" and draft to "ignored".\n\n'
+        )
 
-    prompt += f"Do not hallucinate information. Base your response strictly on the provided text.\n\nSENDER: {req.sender}\nSUBJECT: {req.subject}\nBODY: {req.body}"
+    prompt = (
+        f"Analyze the following email and respond with a JSON object containing exactly "
+        f'three keys: "priority" (one of: "high", "medium", "low", "spam"), '
+        f'"summary" (1-2 sentences summarising the sender\'s request; if spam write '
+        f'"Spam detected."), and "draft" (a polite response in the SAME LANGUAGE as the '
+        f"original email; tone: {config.tone_of_voice}; end with: {config.custom_signature}; "
+        f'if spam write "ignored"). Output ONLY the JSON object, no extra text.\n\n'
+        f"GREETING & PERSONA: You respond on behalf of the inbox owner (first person). "
+        f"Always greet the sender by their actual name if available; never use a raw email address.\n\n"
+        f"{lang_instruction}"
+        f"Do not hallucinate. Base your response strictly on the provided text.\n\n"
+        f"SENDER: {req.sender}\nSUBJECT: {req.subject}\nBODY: {req.body}"
+    )
 
     from api.routes.agent import _run_task_sync
 
@@ -69,49 +76,39 @@ DRAFT RESPONSE:
         result = await asyncio.to_thread(_run_task_sync, prompt, False, 3)
         result_text = result.result
 
-        import re as regex
+        # Strip markdown code fences if the LLM wrapped the JSON
+        stripped = result_text.strip()
+        if stripped.startswith("```"):
+            stripped = stripped.split("```")[-2] if "```" in stripped[3:] else stripped[3:]
+            stripped = stripped.lstrip("json").strip()
 
-        imp_match = regex.search(r"PRIORITY:\s*(\S+)", result_text, regex.IGNORECASE)
-        importanza = imp_match.group(1).upper() if imp_match else "MEDIUM"
+        try:
+            analysis = _EmailAnalysis.model_validate(json.loads(stripped))
+        except (json.JSONDecodeError, ValidationError) as parse_err:
+            logger.warning(f"[email] Failed to parse LLM JSON response: {parse_err}. Raw: {stripped[:200]}")
+            raise HTTPException(status_code=502, detail="LLM returned an unparseable response.")
 
-        allowed_priorities = {"HIGH", "MEDIUM", "LOW", "SPAM"}
-        if importanza not in allowed_priorities:
-            logger.warning(
-                f"⚠️ LLM hallucinated priority '{importanza}'. Falling back to LOW."
-            )
-            importanza = "LOW"
-
-        priority_map = {"HIGH": 4, "MEDIUM": 3, "LOW": 2, "SPAM": 1}
-        email_prio_val = priority_map.get(importanza, 3)
-        min_prio_val = priority_map.get(config.min_priority, 2)
+        priority_map = {"high": 4, "medium": 3, "low": 2, "spam": 1}
+        email_prio_val = priority_map.get(analysis.priority, 3)
+        min_prio_val = priority_map.get(config.min_priority.lower(), 2)
 
         if email_prio_val < min_prio_val:
             logger.info(
-                f"🚫 Email ignored: Priority '{importanza}' is below threshold '{config.min_priority}'"
+                f"🚫 Email ignored: Priority '{analysis.priority}' is below threshold '{config.min_priority}'"
             )
             return {
                 "status": "ignored",
-                "reason": f"priority_below_threshold ({importanza})",
+                "reason": f"priority_below_threshold ({analysis.priority})",
             }
-
-        rias_match = regex.search(
-            r"SUMMARY:\s*(.+?)(?=\nDRAFT|$)",
-            result_text,
-            regex.IGNORECASE | regex.DOTALL,
-        )
-        riassunto = rias_match.group(1).strip() if rias_match else ""
-
-        draft_match = regex.search(
-            r"DRAFT RESPONSE:\s*\n?([\s\S]*)", result_text, regex.IGNORECASE
-        )
-        draft = draft_match.group(1).strip() if draft_match else result_text
 
         return {
             "status": "success",
-            "priority": importanza.lower(),
-            "summary": riassunto,
-            "draft": draft,
+            "priority": analysis.priority,
+            "summary": analysis.summary,
+            "draft": analysis.draft,
         }
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error in /analyze_email: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -130,7 +127,7 @@ async def store_pending_email(data: dict):
         cursor = conn.cursor()
         if DB_BACKEND == "postgres":
             cursor.execute(
-                _ph(
+                ph(
                     "INSERT INTO pending_emails (msg_id, payload) VALUES (?, ?) "
                     "ON CONFLICT (msg_id) DO UPDATE SET payload = EXCLUDED.payload"
                 ),
@@ -165,7 +162,7 @@ async def consume_pending_email(message_id: str):
         cursor = conn.cursor()
 
         cursor.execute(
-            _ph("SELECT payload FROM pending_emails WHERE msg_id = ?"), (message_id,)
+            ph("SELECT payload FROM pending_emails WHERE msg_id = ?"), (message_id,)
         )
         row = cursor.fetchone()
 
@@ -177,7 +174,7 @@ async def consume_pending_email(message_id: str):
         payload = row[0] if not isinstance(row, dict) else row["payload"]
         data = _json.loads(payload)
         cursor.execute(
-            _ph("DELETE FROM pending_emails WHERE msg_id = ?"), (message_id,)
+            ph("DELETE FROM pending_emails WHERE msg_id = ?"), (message_id,)
         )
         conn.commit()
 

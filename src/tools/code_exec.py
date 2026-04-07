@@ -9,7 +9,7 @@ Nessun accesso alla rete o al filesystem host, ad eccezione della workspace dedi
 import os
 import uuid
 
-from src.config import DOCKER_HOST, HOST_WORKSPACE_DIR, WORKSPACE_DIR
+from src.config import DOCKER_EXEC_MEM_LIMIT, DOCKER_HOST, HOST_WORKSPACE_DIR, WORKSPACE_DIR
 
 from .helpers import _get_arg
 
@@ -52,7 +52,7 @@ def _run_in_docker(image: str, command: list, timeout: int = EXEC_TIMEOUT) -> st
                 volumes=volumes,
                 working_dir="/workspace",
                 detach=True,
-                mem_limit="128m",
+                mem_limit=DOCKER_EXEC_MEM_LIMIT,
                 cpu_quota=25000,  # 25% of single CPU core
                 network_mode="none",  # NO network access
                 environment={"PYTHONDONTWRITEBYTECODE": "1"},
@@ -109,7 +109,8 @@ def python_repl_tool(inp):
         )
         return f"🐍 Python Result:\n{output}"
     finally:
-        if os.path.exists(script_path):
+        # Use os.path.islink to avoid following symlinks before removal
+        if os.path.islink(script_path) or os.path.exists(script_path):
             os.remove(script_path)
 
 

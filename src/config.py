@@ -1,3 +1,11 @@
+"""
+Infrastructure & secrets configuration — loaded from .env / environment variables.
+
+BOUNDARY: this module owns anything that cannot change at runtime without a restart:
+API keys, DB connection strings, model names, resource limits, feature flags.
+Behavioral settings that operators adjust without restarting the server (tone of voice,
+conversation window, auto-approve, etc.) live in workflows_config.py (YAML, hot-reload).
+"""
 import os
 
 from dotenv import load_dotenv
@@ -41,4 +49,5 @@ RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "5"))
 DOCKER_HOST = os.getenv("DOCKER_HOST", "tcp://localhost:2375")
 HOST_WORKSPACE_DIR = os.getenv("HOST_WORKSPACE_DIR", "")
 WORKSPACE_DIR = os.getenv("WORKSPACE_DIR", "./workspace")
+DOCKER_EXEC_MEM_LIMIT = os.getenv("DOCKER_EXEC_MEM_LIMIT", "128m")
 os.makedirs(WORKSPACE_DIR, exist_ok=True)

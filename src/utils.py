@@ -33,7 +33,7 @@ def no_alsa_err():
                 os.close(original_stderr)
             if devnull != -1:
                 os.close(devnull)
-        except:
+        except Exception:
             pass
 
 

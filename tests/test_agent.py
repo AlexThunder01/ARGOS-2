@@ -91,6 +91,6 @@ def test_openai_compatible_key_rotation(mock_post, mock_sleep):
     config.LLM_API_KEY = "f"
     config.LLM_API_KEY_2 = "s"
 
-    result = agent._call_openai_compatible([], temperature=0.0, retries=0)
+    result = agent._call_openai_compatible([], temperature=0.0, max_retries=1)
     assert result == "Hello on retry!"
     assert mock_post.call_count == 2

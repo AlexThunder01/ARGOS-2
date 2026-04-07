@@ -9,7 +9,7 @@ SQLite (?-placeholders) and psycopg (%s-placeholders).
 import logging
 from datetime import date
 
-from src.db.connection import DB_BACKEND, get_connection, return_pg_connection
+from src.db.connection import DB_BACKEND, get_connection, ph, return_pg_connection
 
 logger = logging.getLogger("argos")
 
@@ -17,12 +17,8 @@ logger = logging.getLogger("argos")
 # Backend-Aware Query Helpers
 # ---------------------------------------------------------------------------
 
-
-def _ph(query: str) -> str:
-    """Converts ?-style placeholders to %s for PostgreSQL."""
-    if DB_BACKEND == "postgres":
-        return query.replace("?", "%s")
-    return query
+# Alias for backward compatibility within this module
+_ph = ph
 
 
 def _now_expr() -> str:

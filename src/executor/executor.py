@@ -51,7 +51,7 @@ def _classify_error(message: str) -> bool:
         return False
     if any(kw in msg_lower for kw in RETRYABLE_KEYWORDS):
         return True
-    return True
+    return False  # Unknown errors are not retried (fail-fast)
 
 
 def execute_with_retry(

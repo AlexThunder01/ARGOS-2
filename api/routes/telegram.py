@@ -14,6 +14,18 @@ router = APIRouter(prefix="/telegram", tags=["Telegram"])
 logger = logging.getLogger("argos")
 telegram_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
 
+# Singleton — think_with_context and call_lightweight are stateless (no shared history),
+# so one instance is safe across all concurrent requests.
+_telegram_agent = None
+
+
+def _get_telegram_agent():
+    global _telegram_agent
+    if _telegram_agent is None:
+        from src.core import CoreAgent
+        _telegram_agent = CoreAgent(memory_mode="off")
+    return _telegram_agent
+
 
 class TelegramChatRequest(BaseModel):
     user_id: int = Field(..., description="Telegram user_id")
@@ -159,7 +171,6 @@ def _handle_telegram_command(text: str, user_id: int, config) -> str | None:
     "/chat", response_model=TelegramChatResponse, dependencies=[Depends(verify_api_key)]
 )
 async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTasks):
-    from src.core import CoreAgent
     from src.telegram.db import (
         db_approve_user,
         db_gc_memories,
@@ -270,7 +281,7 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
     messages.extend(recent_history)
     messages.append({"role": "user", "content": req.text})
 
-    agent = CoreAgent(memory_mode="off", user_id=req.user_id)
+    agent = _get_telegram_agent()
 
     try:
         raw_reply = await asyncio.to_thread(
@@ -303,19 +314,18 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
         _susp_ret = mem_cfg.get("suspicious_retention", 500)
 
         def _do_extraction():
-            mem_agent = CoreAgent(memory_mode="off", user_id=req.user_id)
             existing = [
                 {"content": m["content"], "category": m["category"]}
                 for m in relevant_memories
             ]
             facts = extract_memories_from_text(
-                req.text, existing, mem_agent.call_lightweight
+                req.text, existing, agent.call_lightweight
             )
             if facts:
                 save_extracted_memories(
                     req.user_id,
                     facts,
-                    llm_call_fn=mem_agent.call_lightweight,
+                    llm_call_fn=agent.call_lightweight,
                     poisoning_enabled=_poisoning_on,
                     risk_threshold=_risk_thresh,
                     suspicious_retention=_susp_ret,

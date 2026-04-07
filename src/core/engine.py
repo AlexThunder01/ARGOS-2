@@ -254,229 +254,78 @@ class CoreAgent:
 
     def run_task(self, task: str) -> TaskResult:
         """
-        Executes a natural language task through the full cognitive pipeline:
-        1. SESSION_START hook
-        2. Context memoization (git status injected once)
-        3. Retrieve relevant memories (if enabled)
-        4. LLM reasoning loop with:
-           - PreToolUse hooks (can block execution)
-           - PostToolUse / PostToolUseFailure hooks
-           - Diminishing returns early stop
-        5. Extract new memories (if enabled)
-        6. SESSION_END hook
+        Sync entry point — delegates to run_task_async via a fresh event loop.
 
-        Returns a TaskResult with the final response and execution history.
+        Safe to call from any non-async context (CLI, sync tests, thread workers).
+        Do NOT call this from within a running event loop; use run_task_async instead.
+        """
+        return asyncio.run(self.run_task_async(task))
+
+    # ==========================================================================
+    # Async Entry Point (FastAPI — non-blocking)
+    # ==========================================================================
+
+    async def run_task_async(self, task: str) -> TaskResult:
+        """
+        Canonical async implementation of the full cognitive pipeline.
+
+        All entry points (run_task, run_task_async) converge here.
+        LLM calls use httpx.AsyncClient; sync tool executors are offloaded
+        via asyncio.to_thread so the FastAPI event loop is never blocked.
         """
         tracer = get_tracer()
 
         # ── SESSION_START ──────────────────────────────────────────────────
-        HOOK_REGISTRY.fire_session(
-            HookEvent.SESSION_START,
-            task=task,
-            user_id=self.user_id,
-        )
+        HOOK_REGISTRY.fire_session(HookEvent.SESSION_START, task=task, user_id=self.user_id)
 
         with tracer.start_as_current_span(
             "core.run_task",
-            attributes={
-                "task": task[:200],
-                "user_id": self.user_id,
-                "memory_mode": self.memory_mode,
-            },
+            attributes={"task": task[:200], "user_id": self.user_id, "memory_mode": self.memory_mode},
         ) as root_span:
             state = WorldState()
             state.current_task = task
 
-            # ── Phase 1: Context Memoization ──────────────────────────────
+            # ── Phase 1: Context memoization ──────────────────────────────
             if self.inject_git_context and self._git_context_cache is None:
-                self._git_context_cache = _get_git_context()
+                try:
+                    self._git_context_cache = await asyncio.wait_for(
+                        asyncio.to_thread(_get_git_context), timeout=5.0
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("[CoreAgent] Git context fetch timed out — skipping.")
+                    self._git_context_cache = None
 
-            # ── Phase 2: Memory Retrieval ──────────────────────────────────
+            # ── Phase 2: Memory retrieval ──────────────────────────────────
             with tracer.start_as_current_span("core.retrieve_memories") as mem_span:
-                relevant_memories = self._retrieve_memories(task)
+                try:
+                    relevant_memories = await asyncio.wait_for(
+                        asyncio.to_thread(self._retrieve_memories, task), timeout=10.0
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("[CoreAgent] Memory retrieval timed out — continuing without memories.")
+                    relevant_memories = []
                 mem_span.set_attribute("memories.count", len(relevant_memories))
 
             # ── Phase 3: Build LLM context ────────────────────────────────
-            self._llm._init_history()
+            self._build_llm_context(task, relevant_memories)
 
-            # Inject git context once (memoized)
-            if self._git_context_cache:
-                self._llm.add_message(
-                    "system",
-                    f"CURRENT WORKSPACE STATE:\n{self._git_context_cache}",
-                )
-
-            # Inject current date
-            self._llm.add_message(
-                "system",
-                f"Today's date: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            # ── Phase 4: Reasoning loop ────────────────────────────────────
+            final_response, step_records, loop_success = await self._reasoning_loop(
+                task, state, tracer, root_span
             )
 
-            # Inject relevant memories
-            if relevant_memories:
-                memory_context = "\n".join(
-                    f"- [{m['category']}] {m['content']}" for m in relevant_memories
-                )
-                self._llm.add_message(
-                    "system",
-                    f"THINGS YOU KNOW ABOUT THE USER (use when relevant):\n{memory_context}",
-                )
-
-            self._llm.add_message("user", task)
-
-            # ── Phase 4: Reasoning Loop ───────────────────────────────────
-            step_records: list[StepRecord] = []
-            final_response = ""
-            response_lengths: deque[int] = deque(maxlen=DIMINISHING_STEPS)
-
-            for step_num in range(self.max_steps):
-                raw = self._llm.think()
-                decision = parse_planner_response(raw)
-                log_decision(
-                    logger,
-                    decision.thought,
-                    decision.tool or "done",
-                    decision.confidence,
-                )
-
-                # ── Diminishing returns detection ──────────────────────────
-                response_lengths.append(len(raw))
-                if (
-                    len(response_lengths) == DIMINISHING_STEPS
-                    and all(l < DIMINISHING_THRESHOLD for l in response_lengths)
-                    and not decision.done
-                ):
-                    logger.warning(
-                        f"[CoreAgent] Diminishing returns detected after {step_num + 1} steps "
-                        f"(lengths={list(response_lengths)}). Stopping loop."
-                    )
-                    final_response = decision.response or raw
-                    root_span.set_attribute("stop_reason", "diminishing_returns")
-                    break
-
-                if decision.done:
-                    final_response = decision.response or raw
-                    logger.info(f"[CoreAgent] Task completed in {step_num + 1} step(s).")
-                    root_span.set_attribute("steps.total", step_num + 1)
-                    break
-
-                tool_name = decision.tool
-                tool_input = decision.tool_input
-
-                if not tool_name or tool_name not in self._available_tools:
-                    final_response = f"Unknown or restricted tool: '{tool_name}'"
-                    logger.error(f"[CoreAgent] {final_response}")
-                    break
-
-                spec = self._available_tools[tool_name]
-
-                # ── PreToolUse hooks ───────────────────────────────────────
-                pre_result = HOOK_REGISTRY.fire_pre_tool(tool_name, tool_input or {})
-                if not pre_result.allowed:
-                    final_response = f"Action '{tool_name}' blocked by hook: {pre_result.block_reason}"
-                    logger.warning(f"[CoreAgent] {final_response}")
-                    self._llm.add_message(
-                        "assistant",
-                        json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
-                    )
-                    self._llm.add_message("user", f"ACTION BLOCKED: {pre_result.block_reason}")
-                    break
-
-                # ── Security Gate (with audit trail) ──────────────────────
-                if not self._authorize_tool(spec, tool_input):
-                    final_response = f"Action '{tool_name}' denied."
-                    state.record_action(tool_name, tool_input, "Denied by user.", False)
-                    step_records.append(
-                        StepRecord(
-                            step=state.step_count,
-                            tool=tool_name,
-                            tool_input=tool_input or {},
-                            result="Denied by user.",
-                            success=False,
-                        )
-                    )
-                    self._llm.add_message(
-                        "assistant",
-                        json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
-                    )
-                    self._llm.add_message("user", "ACTION DENIED BY USER. STOP.")
-                    break
-
-                # ── Execute Tool ───────────────────────────────────────────
-                with tracer.start_as_current_span(
-                    "core.tool_execution",
-                    attributes={"tool.name": tool_name, "tool.step": step_num + 1},
-                ) as tool_span:
-                    action_result = execute_with_retry(spec, tool_input)
-                    tool_span.set_attribute("tool.success", action_result.success)
-                    tool_span.set_attribute(
-                        "tool.result_preview", action_result.message[:200]
-                    )
-
-                # ── PostToolUse hooks ──────────────────────────────────────
-                HOOK_REGISTRY.fire_post_tool(
-                    tool_name=tool_name,
-                    tool_input=tool_input or {},
-                    result=action_result.message,
-                    success=action_result.success,
-                )
-
-                # ── Git context refresh after filesystem mutations ──────────
-                if (
-                    action_result.success
-                    and tool_name in _FILESYSTEM_MUTATING_TOOLS
-                    and self.inject_git_context
-                ):
-                    self._git_context_cache = _get_git_context()
-                    if self._git_context_cache:
-                        self._llm.add_message(
-                            "system",
-                            f"WORKSPACE STATE UPDATED:\n{self._git_context_cache}",
-                        )
-
-                state.record_action(
-                    tool_name, tool_input, action_result.message, action_result.success
-                )
-                log_step(logger, state, tool_name, action_result.message, action_result.success)
-
-                step_records.append(
-                    StepRecord(
-                        step=state.step_count,
-                        tool=tool_name,
-                        tool_input=tool_input or {},
-                        result=action_result.message[:500],
-                        success=action_result.success,
-                        timestamp=state.action_history[-1].timestamp,
-                    )
-                )
-
-                self._llm.add_message(
-                    "assistant",
-                    json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
-                )
-                self._llm.add_message("user", f"TOOL RESULT: {action_result.message}")
-
-                final_response = (
-                    action_result.message
-                    if action_result.success
-                    else f"Step failure: {action_result.message}"
-                )
-
-            # ── Phase 5: Memory Extraction ────────────────────────────────
+            # ── Phase 5: Memory extraction ────────────────────────────────
             if self.memory_mode != "off" and final_response:
                 with tracer.start_as_current_span("core.extract_memories"):
-                    self._maybe_extract_memories(task, relevant_memories)
+                    await asyncio.to_thread(
+                        self._maybe_extract_memories, task, relevant_memories
+                    )
 
-            # Invalidate git cache so next task gets a fresh snapshot
             self._git_context_cache = None
-
-            success = not final_response.startswith(
-                ("Step failure", "Unknown tool", "Action", "Blocked")
-            )
-            root_span.set_attribute("result.success", success)
+            root_span.set_attribute("result.success", loop_success)
 
             task_result = TaskResult(
-                success=success,
+                success=loop_success,
                 task=task,
                 response=final_response,
                 steps_executed=state.step_count,
@@ -485,225 +334,176 @@ class CoreAgent:
             )
 
         # ── SESSION_END ────────────────────────────────────────────────────
-        HOOK_REGISTRY.fire_session(
-            HookEvent.SESSION_END,
-            task=task,
-            result=task_result,
-        )
-
+        HOOK_REGISTRY.fire_session(HookEvent.SESSION_END, task=task, result=task_result)
         return task_result
 
     # ==========================================================================
-    # Async Entry Point (FastAPI — non-blocking)
+    # Reasoning Loop (single canonical async implementation)
     # ==========================================================================
 
-    async def run_task_async(self, task: str) -> TaskResult:
+    async def _reasoning_loop(
+        self,
+        task: str,
+        state: WorldState,
+        tracer,
+        root_span,
+    ) -> tuple[str, list[StepRecord], bool]:
         """
-        Fully async variant of run_task().
+        The step-by-step LLM ↔ tool execution loop.
 
-        LLM calls use httpx.AsyncClient (think_async), so the FastAPI event
-        loop is never blocked.  Sync tool executors are offloaded via
-        asyncio.to_thread() so they don't block either.
+        Shared by run_task (via asyncio.run → run_task_async) and run_task_async
+        directly.  A single implementation means every fix and feature applies
+        to both the CLI and API paths automatically.
 
-        The logic mirrors run_task() exactly; keep both in sync when adding
-        new features to the reasoning loop.
+        Returns (final_response, step_records, loop_success).
         """
-        tracer = get_tracer()
+        step_records: list[StepRecord] = []
+        final_response = ""
+        loop_success = True
+        response_lengths: deque[int] = deque(maxlen=DIMINISHING_STEPS)
 
-        # ── SESSION_START ──────────────────────────────────────────────────
-        HOOK_REGISTRY.fire_session(HookEvent.SESSION_START, task=task, user_id=self.user_id)
+        for step_num in range(self.max_steps):
+            raw = await self._llm.think_async()
+            decision = parse_planner_response(raw)
+            log_decision(logger, decision.thought, decision.tool or "done", decision.confidence)
 
-        with tracer.start_as_current_span(
-            "core.run_task_async",
-            attributes={"task": task[:200], "user_id": self.user_id, "memory_mode": self.memory_mode},
-        ) as root_span:
-            state = WorldState()
-            state.current_task = task
-
-            # ── Context memoization ────────────────────────────────────────
-            if self.inject_git_context and self._git_context_cache is None:
-                self._git_context_cache = await asyncio.to_thread(_get_git_context)
-
-            # ── Memory retrieval ───────────────────────────────────────────
-            with tracer.start_as_current_span("core.retrieve_memories") as mem_span:
-                relevant_memories = self._retrieve_memories(task)
-                mem_span.set_attribute("memories.count", len(relevant_memories))
-
-            # ── Build LLM context ──────────────────────────────────────────
-            self._llm._init_history()
-
-            if self._git_context_cache:
-                self._llm.add_message(
-                    "system", f"CURRENT WORKSPACE STATE:\n{self._git_context_cache}"
+            # ── Diminishing returns detection ──────────────────────────────
+            response_lengths.append(len(raw))
+            if (
+                len(response_lengths) == DIMINISHING_STEPS
+                and all(l < DIMINISHING_THRESHOLD for l in response_lengths)
+                and not decision.done
+            ):
+                logger.warning(
+                    f"[CoreAgent] Diminishing returns after {step_num + 1} steps "
+                    f"(lengths={list(response_lengths)}). Stopping."
                 )
-            self._llm.add_message(
-                "system", f"Today's date: {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+                final_response = decision.response or raw
+                root_span.set_attribute("stop_reason", "diminishing_returns")
+                break
+
+            if decision.done:
+                final_response = decision.response or raw
+                logger.info(f"[CoreAgent] Task completed in {step_num + 1} step(s).")
+                root_span.set_attribute("steps.total", step_num + 1)
+                break
+
+            tool_name = decision.tool
+            tool_input = decision.tool_input
+
+            if not tool_name or tool_name not in self._available_tools:
+                final_response = f"Unknown or restricted tool: '{tool_name}'"
+                logger.error(f"[CoreAgent] {final_response}")
+                loop_success = False
+                break
+
+            spec = self._available_tools[tool_name]
+
+            # ── PreToolUse hooks (offloaded — may do I/O) ─────────────────
+            pre_result = await asyncio.to_thread(
+                HOOK_REGISTRY.fire_pre_tool, tool_name, tool_input or {}
             )
-            if relevant_memories:
-                memory_context = "\n".join(
-                    f"- [{m['category']}] {m['content']}" for m in relevant_memories
-                )
+            if not pre_result.allowed:
+                final_response = f"Action '{tool_name}' blocked by hook: {pre_result.block_reason}"
+                logger.warning(f"[CoreAgent] {final_response}")
                 self._llm.add_message(
-                    "system",
-                    f"THINGS YOU KNOW ABOUT THE USER (use when relevant):\n{memory_context}",
+                    "assistant",
+                    json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
                 )
-            self._llm.add_message("user", task)
+                self._llm.add_message("user", f"ACTION BLOCKED: {pre_result.block_reason}")
+                loop_success = False
+                break
 
-            # ── Reasoning loop ─────────────────────────────────────────────
-            step_records: list[StepRecord] = []
-            final_response = ""
-            response_lengths: deque[int] = deque(maxlen=DIMINISHING_STEPS)
-
-            for step_num in range(self.max_steps):
-                raw = await self._llm.think_async()
-                decision = parse_planner_response(raw)
-                log_decision(logger, decision.thought, decision.tool or "done", decision.confidence)
-
-                # Diminishing returns
-                response_lengths.append(len(raw))
-                if (
-                    len(response_lengths) == DIMINISHING_STEPS
-                    and all(l < DIMINISHING_THRESHOLD for l in response_lengths)
-                    and not decision.done
-                ):
-                    logger.warning(
-                        f"[CoreAgent/async] Diminishing returns after {step_num + 1} steps "
-                        f"(lengths={list(response_lengths)}). Stopping."
-                    )
-                    final_response = decision.response or raw
-                    root_span.set_attribute("stop_reason", "diminishing_returns")
-                    break
-
-                if decision.done:
-                    final_response = decision.response or raw
-                    logger.info(f"[CoreAgent/async] Completed in {step_num + 1} step(s).")
-                    root_span.set_attribute("steps.total", step_num + 1)
-                    break
-
-                tool_name = decision.tool
-                tool_input = decision.tool_input
-
-                if not tool_name or tool_name not in self._available_tools:
-                    final_response = f"Unknown or restricted tool: '{tool_name}'"
-                    logger.error(f"[CoreAgent/async] {final_response}")
-                    break
-
-                spec = self._available_tools[tool_name]
-
-                # PreToolUse hooks
-                pre_result = HOOK_REGISTRY.fire_pre_tool(tool_name, tool_input or {})
-                if not pre_result.allowed:
-                    final_response = f"Action '{tool_name}' blocked by hook: {pre_result.block_reason}"
-                    logger.warning(f"[CoreAgent/async] {final_response}")
-                    self._llm.add_message(
-                        "assistant",
-                        json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
-                    )
-                    self._llm.add_message("user", f"ACTION BLOCKED: {pre_result.block_reason}")
-                    break
-
-                # Security gate
-                if not self._authorize_tool(spec, tool_input):
-                    final_response = f"Action '{tool_name}' denied."
-                    state.record_action(tool_name, tool_input, "Denied by user.", False)
-                    step_records.append(
-                        StepRecord(
-                            step=state.step_count,
-                            tool=tool_name,
-                            tool_input=tool_input or {},
-                            result="Denied by user.",
-                            success=False,
-                        )
-                    )
-                    self._llm.add_message(
-                        "assistant",
-                        json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
-                    )
-                    self._llm.add_message("user", "ACTION DENIED BY USER. STOP.")
-                    break
-
-                # Execute tool in thread (sync executors must not block event loop)
-                with tracer.start_as_current_span(
-                    "core.tool_execution",
-                    attributes={"tool.name": tool_name, "tool.step": step_num + 1},
-                ) as tool_span:
-                    action_result = await asyncio.to_thread(
-                        execute_with_retry, spec, tool_input
-                    )
-                    tool_span.set_attribute("tool.success", action_result.success)
-                    tool_span.set_attribute("tool.result_preview", action_result.message[:200])
-
-                # PostToolUse hooks
-                HOOK_REGISTRY.fire_post_tool(
-                    tool_name=tool_name,
-                    tool_input=tool_input or {},
-                    result=action_result.message,
-                    success=action_result.success,
-                )
-
-                # Git context refresh after filesystem mutations
-                if (
-                    action_result.success
-                    and tool_name in _FILESYSTEM_MUTATING_TOOLS
-                    and self.inject_git_context
-                ):
-                    self._git_context_cache = await asyncio.to_thread(_get_git_context)
-                    if self._git_context_cache:
-                        self._llm.add_message(
-                            "system",
-                            f"WORKSPACE STATE UPDATED:\n{self._git_context_cache}",
-                        )
-
-                state.record_action(tool_name, tool_input, action_result.message, action_result.success)
-                log_step(logger, state, tool_name, action_result.message, action_result.success)
-
+            # ── Security gate ──────────────────────────────────────────────
+            if not self._authorize_tool(spec, tool_input):
+                final_response = f"Action '{tool_name}' denied."
+                state.record_action(tool_name, tool_input, "Denied by user.", False)
                 step_records.append(
                     StepRecord(
                         step=state.step_count,
                         tool=tool_name,
                         tool_input=tool_input or {},
-                        result=action_result.message[:500],
-                        success=action_result.success,
-                        timestamp=state.action_history[-1].timestamp,
+                        result="Denied by user.",
+                        success=False,
                     )
                 )
-
                 self._llm.add_message(
                     "assistant",
                     json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
                 )
-                self._llm.add_message("user", f"TOOL RESULT: {action_result.message}")
+                self._llm.add_message("user", "ACTION DENIED BY USER. STOP.")
+                loop_success = False
+                break
 
-                final_response = (
-                    action_result.message
-                    if action_result.success
-                    else f"Step failure: {action_result.message}"
+            # ── Execute tool ───────────────────────────────────────────────
+            with tracer.start_as_current_span(
+                "core.tool_execution",
+                attributes={"tool.name": tool_name, "tool.step": step_num + 1},
+            ) as tool_span:
+                action_result = await asyncio.to_thread(execute_with_retry, spec, tool_input)
+                tool_span.set_attribute("tool.success", action_result.success)
+                tool_span.set_attribute("tool.result_preview", action_result.message[:200])
+
+            # ── PostToolUse hooks (offloaded — may do I/O) ────────────────
+            await asyncio.to_thread(
+                HOOK_REGISTRY.fire_post_tool,
+                tool_name,
+                tool_input or {},
+                action_result.message,
+                action_result.success,
+            )
+
+            # ── Git context refresh after filesystem mutations ──────────────
+            if (
+                action_result.success
+                and tool_name in _FILESYSTEM_MUTATING_TOOLS
+                and self.inject_git_context
+            ):
+                try:
+                    self._git_context_cache = await asyncio.wait_for(
+                        asyncio.to_thread(_get_git_context), timeout=5.0
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("[CoreAgent] Git context refresh timed out — skipping.")
+                    self._git_context_cache = None
+                if self._git_context_cache:
+                    self._llm.add_message(
+                        "system",
+                        f"WORKSPACE STATE UPDATED:\n{self._git_context_cache}",
+                    )
+
+            state.record_action(tool_name, tool_input, action_result.message, action_result.success)
+            log_step(logger, state, tool_name, action_result.message, action_result.success)
+
+            step_records.append(
+                StepRecord(
+                    step=state.step_count,
+                    tool=tool_name,
+                    tool_input=tool_input or {},
+                    result=action_result.message[:500],
+                    success=action_result.success,
+                    timestamp=state.action_history[-1].timestamp,
                 )
-
-            # Memory extraction
-            if self.memory_mode != "off" and final_response:
-                with tracer.start_as_current_span("core.extract_memories"):
-                    self._maybe_extract_memories(task, relevant_memories)
-
-            self._git_context_cache = None
-
-            success = not final_response.startswith(
-                ("Step failure", "Unknown tool", "Action", "Blocked")
-            )
-            root_span.set_attribute("result.success", success)
-
-            task_result = TaskResult(
-                success=success,
-                task=task,
-                response=final_response,
-                steps_executed=state.step_count,
-                history=step_records,
-                memories_used=len(relevant_memories),
             )
 
-        # SESSION_END
-        HOOK_REGISTRY.fire_session(HookEvent.SESSION_END, task=task, result=task_result)
-        return task_result
+            # Inject WorldState snapshot so the LLM has structured context
+            # about what has been done — step count, last error, recent history.
+            self._llm.add_message("system", state.to_context_string())
+            self._llm.add_message(
+                "assistant",
+                json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
+            )
+            self._llm.add_message("user", f"TOOL RESULT: {action_result.message}")
+
+            if not action_result.success:
+                loop_success = False
+            final_response = (
+                action_result.message
+                if action_result.success
+                else f"Step failure: {action_result.message}"
+            )
+
+        return final_response, step_records, loop_success
 
     # ==========================================================================
     # Streaming Entry Point
@@ -736,6 +536,48 @@ class CoreAgent:
     # Memory Management (Private)
     # ==========================================================================
 
+    # ==========================================================================
+    # LLM Context Builder (shared by run_task and run_task_async)
+    # ==========================================================================
+
+    _TOOL_RAG_TOP_K = 12
+
+    def _build_llm_context(self, task: str, relevant_memories: list[dict]) -> None:
+        """
+        Initialises the LLM history for a new task.
+
+        Uses Tool RAG to inject only the most relevant tools (top-k by TF-IDF
+        similarity), then appends git context, current date, memories, and the
+        task message.  Called identically from run_task() and run_task_async()
+        so both paths always receive the same context.
+        """
+        filtered_registry = self._llm._registry.select_for_query(
+            task, top_k=self._TOOL_RAG_TOP_K
+        )
+        self._llm._init_history_with_tools(filtered_registry.build_prompt_block())
+
+        if self._git_context_cache:
+            self._llm.add_message(
+                "system",
+                f"CURRENT WORKSPACE STATE:\n{self._git_context_cache}",
+            )
+
+        self._llm.add_message(
+            "system",
+            f"Today's date: {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+        )
+
+        if relevant_memories:
+            memory_context = "\n".join(
+                f"- [{m['category']}] {m['content']}" for m in relevant_memories
+            )
+            self._llm.add_message(
+                "system",
+                f"THINGS YOU KNOW ABOUT THE USER (use when relevant):\n{memory_context}",
+            )
+
+        self._llm.add_message("user", task)
+
     def _retrieve_memories(self, query: str) -> list[dict]:
         if self.memory_mode == "off":
             return []
@@ -746,7 +588,7 @@ class CoreAgent:
                 from src.core.memory import retrieve_relevant_memories
                 return retrieve_relevant_memories(self.user_id, query, top_k=6)
             except Exception as e:
-                logger.warning(f"[CoreAgent] Memory retrieval failed: {e}")
+                logger.exception(f"[CoreAgent] Memory retrieval failed: {e}")
                 return []
         return []
 
@@ -789,7 +631,7 @@ class CoreAgent:
                             self.user_id, facts, llm_call_fn=self._llm.call_lightweight
                         )
             except Exception as e:
-                logger.warning(f"[CoreAgent] Memory extraction failed: {e}")
+                logger.exception(f"[CoreAgent] Memory extraction failed: {e}")
 
     # ==========================================================================
     # Security Gate (Private)

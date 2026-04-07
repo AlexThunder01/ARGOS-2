@@ -11,12 +11,14 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: argos
-      # SECURITY: always set POSTGRES_PASSWORD in your .env file before deploying.
-      # The default 'argos_secret' is for local development only.
+      # SECURITY: POSTGRES_PASSWORD MUST be set in your .env file before deploying.
+      # The fallback 'argos_secret' is intentionally weak — it exists only so
+      # `docker compose up` works in local dev without extra setup.
+      # In production, set a strong POSTGRES_PASSWORD in .env and remove this fallback.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-argos_secret}
       POSTGRES_DB: argos
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
@@ -36,7 +38,7 @@ services:
     env_file: .env
     command: ["uvicorn", "api.server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     environment:
       - LLM_API_KEY=${LLM_API_KEY}
       - LLM_API_KEY_2=${LLM_API_KEY_2:-}
@@ -45,7 +47,7 @@ services:
       - ADMIN_CHAT_ID=${ADMIN_CHAT_ID:-}
       - N8N_API_KEY=${N8N_API_KEY}
       - ARGOS_API_KEY=${ARGOS_API_KEY:-}
-      - DATABASE_URL=postgresql://argos:${POSTGRES_PASSWORD:-argos_secret}@argos-db:5432/argos  # set POSTGRES_PASSWORD in .env
+      - DATABASE_URL=postgresql://argos:${POSTGRES_PASSWORD:-argos_secret}@argos-db:5432/argos
       - DB_BACKEND=${DB_BACKEND:-postgres}
       - OTEL_EXPORTER_OTLP_ENDPOINT=http://argos-jaeger:4317
       - OTEL_SERVICE_NAME=argos-api
@@ -53,7 +55,7 @@ services:
       - HOST_WORKSPACE_DIR=${HOST_WORKSPACE_DIR:-${PWD}/data/workspace}
       - WORKSPACE_DIR=/app/data/workspace
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD-SHELL", "wget --no-verbose --spider http://localhost:8000/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -79,7 +81,7 @@ services:
       - "127.0.0.1:5678:5678"
     environment:
       - WEBHOOK_URL=https://${NGROK_DOMAIN}/
-      - N8N_EDITOR_BASE_URL=http://localhost:5678
+      - N8N_EDITOR_BASE_URL=${N8N_EDITOR_BASE_URL:-http://localhost:5678}
       - N8N_BLOCK_ENV_ACCESS_IN_NODE=false
       - ARGOS_API_KEY=${ARGOS_API_KEY:-}
     volumes:
@@ -120,7 +122,7 @@ services:
     container_name: argos-jaeger
     restart: unless-stopped
     ports:
-      - "16687:16686"   # Mapped to 16687 to avoid conflict with existing Jaeger
+      - "127.0.0.1:16687:16686"   # Mapped to 16687 to avoid conflict with existing Jaeger
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
     networks:

@@ -110,8 +110,8 @@ def validate_with_llm_judge(fact_content: str, llm_call_fn: Callable) -> bool:
             logger.warning(f"[Security] LLM Judge flagged: {fact_content[:80]}...")
         return is_safe
     except Exception as e:
-        logger.warning(f"[Security] LLM Judge call failed: {e}")
-        return True  # Fail-open: don't block on LLM errors
+        logger.exception(f"[Security] LLM Judge call failed — blocking as precaution: {e}")
+        return False  # Fail-safe: block on LLM errors
 
 
 # ==========================================================================

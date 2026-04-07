@@ -39,15 +39,21 @@ NEVER write any text outside the JSON block.
 
 @dataclass
 class PlannerDecision:
-    """Decisione strutturata del planner, parsata dalla risposta LLM."""
+    """
+    Structured output of a single LLM reasoning step.
+
+    Fields map 1-to-1 with PLANNER_RESPONSE_SCHEMA above.
+    If you add or rename a field here, update the schema string accordingly
+    so the prompt stays in sync with the parser.
+    """
 
     thought: str
     tool: Optional[str]
     tool_input: Optional[dict]
     confidence: float
     done: bool
-    response: Optional[str]  # Risposta testuale finale (se done=True)
-    raw: str  # Risposta grezza del modello (per debug)
+    response: Optional[str]  # Final textual reply (when done=True)
+    raw: str                  # Raw model output (for debugging)
 
 
 def parse_planner_response(raw_response: str) -> PlannerDecision:
@@ -115,10 +121,17 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
                 response=None,
                 raw=raw_response,
             )
-        except Exception:
-            pass
+        except Exception as parse_exc:
+            logger.debug(
+                f"[Planner] JSON found but failed to parse into PlannerDecision "
+                f"(error={parse_exc!r}, raw={raw_response[:120]!r})"
+            )
 
     # Fallback: no JSON found — treat as raw textual response
+    logger.debug(
+        f"[Planner] No valid JSON in LLM response — treating as final text "
+        f"(raw={raw_response[:120]!r})"
+    )
     return PlannerDecision(
         thought="(free-form text, no JSON found)",
         tool=None,

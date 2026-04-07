@@ -14,10 +14,13 @@ Changes:
 """
 
 import asyncio
+import logging
 import os
 import platform
 import time
 from typing import TYPE_CHECKING, AsyncGenerator, Generator, Optional
+
+logger = logging.getLogger("argos")
 
 import httpx
 import requests
@@ -83,19 +86,24 @@ class ArgosAgent:
 
         """.format(os_system=os_system, user=user, home_dir=home_dir)
 
-        self.system_prompt = (
-            static_context
-            + "\n"
-            + self._registry.build_prompt_block()
-            + "\n\n"
-            + build_system_prompt_suffix()
-        )
+        self._static_context = static_context
+        self._prompt_suffix = "\n\n" + build_system_prompt_suffix()
 
         self._init_history()
 
-    def _init_history(self):
-        """Resets the conversation history to the initial system prompt."""
+    def _init_history_with_tools(self, tool_block: str):
+        """Resets history using a specific tool block (enables per-task Tool RAG)."""
+        self.system_prompt = (
+            self._static_context
+            + "\n"
+            + tool_block
+            + self._prompt_suffix
+        )
         self.history = [{"role": "system", "content": self.system_prompt}]
+
+    def _init_history(self):
+        """Resets the conversation history to the initial system prompt (all tools)."""
+        self._init_history_with_tools(self._registry.build_prompt_block())
 
     def add_message(self, role: str, content: str):
         """Appends a new message to the memory buffer."""
@@ -145,55 +153,62 @@ class ArgosAgent:
         self,
         messages: list[dict],
         temperature: float = 0.0,
-        retries: int = 0,
         model_override: str = None,
         max_retries: int = 3,
     ) -> str:
         """Sync OpenAI-compatible call with dual-key rotation on rate limits."""
         from .config import LLM_API_KEY, LLM_API_KEY_2, LLM_BASE_URL
 
-        current_key = (
-            LLM_API_KEY_2 if (retries % 2 != 0 and LLM_API_KEY_2) else LLM_API_KEY
-        )
-        headers = {"Content-Type": "application/json"}
-        if current_key:
-            headers["Authorization"] = f"Bearer {current_key}"
-
+        available_keys = [k for k in [LLM_API_KEY, LLM_API_KEY_2] if k]
+        url = f"{LLM_BASE_URL.rstrip('/')}/chat/completions"
         payload = {
             "model": model_override or self.model,
             "messages": messages,
             "temperature": temperature,
         }
 
-        try:
-            url = f"{LLM_BASE_URL.rstrip('/')}/chat/completions"
-            response = requests.post(url, headers=headers, json=payload, timeout=60)
+        exhausted: set[str] = set()
+        current_key = available_keys[0] if available_keys else None
 
-            if response.status_code == 429:
-                if retries < max_retries:
-                    if retries % 2 == 0 and LLM_API_KEY_2:
-                        print("⏳ Rate Limit (Key 1). Rotating instantly to Key 2...")
-                        return self._call_openai_compatible(
-                            messages, temperature, retries + 1, model_override, max_retries
-                        )
-                    else:
-                        wait_time = 5 * (retries + 1)
-                        print(f"⏳ Rate Limit reached. Waiting {wait_time}s...")
+        for attempt in range(max_retries + 1):
+            headers = {"Content-Type": "application/json"}
+            if current_key:
+                headers["Authorization"] = f"Bearer {current_key}"
+
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=60)
+
+                if response.status_code == 429:
+                    if current_key:
+                        exhausted.add(current_key)
+                    remaining = [k for k in available_keys if k not in exhausted]
+                    if remaining and attempt < max_retries:
+                        logger.warning("[LLM] Rate Limit. Rotating to next key...")
+                        current_key = remaining[0]
+                        continue
+                    elif attempt < max_retries:
+                        wait_time = 5 * (attempt + 1)
+                        exhausted.clear()
+                        logger.warning(f"[LLM] All keys rate-limited. Waiting {wait_time}s...")
                         time.sleep(wait_time)
-                        return self._call_openai_compatible(
-                            messages, temperature, retries + 1, model_override, max_retries
-                        )
-                else:
+                        current_key = available_keys[0] if available_keys else None
+                        continue
                     return "Error: Rate Limit exceeded."
 
-            if response.status_code != 200:
-                print(f"❌ LLM ERROR: {response.text}")
-                return "API Error."
+                if response.status_code != 200:
+                    logger.error(f"[LLM] OpenAI-compatible error {response.status_code}: {response.text[:200]}")
+                    return "API Error."
 
-            return response.json()["choices"][0]["message"]["content"]
+                choices = response.json().get("choices", [])
+                if not choices:
+                    logger.error("[LLM] OpenAI-compatible: empty 'choices' in response")
+                    return "API Error: empty response from LLM."
+                return choices[0]["message"]["content"]
 
-        except Exception as e:
-            return f"Connection Error: {e}"
+            except Exception as e:
+                return f"Connection Error: {e}"
+
+        return "Error: Rate Limit exceeded."
 
     def _call_anthropic(
         self,
@@ -233,9 +248,13 @@ class ArgosAgent:
                 timeout=60,
             )
             if response.status_code != 200:
-                print(f"❌ ANTHROPIC ERROR: {response.text}")
+                logger.error(f"[LLM] Anthropic error {response.status_code}: {response.text[:200]}")
                 return "API Error."
-            return response.json()["content"][0]["text"]
+            content_blocks = response.json().get("content", [])
+            if not content_blocks:
+                logger.error("[LLM] Anthropic: empty 'content' in response")
+                return "API Error: empty response from LLM."
+            return content_blocks[0]["text"]
         except Exception as e:
             return f"Connection Error: {e}"
 
@@ -276,7 +295,10 @@ class ArgosAgent:
             "temperature": temperature,
         }
 
-        current_key = LLM_API_KEY
+        available_keys = [k for k in [LLM_API_KEY, LLM_API_KEY_2] if k]
+        exhausted: set[str] = set()
+        current_key = available_keys[0] if available_keys else None
+
         for attempt in range(max_retries + 1):
             headers = {"Content-Type": "application/json"}
             if current_key:
@@ -287,24 +309,31 @@ class ArgosAgent:
                     resp = await client.post(url, headers=headers, json=payload)
 
                 if resp.status_code == 429:
-                    if attempt < max_retries:
-                        # Rotate to key 2 on first failure, then backoff
-                        if attempt % 2 == 0 and LLM_API_KEY_2:
-                            print("⏳ Rate Limit (Key 1). Rotating to Key 2...")
-                            current_key = LLM_API_KEY_2
-                        else:
-                            wait = 5 * (attempt + 1)
-                            print(f"⏳ Rate Limit. Waiting {wait}s...")
-                            await asyncio.sleep(wait)
-                            current_key = LLM_API_KEY
+                    if current_key:
+                        exhausted.add(current_key)
+                    remaining = [k for k in available_keys if k not in exhausted]
+                    if remaining and attempt < max_retries:
+                        logger.warning("[LLM/async] Rate Limit. Rotating to next key...")
+                        current_key = remaining[0]
+                        continue
+                    elif attempt < max_retries:
+                        wait = 5 * (attempt + 1)
+                        exhausted.clear()
+                        logger.warning(f"[LLM/async] All keys rate-limited. Waiting {wait}s...")
+                        await asyncio.sleep(wait)
+                        current_key = available_keys[0] if available_keys else None
                         continue
                     return "Error: Rate Limit exceeded."
 
                 if resp.status_code != 200:
-                    print(f"❌ LLM ERROR: {resp.text}")
+                    logger.error(f"[LLM/async] OpenAI-compatible error {resp.status_code}: {resp.text[:200]}")
                     return "API Error."
 
-                return resp.json()["choices"][0]["message"]["content"]
+                choices = resp.json().get("choices", [])
+                if not choices:
+                    logger.error("[LLM/async] OpenAI-compatible: empty 'choices' in response")
+                    return "API Error: empty response from LLM."
+                return choices[0]["message"]["content"]
 
             except httpx.TimeoutException:
                 if attempt < max_retries:
@@ -354,9 +383,13 @@ class ArgosAgent:
                     json=payload,
                 )
             if resp.status_code != 200:
-                print(f"❌ ANTHROPIC ERROR: {resp.text}")
+                logger.error(f"[LLM/async] Anthropic error {resp.status_code}: {resp.text[:200]}")
                 return "API Error."
-            return resp.json()["content"][0]["text"]
+            content_blocks = resp.json().get("content", [])
+            if not content_blocks:
+                logger.error("[LLM/async] Anthropic: empty 'content' in response")
+                return "API Error: empty response from LLM."
+            return content_blocks[0]["text"]
         except Exception as e:
             return f"Connection Error: {e}"
 

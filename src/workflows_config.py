@@ -1,3 +1,13 @@
+"""
+Behavioral runtime configuration — loaded from config.yaml, hot-reloaded on change.
+
+BOUNDARY: this module owns anything an operator might tune while the server is running:
+assistant personas, tone, conversation window, memory thresholds, auto-approve flags,
+sender blacklists, priority filters.
+Infrastructure settings (API keys, DB URLs, model names, rate limits) live in
+src/config.py (.env, requires restart).
+"""
+import atexit
 import logging
 import os
 import threading
@@ -192,6 +202,7 @@ _observer.schedule(
     ConfigFileHandler(), path=os.path.dirname(_config_file_path), recursive=False
 )
 _observer.start()
+atexit.register(_observer.stop)
 
 
 def get_workflows_config() -> WorkflowsConfig:

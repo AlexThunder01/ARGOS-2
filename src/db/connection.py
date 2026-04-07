@@ -172,3 +172,12 @@ def close_all():
     """Closes all pooled connections for both backends."""
     _close_sqlite_all()
     _close_pg_pool()
+
+
+def ph(query: str) -> str:
+    """
+    Converts ?-style placeholders to %s for PostgreSQL, leaves them
+    unchanged for SQLite.  Single source of truth — import this instead
+    of defining a local _ph() in each module.
+    """
+    return query.replace("?", "%s") if DB_BACKEND == "postgres" else query

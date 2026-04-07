@@ -31,7 +31,10 @@ def read_pdf_tool(inp):
     if not fname:
         return "Error: No filename specified. Use {'filename': 'path/to/file.pdf'}."
 
-    path = _normalize_path(fname)
+    try:
+        path = _normalize_path(fname)
+    except ValueError as e:
+        return f"Error: {e}"
     if not os.path.exists(path):
         return f"Error: File '{path}' not found."
     if not path.lower().endswith(".pdf"):
@@ -50,13 +53,16 @@ def read_pdf_tool(inp):
         page_range = None
         if isinstance(inp, dict) and "pages" in inp:
             page_spec = str(inp["pages"])
-            if "-" in page_spec:
-                start, end = page_spec.split("-", 1)
-                page_range = range(max(0, int(start) - 1), min(total_pages, int(end)))
-            else:
-                page_idx = int(page_spec) - 1
-                if 0 <= page_idx < total_pages:
-                    page_range = range(page_idx, page_idx + 1)
+            try:
+                if "-" in page_spec:
+                    start, end = page_spec.split("-", 1)
+                    page_range = range(max(0, int(start) - 1), min(total_pages, int(end)))
+                else:
+                    page_idx = int(page_spec) - 1
+                    if 0 <= page_idx < total_pages:
+                        page_range = range(page_idx, page_idx + 1)
+            except ValueError:
+                return f"Error: Invalid page specification '{page_spec}'. Use a number (e.g. '3') or a range (e.g. '1-5')."
 
         if page_range is None:
             page_range = range(min(total_pages, 20))  # Default: first 20 pages
@@ -99,13 +105,19 @@ def read_csv_tool(inp):
     if not fname:
         return "Error: No filename specified."
 
-    path = _normalize_path(fname)
+    try:
+        path = _normalize_path(fname)
+    except ValueError as e:
+        return f"Error: {e}"
     if not os.path.exists(path):
         return f"Error: File '{path}' not found."
 
     max_rows = 20
     if isinstance(inp, dict) and "rows" in inp:
-        max_rows = min(int(inp["rows"]), 100)
+        try:
+            max_rows = min(int(inp["rows"]), 100)
+        except (ValueError, TypeError):
+            pass
 
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -153,7 +165,10 @@ def read_json_tool(inp):
     if not fname:
         return "Error: No filename specified."
 
-    path = _normalize_path(fname)
+    try:
+        path = _normalize_path(fname)
+    except ValueError as e:
+        return f"Error: {e}"
     if not os.path.exists(path):
         return f"Error: File '{path}' not found."
 
