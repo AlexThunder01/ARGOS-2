@@ -11,6 +11,8 @@ GUI tools verify graceful degradation when pyautogui is absent.
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from unittest.mock import MagicMock, patch
@@ -83,6 +85,11 @@ def test_system_stats():
 
 
 class TestFilesystemTools:
+    @pytest.fixture(autouse=True)
+    def sandbox(self, tmp_path, monkeypatch):
+        """Redirect the filesystem sandbox to tmp_path so tests work in CI."""
+        monkeypatch.setattr("src.tools.helpers._HOME", str(tmp_path))
+
     def test_create_read_modify_delete_lifecycle(self, tmp_path):
         test_file = str(tmp_path / "test_argos.txt")
 
@@ -126,12 +133,13 @@ class TestFilesystemTools:
         result = TOOLS["delete_directory"]({"path": test_dir})
         assert "deleted" in result.lower()
 
-    def test_list_files_home(self):
-        result = TOOLS["list_files"]({"path": os.path.expanduser("~")})
+    def test_list_files_home(self, tmp_path):
+        (tmp_path / "subdir").mkdir()
+        result = TOOLS["list_files"]({"path": str(tmp_path)})
         assert "📂" in result
 
-    def test_read_nonexistent_file(self):
-        result = TOOLS["read_file"]({"path": "/tmp/this_file_does_not_exist_argos.txt"})
+    def test_read_nonexistent_file(self, tmp_path):
+        result = TOOLS["read_file"]({"path": str(tmp_path / "this_file_does_not_exist.txt")})
         assert "not found" in result.lower()
 
     def test_rename_file(self, tmp_path):

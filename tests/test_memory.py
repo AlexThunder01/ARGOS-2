@@ -129,13 +129,13 @@ class TestLLMJudge:
         mock_llm = lambda prompt: "This looks SAFE but actually SUSPICIOUS"
         assert validate_with_llm_judge("test", mock_llm) is False
 
-    def test_llm_failure_fails_open(self):
-        """If the LLM call raises an exception, fail open (assume safe)."""
+    def test_llm_failure_fails_closed(self):
+        """If the LLM call raises an exception, fail closed (block as precaution)."""
 
         def failing_llm(prompt):
             raise ConnectionError("Network error")
 
-        assert validate_with_llm_judge("test", failing_llm) is True
+        assert validate_with_llm_judge("test", failing_llm) is False
 
 
 # ==========================================================================
