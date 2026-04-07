@@ -25,13 +25,26 @@ def mock_get_embedding(text: str) -> np.ndarray:
 
 @pytest.fixture(autouse=True)
 def setup_teardown():
-    """Garantisce pulizia prima e dopo ogni test memory."""
+    """Garantisce pulizia prima e dopo ogni test memory.
+
+    tg_memory_vectors ha FOREIGN KEY su tg_users(user_id): l'utente deve
+    esistere prima di poter salvare memorie.
+    """
     from src.db.connection import get_connection
     conn = get_connection()
+    # Inserisce l'utente fittizio se non esiste già
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO tg_users (user_id, username, status)
+        VALUES (?, 'test_user', 'approved')
+        """,
+        (TEST_USER_ID,),
+    )
     conn.execute("DELETE FROM tg_memory_vectors WHERE user_id=?", (TEST_USER_ID,))
     conn.commit()
     yield
     conn.execute("DELETE FROM tg_memory_vectors WHERE user_id=?", (TEST_USER_ID,))
+    conn.execute("DELETE FROM tg_users WHERE user_id=?", (TEST_USER_ID,))
     conn.commit()
 
 class TestMemoryIntegration:
@@ -41,7 +54,7 @@ class TestMemoryIntegration:
     """
 
     @patch("src.core.memory.get_embedding", side_effect=mock_get_embedding)
-    @patch("src.core.security.compute_risk_score", return_value=0.1)
+    @patch("src.core.memory.compute_risk_score", return_value=0.1)
     def test_save_and_retrieve_rag_memory(self, mock_risk, mock_embed):
         """Verifica che una memoria venga salvata e recuperata correttamente via RAG."""
         facts = [
@@ -74,7 +87,7 @@ class TestMemoryIntegration:
 
 
     @patch("src.core.memory.get_embedding", side_effect=mock_get_embedding)
-    @patch("src.core.security.compute_risk_score", return_value=0.8) # Simuliamo un fallimento sicurezza
+    @patch("src.core.memory.compute_risk_score", return_value=0.8)  # Simuliamo un fallimento sicurezza
     def test_security_rejection_prevents_save(self, mock_risk, mock_embed):
         """Verifica che un contenuto ad alto rischio non venga memorizzato."""
         facts = [
