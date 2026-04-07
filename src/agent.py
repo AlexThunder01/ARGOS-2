@@ -56,6 +56,7 @@ class ArgosAgent:
 
         if registry is None:
             from src.tools.registry import REGISTRY
+
             registry = REGISTRY
         self._registry = registry
 
@@ -94,10 +95,7 @@ class ArgosAgent:
     def _init_history_with_tools(self, tool_block: str):
         """Resets history using a specific tool block (enables per-task Tool RAG)."""
         self.system_prompt = (
-            self._static_context
-            + "\n"
-            + tool_block
-            + self._prompt_suffix
+            self._static_context + "\n" + tool_block + self._prompt_suffix
         )
         self.history = [{"role": "system", "content": self.system_prompt}]
 
@@ -189,14 +187,18 @@ class ArgosAgent:
                     elif attempt < max_retries:
                         wait_time = 5 * (attempt + 1)
                         exhausted.clear()
-                        logger.warning(f"[LLM] All keys rate-limited. Waiting {wait_time}s...")
+                        logger.warning(
+                            f"[LLM] All keys rate-limited. Waiting {wait_time}s..."
+                        )
                         time.sleep(wait_time)
                         current_key = available_keys[0] if available_keys else None
                         continue
                     return "Error: Rate Limit exceeded."
 
                 if response.status_code != 200:
-                    logger.error(f"[LLM] OpenAI-compatible error {response.status_code}: {response.text[:200]}")
+                    logger.error(
+                        f"[LLM] OpenAI-compatible error {response.status_code}: {response.text[:200]}"
+                    )
                     return "API Error."
 
                 choices = response.json().get("choices", [])
@@ -248,7 +250,9 @@ class ArgosAgent:
                 timeout=60,
             )
             if response.status_code != 200:
-                logger.error(f"[LLM] Anthropic error {response.status_code}: {response.text[:200]}")
+                logger.error(
+                    f"[LLM] Anthropic error {response.status_code}: {response.text[:200]}"
+                )
                 return "API Error."
             content_blocks = response.json().get("content", [])
             if not content_blocks:
@@ -313,31 +317,39 @@ class ArgosAgent:
                         exhausted.add(current_key)
                     remaining = [k for k in available_keys if k not in exhausted]
                     if remaining and attempt < max_retries:
-                        logger.warning("[LLM/async] Rate Limit. Rotating to next key...")
+                        logger.warning(
+                            "[LLM/async] Rate Limit. Rotating to next key..."
+                        )
                         current_key = remaining[0]
                         continue
                     elif attempt < max_retries:
                         wait = 5 * (attempt + 1)
                         exhausted.clear()
-                        logger.warning(f"[LLM/async] All keys rate-limited. Waiting {wait}s...")
+                        logger.warning(
+                            f"[LLM/async] All keys rate-limited. Waiting {wait}s..."
+                        )
                         await asyncio.sleep(wait)
                         current_key = available_keys[0] if available_keys else None
                         continue
                     return "Error: Rate Limit exceeded."
 
                 if resp.status_code != 200:
-                    logger.error(f"[LLM/async] OpenAI-compatible error {resp.status_code}: {resp.text[:200]}")
+                    logger.error(
+                        f"[LLM/async] OpenAI-compatible error {resp.status_code}: {resp.text[:200]}"
+                    )
                     return "API Error."
 
                 choices = resp.json().get("choices", [])
                 if not choices:
-                    logger.error("[LLM/async] OpenAI-compatible: empty 'choices' in response")
+                    logger.error(
+                        "[LLM/async] OpenAI-compatible: empty 'choices' in response"
+                    )
                     return "API Error: empty response from LLM."
                 return choices[0]["message"]["content"]
 
             except httpx.TimeoutException:
                 if attempt < max_retries:
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(2**attempt)
                     continue
                 return "Connection Error: timeout"
             except Exception as e:
@@ -383,7 +395,9 @@ class ArgosAgent:
                     json=payload,
                 )
             if resp.status_code != 200:
-                logger.error(f"[LLM/async] Anthropic error {resp.status_code}: {resp.text[:200]}")
+                logger.error(
+                    f"[LLM/async] Anthropic error {resp.status_code}: {resp.text[:200]}"
+                )
                 return "API Error."
             content_blocks = resp.json().get("content", [])
             if not content_blocks:
@@ -444,7 +458,11 @@ class ArgosAgent:
                 for raw_line in resp.iter_lines():
                     if not raw_line:
                         continue
-                    line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+                    line = (
+                        raw_line.decode("utf-8")
+                        if isinstance(raw_line, bytes)
+                        else raw_line
+                    )
                     if not line.startswith("data: "):
                         continue
                     data = line[6:]
@@ -512,7 +530,11 @@ class ArgosAgent:
                 for raw_line in resp.iter_lines():
                     if not raw_line:
                         continue
-                    line = raw_line.decode("utf-8") if isinstance(raw_line, bytes) else raw_line
+                    line = (
+                        raw_line.decode("utf-8")
+                        if isinstance(raw_line, bytes)
+                        else raw_line
+                    )
                     if not line.startswith("data: "):
                         continue
                     data = line[6:]

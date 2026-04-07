@@ -79,9 +79,7 @@ def _validate_webhook_url(url: str) -> None:
         raise ValueError(f"Invalid webhook URL: {exc}") from exc
 
     if parsed.scheme not in ("http", "https"):
-        raise ValueError(
-            f"Webhook URL must use http or https, got: {parsed.scheme!r}"
-        )
+        raise ValueError(f"Webhook URL must use http or https, got: {parsed.scheme!r}")
 
     hostname = parsed.hostname
     if not hostname:
@@ -99,9 +97,7 @@ def _validate_webhook_url(url: str) -> None:
             or addr.is_reserved
             or addr.is_multicast
         ):
-            raise ValueError(
-                f"Webhook URL targets a non-public IP address: {hostname}"
-            )
+            raise ValueError(f"Webhook URL targets a non-public IP address: {hostname}")
     except ValueError as exc:
         if "Webhook URL targets" in str(exc):
             raise
@@ -166,8 +162,6 @@ class StatusResponse(BaseModel):
 # ==========================================================================
 # Core Logic — Delegates to CoreAgent
 # ==========================================================================
-
-
 
 
 def _task_result_to_response(result, agent: CoreAgent, task: str) -> TaskResponse:
@@ -293,7 +287,9 @@ def _run_task_async_worker(
                 timeout=5,
             )
         except Exception:
-            logger.warning(f"[Job {job_id}] Failed to deliver error payload to webhook.")
+            logger.warning(
+                f"[Job {job_id}] Failed to deliver error payload to webhook."
+            )
 
 
 # ==========================================================================
@@ -323,7 +319,9 @@ async def run_task(req: TaskRequest):
         raise HTTPException(status_code=429, detail=str(e))
 
     try:
-        return await _run_task_async_core(req.task, req.require_confirmation, req.max_steps)
+        return await _run_task_async_core(
+            req.task, req.require_confirmation, req.max_steps
+        )
     except HTTPException:
         raise
     except Exception as e:

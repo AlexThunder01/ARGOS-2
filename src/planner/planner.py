@@ -12,8 +12,11 @@ L'output del modello LLM viene vincolato a questo schema JSON:
 If the model produces free-form text (final response), it is treated as "done: true".
 """
 
+import logging
 from dataclasses import dataclass
 from typing import Optional
+
+logger = logging.getLogger("argos")
 
 PLANNER_RESPONSE_SCHEMA = """
 MANDATORY RESPONSE FORMAT — ALWAYS use one of these two JSON structures:
@@ -53,7 +56,7 @@ class PlannerDecision:
     confidence: float
     done: bool
     response: Optional[str]  # Final textual reply (when done=True)
-    raw: str                  # Raw model output (for debugging)
+    raw: str  # Raw model output (for debugging)
 
 
 def parse_planner_response(raw_response: str) -> PlannerDecision:

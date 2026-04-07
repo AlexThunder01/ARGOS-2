@@ -79,14 +79,20 @@ async def analyze_email(req: EmailAnalyzeRequest):
         # Strip markdown code fences if the LLM wrapped the JSON
         stripped = result_text.strip()
         if stripped.startswith("```"):
-            stripped = stripped.split("```")[-2] if "```" in stripped[3:] else stripped[3:]
+            stripped = (
+                stripped.split("```")[-2] if "```" in stripped[3:] else stripped[3:]
+            )
             stripped = stripped.lstrip("json").strip()
 
         try:
             analysis = _EmailAnalysis.model_validate(json.loads(stripped))
         except (json.JSONDecodeError, ValidationError) as parse_err:
-            logger.warning(f"[email] Failed to parse LLM JSON response: {parse_err}. Raw: {stripped[:200]}")
-            raise HTTPException(status_code=502, detail="LLM returned an unparseable response.")
+            logger.warning(
+                f"[email] Failed to parse LLM JSON response: {parse_err}. Raw: {stripped[:200]}"
+            )
+            raise HTTPException(
+                status_code=502, detail="LLM returned an unparseable response."
+            )
 
         priority_map = {"high": 4, "medium": 3, "low": 2, "spam": 1}
         email_prio_val = priority_map.get(analysis.priority, 3)
@@ -173,9 +179,7 @@ async def consume_pending_email(message_id: str):
 
         payload = row[0] if not isinstance(row, dict) else row["payload"]
         data = _json.loads(payload)
-        cursor.execute(
-            ph("DELETE FROM pending_emails WHERE msg_id = ?"), (message_id,)
-        )
+        cursor.execute(ph("DELETE FROM pending_emails WHERE msg_id = ?"), (message_id,))
         conn.commit()
 
         return {**data, "status": "deleted_and_consumed"}

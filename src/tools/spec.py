@@ -167,7 +167,8 @@ class ToolRegistry:
         }
         allowed_categories = _GROUP_CATEGORIES.get(group, set())
         filtered = [
-            s for s in self._specs.values()
+            s
+            for s in self._specs.values()
             if s.group is None or s.category in allowed_categories
         ]
         return ToolRegistry(filtered)
@@ -201,8 +202,7 @@ class ToolRegistry:
 
         names = list(self._specs.keys())
         corpus = [
-            f"{s.name} {s.description} {s.category}"
-            for s in self._specs.values()
+            f"{s.name} {s.description} {s.category}" for s in self._specs.values()
         ]
 
         try:

@@ -23,6 +23,7 @@ def _get_telegram_agent():
     global _telegram_agent
     if _telegram_agent is None:
         from src.core import CoreAgent
+
         _telegram_agent = CoreAgent(memory_mode="off")
     return _telegram_agent
 

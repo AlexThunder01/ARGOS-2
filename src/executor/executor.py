@@ -7,7 +7,7 @@ lo schema Pydantic prima dell'esecuzione.
 
 import logging
 import time
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from src.actions.base import ActionResult, ActionStatus
 

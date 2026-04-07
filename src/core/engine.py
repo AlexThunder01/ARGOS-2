@@ -45,15 +45,21 @@ from src.world_model.state import WorldState
 logger = logging.getLogger("argos")
 
 # ── Filesystem-mutating tools that invalidate git context mid-task ─────────
-_FILESYSTEM_MUTATING_TOOLS: frozenset[str] = frozenset({
-    "create_file", "modify_file", "rename_file", "delete_file",
-    "create_directory", "delete_directory",
-})
+_FILESYSTEM_MUTATING_TOOLS: frozenset[str] = frozenset(
+    {
+        "create_file",
+        "modify_file",
+        "rename_file",
+        "delete_file",
+        "create_directory",
+        "delete_directory",
+    }
+)
 
 # ── Diminishing returns constants ──────────────────────────────────────────
 # If LLM response length drops below this for DIMINISHING_STEPS consecutive
 # steps, we consider the loop to be spinning and stop early.
-DIMINISHING_THRESHOLD = 120   # characters
+DIMINISHING_THRESHOLD = 120  # characters
 DIMINISHING_STEPS = 3
 
 # ── Permission audit log ───────────────────────────────────────────────────
@@ -64,9 +70,9 @@ _AUDIT_LOCK = Lock()  # Protegge da race condition su scritture concorrenti
 def _log_permission_decision(
     tool_name: str,
     tool_input: dict,
-    decision: str,         # "allowed" | "denied_auto" | "denied_user" | "denied_hook"
+    decision: str,  # "allowed" | "denied_auto" | "denied_user" | "denied_hook"
     risk: str,
-    source: str,           # "safe" | "api_auto" | "callback" | "hook" | "default"
+    source: str,  # "safe" | "api_auto" | "callback" | "hook" | "default"
 ) -> None:
     """Appende una riga JSONL al permission audit log."""
     try:
@@ -89,17 +95,28 @@ def _log_permission_decision(
 
 # ── Context memoization ────────────────────────────────────────────────────
 
+
 def _get_git_context(max_chars: int = 500) -> Optional[str]:
     """Returns a compact git status string, or None if not in a git repo."""
     try:
-        branch = subprocess.check_output(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            stderr=subprocess.DEVNULL, timeout=3,
-        ).decode().strip()
-        status = subprocess.check_output(
-            ["git", "status", "--short"],
-            stderr=subprocess.DEVNULL, timeout=3,
-        ).decode().strip()
+        branch = (
+            subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+            .decode()
+            .strip()
+        )
+        status = (
+            subprocess.check_output(
+                ["git", "status", "--short"],
+                stderr=subprocess.DEVNULL,
+                timeout=3,
+            )
+            .decode()
+            .strip()
+        )
         result = f"Git branch: {branch}"
         if status:
             result += f"\nChanged files:\n{status}"
@@ -219,9 +236,9 @@ class CoreAgent:
             self.user_id = user_id
         else:
             linux_user = os.environ.get("USER", "argos")
-            self.user_id = (
-                int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)
-            )
+            self.user_id = int(
+                hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16
+            ) % (2**31)
 
         # LLM provider — receives filtered registry so prompt matches available tools
         self._llm = ArgosAgent(registry=active_registry)
@@ -276,11 +293,17 @@ class CoreAgent:
         tracer = get_tracer()
 
         # ── SESSION_START ──────────────────────────────────────────────────
-        HOOK_REGISTRY.fire_session(HookEvent.SESSION_START, task=task, user_id=self.user_id)
+        HOOK_REGISTRY.fire_session(
+            HookEvent.SESSION_START, task=task, user_id=self.user_id
+        )
 
         with tracer.start_as_current_span(
             "core.run_task",
-            attributes={"task": task[:200], "user_id": self.user_id, "memory_mode": self.memory_mode},
+            attributes={
+                "task": task[:200],
+                "user_id": self.user_id,
+                "memory_mode": self.memory_mode,
+            },
         ) as root_span:
             state = WorldState()
             state.current_task = task
@@ -292,7 +315,9 @@ class CoreAgent:
                         asyncio.to_thread(_get_git_context), timeout=5.0
                     )
                 except asyncio.TimeoutError:
-                    logger.warning("[CoreAgent] Git context fetch timed out — skipping.")
+                    logger.warning(
+                        "[CoreAgent] Git context fetch timed out — skipping."
+                    )
                     self._git_context_cache = None
 
             # ── Phase 2: Memory retrieval ──────────────────────────────────
@@ -302,7 +327,9 @@ class CoreAgent:
                         asyncio.to_thread(self._retrieve_memories, task), timeout=10.0
                     )
                 except asyncio.TimeoutError:
-                    logger.warning("[CoreAgent] Memory retrieval timed out — continuing without memories.")
+                    logger.warning(
+                        "[CoreAgent] Memory retrieval timed out — continuing without memories."
+                    )
                     relevant_memories = []
                 mem_span.set_attribute("memories.count", len(relevant_memories))
 
@@ -365,13 +392,15 @@ class CoreAgent:
         for step_num in range(self.max_steps):
             raw = await self._llm.think_async()
             decision = parse_planner_response(raw)
-            log_decision(logger, decision.thought, decision.tool or "done", decision.confidence)
+            log_decision(
+                logger, decision.thought, decision.tool or "done", decision.confidence
+            )
 
             # ── Diminishing returns detection ──────────────────────────────
             response_lengths.append(len(raw))
             if (
                 len(response_lengths) == DIMINISHING_STEPS
-                and all(l < DIMINISHING_THRESHOLD for l in response_lengths)
+                and all(length < DIMINISHING_THRESHOLD for length in response_lengths)
                 and not decision.done
             ):
                 logger.warning(
@@ -404,13 +433,17 @@ class CoreAgent:
                 HOOK_REGISTRY.fire_pre_tool, tool_name, tool_input or {}
             )
             if not pre_result.allowed:
-                final_response = f"Action '{tool_name}' blocked by hook: {pre_result.block_reason}"
+                final_response = (
+                    f"Action '{tool_name}' blocked by hook: {pre_result.block_reason}"
+                )
                 logger.warning(f"[CoreAgent] {final_response}")
                 self._llm.add_message(
                     "assistant",
                     json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
                 )
-                self._llm.add_message("user", f"ACTION BLOCKED: {pre_result.block_reason}")
+                self._llm.add_message(
+                    "user", f"ACTION BLOCKED: {pre_result.block_reason}"
+                )
                 loop_success = False
                 break
 
@@ -440,9 +473,13 @@ class CoreAgent:
                 "core.tool_execution",
                 attributes={"tool.name": tool_name, "tool.step": step_num + 1},
             ) as tool_span:
-                action_result = await asyncio.to_thread(execute_with_retry, spec, tool_input)
+                action_result = await asyncio.to_thread(
+                    execute_with_retry, spec, tool_input
+                )
                 tool_span.set_attribute("tool.success", action_result.success)
-                tool_span.set_attribute("tool.result_preview", action_result.message[:200])
+                tool_span.set_attribute(
+                    "tool.result_preview", action_result.message[:200]
+                )
 
             # ── PostToolUse hooks (offloaded — may do I/O) ────────────────
             await asyncio.to_thread(
@@ -464,7 +501,9 @@ class CoreAgent:
                         asyncio.to_thread(_get_git_context), timeout=5.0
                     )
                 except asyncio.TimeoutError:
-                    logger.warning("[CoreAgent] Git context refresh timed out — skipping.")
+                    logger.warning(
+                        "[CoreAgent] Git context refresh timed out — skipping."
+                    )
                     self._git_context_cache = None
                 if self._git_context_cache:
                     self._llm.add_message(
@@ -472,8 +511,12 @@ class CoreAgent:
                         f"WORKSPACE STATE UPDATED:\n{self._git_context_cache}",
                     )
 
-            state.record_action(tool_name, tool_input, action_result.message, action_result.success)
-            log_step(logger, state, tool_name, action_result.message, action_result.success)
+            state.record_action(
+                tool_name, tool_input, action_result.message, action_result.success
+            )
+            log_step(
+                logger, state, tool_name, action_result.message, action_result.success
+            )
 
             step_records.append(
                 StepRecord(
@@ -586,6 +629,7 @@ class CoreAgent:
         if self.memory_mode == "persistent":
             try:
                 from src.core.memory import retrieve_relevant_memories
+
                 return retrieve_relevant_memories(self.user_id, query, top_k=6)
             except Exception as e:
                 logger.exception(f"[CoreAgent] Memory retrieval failed: {e}")
@@ -604,7 +648,8 @@ class CoreAgent:
         else:
             query_words = {w for w in query.lower().split() if len(w) > 3}
             return [
-                m for m in memories
+                m
+                for m in memories
                 if any(w in m["content"].lower() for w in query_words)
             ][:top_k]
 
@@ -622,6 +667,7 @@ class CoreAgent:
                     save_extracted_memories,
                     should_extract_memory,
                 )
+
                 if should_extract_memory(user_message, 5):
                     facts = extract_memories_from_text(
                         user_message, existing_memories, self._llm.call_lightweight
@@ -649,7 +695,11 @@ class CoreAgent:
             spec = self._available_tools.get(spec_or_name) or REGISTRY.get(spec_or_name)
             if spec is None:
                 _log_permission_decision(
-                    str(spec_or_name), tool_input or {}, "denied_auto", "unknown", "not_found"
+                    str(spec_or_name),
+                    tool_input or {},
+                    "denied_auto",
+                    "unknown",
+                    "not_found",
                 )
                 return False
         else:
@@ -657,14 +707,14 @@ class CoreAgent:
 
         # ── Safe tools: always allowed ──
         if not spec.requires_confirmation():
-            _log_permission_decision(spec.name, tool_input or {}, "allowed", spec.risk, "safe")
+            _log_permission_decision(
+                spec.name, tool_input or {}, "allowed", spec.risk, "safe"
+            )
             return True
 
         # ── API mode: auto-block ──
         if self.require_confirmation:
-            logger.warning(
-                f"[CoreAgent] Auto-blocked '{spec.name}' (risk={spec.risk})"
-            )
+            logger.warning(f"[CoreAgent] Auto-blocked '{spec.name}' (risk={spec.risk})")
             _log_permission_decision(
                 spec.name, tool_input or {}, "denied_auto", spec.risk, "api_auto"
             )
@@ -683,5 +733,7 @@ class CoreAgent:
             return allowed
 
         # ── Default: allow ──
-        _log_permission_decision(spec.name, tool_input or {}, "allowed", spec.risk, "default")
+        _log_permission_decision(
+            spec.name, tool_input or {}, "allowed", spec.risk, "default"
+        )
         return True

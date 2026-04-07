@@ -32,15 +32,15 @@ class HookEvent(str, Enum):
 class HookResult:
     """Risultato aggregato dell'esecuzione di tutti gli hook per un evento."""
 
-    allowed: bool = True          # False se almeno un PreToolUse hook ha bloccato
-    block_reason: str = ""        # Messaggio del hook che ha bloccato
+    allowed: bool = True  # False se almeno un PreToolUse hook ha bloccato
+    block_reason: str = ""  # Messaggio del hook che ha bloccato
     errors: list[str] = field(default_factory=list)  # Eccezioni non fatali
 
 
 @dataclass
 class _HookEntry:
     fn: Callable
-    tools: Optional[set[str]]     # None = tutti i tool
+    tools: Optional[set[str]]  # None = tutti i tool
     event: HookEvent
     name: str
 
@@ -79,15 +79,17 @@ class HookRegistry:
             name=name or fn.__name__,
         )
         self._hooks.append(entry)
-        logger.debug(f"[Hooks] Registered '{entry.name}' for {event.value} "
-                     f"(tools={tools or 'all'})")
+        logger.debug(
+            f"[Hooks] Registered '{entry.name}' for {event.value} "
+            f"(tools={tools or 'all'})"
+        )
 
     def _matching(self, event: HookEvent, tool_name: str) -> list[_HookEntry]:
         """Restituisce gli hook che matchano evento e nome tool."""
         return [
-            h for h in self._hooks
-            if h.event == event
-            and (h.tools is None or tool_name in h.tools)
+            h
+            for h in self._hooks
+            if h.event == event and (h.tools is None or tool_name in h.tools)
         ]
 
     # ─── Fire methods ─────────────────────────────────────────────────────
@@ -108,12 +110,8 @@ class HookRegistry:
                 ret = hook.fn(tool_name=tool_name, tool_input=tool_input)
                 if ret is False:
                     result.allowed = False
-                    result.block_reason = (
-                        f"Blocked by hook '{hook.name}'"
-                    )
-                    logger.warning(
-                        f"[Hooks] '{hook.name}' blocked tool '{tool_name}'"
-                    )
+                    result.block_reason = f"Blocked by hook '{hook.name}'"
+                    logger.warning(f"[Hooks] '{hook.name}' blocked tool '{tool_name}'")
                     break  # Il primo blocco è sufficiente
             except Exception as e:
                 msg = f"Hook '{hook.name}' raised {type(e).__name__}: {e}"
@@ -180,6 +178,7 @@ HOOK_REGISTRY = HookRegistry()
 
 # ── Decorator ─────────────────────────────────────────────────────────────
 
+
 def on(
     event: HookEvent,
     tools: Optional[list[str]] = None,
@@ -199,6 +198,7 @@ def on(
             from datetime import datetime
             return datetime.now().hour >= 8
     """
+
     def decorator(fn: Callable) -> Callable:
         HOOK_REGISTRY.register(
             event=event,
@@ -207,4 +207,5 @@ def on(
             name=name or fn.__name__,
         )
         return fn
+
     return decorator

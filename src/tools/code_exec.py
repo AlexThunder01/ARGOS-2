@@ -9,7 +9,12 @@ Nessun accesso alla rete o al filesystem host, ad eccezione della workspace dedi
 import os
 import uuid
 
-from src.config import DOCKER_EXEC_MEM_LIMIT, DOCKER_HOST, HOST_WORKSPACE_DIR, WORKSPACE_DIR
+from src.config import (
+    DOCKER_EXEC_MEM_LIMIT,
+    DOCKER_HOST,
+    HOST_WORKSPACE_DIR,
+    WORKSPACE_DIR,
+)
 
 from .helpers import _get_arg
 

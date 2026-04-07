@@ -56,7 +56,9 @@ def read_pdf_tool(inp):
             try:
                 if "-" in page_spec:
                     start, end = page_spec.split("-", 1)
-                    page_range = range(max(0, int(start) - 1), min(total_pages, int(end)))
+                    page_range = range(
+                        max(0, int(start) - 1), min(total_pages, int(end))
+                    )
                 else:
                     page_idx = int(page_spec) - 1
                     if 0 <= page_idx < total_pages:

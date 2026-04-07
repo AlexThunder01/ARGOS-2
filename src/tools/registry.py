@@ -34,7 +34,6 @@ from .scraper import web_scrape_tool
 from .spec import ToolInput, ToolRegistry, ToolSpec
 from .web import get_weather_tool, system_stats_tool, web_search_tool
 
-
 # ─── Input Schemas ────────────────────────────────────────────────────────────
 
 
@@ -54,7 +53,9 @@ class CreateFileInput(ToolInput):
 class ModifyFileInput(ToolInput):
     filename: str = Field(description="Path or name of the file to modify")
     content: str = Field(default="", description="Content to write or append")
-    mode: str = Field(default="write", description="'write' to overwrite, 'append' to add")
+    mode: str = Field(
+        default="write", description="'write' to overwrite, 'append' to add"
+    )
 
 
 class RenameFileInput(ToolInput):
@@ -124,9 +125,7 @@ class KeyboardTypeInput(ToolInput):
 
 class VisualClickInput(ToolInput):
     description: str = Field(description="Visual description of the element to click")
-    click_type: str = Field(
-        default="left", description="'left', 'right', or 'double'"
-    )
+    click_type: str = Field(default="left", description="'left', 'right', or 'double'")
 
 
 class DescribeScreenInput(ToolInput):

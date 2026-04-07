@@ -26,6 +26,7 @@ logger = logging.getLogger("argos.hooks")
 
 # ─── 1. Audit Log ─────────────────────────────────────────────────────────
 
+
 def register_audit_log(path: Optional[str] = None) -> None:
     """
     Registra un hook che scrive ogni tool execution su file JSON Lines.
@@ -67,6 +68,7 @@ def register_audit_log(path: Optional[str] = None) -> None:
 
 
 # ─── 2. Telegram Alerts ───────────────────────────────────────────────────
+
 
 def register_telegram_alerts(
     bot_token: str,
@@ -116,6 +118,7 @@ def register_telegram_alerts(
 
 # ─── 3. Rate Limiter per tool costosi ─────────────────────────────────────
 
+
 def register_tool_rate_limit(
     tools: list[str],
     max_calls: int = 10,
@@ -160,6 +163,7 @@ def register_tool_rate_limit(
 
 # ─── 4. Business Hours Guard ──────────────────────────────────────────────
 
+
 def register_business_hours_guard(
     tools: Optional[list[str]] = None,
     allowed_hours: tuple[int, int] = (8, 20),
@@ -172,8 +176,11 @@ def register_business_hours_guard(
         allowed_hours: Tupla (ora_inizio, ora_fine) in formato 24h.
     """
     guarded_tools = tools or [
-        "delete_file", "delete_directory", "launch_app",
-        "bash_exec", "python_repl",
+        "delete_file",
+        "delete_directory",
+        "launch_app",
+        "bash_exec",
+        "python_repl",
     ]
     start_h, end_h = allowed_hours
 
