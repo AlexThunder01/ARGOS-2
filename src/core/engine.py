@@ -246,6 +246,9 @@ class CoreAgent:
         # Session memory (RAM-only, cleared on exit)
         self._session_memories: deque[dict] = deque(maxlen=500)
 
+        # Prior conversation messages to inject before the current task (set by callers)
+        self._injected_history: list[dict] = []
+
         # Context cache: computed once per task, cleared between tasks
         self._git_context_cache: Optional[str] = None
 
@@ -599,6 +602,24 @@ class CoreAgent:
         )
         self._llm._init_history_with_tools(filtered_registry.build_prompt_block())
 
+        # Load user profile and inject display name
+        try:
+            from src.telegram.db import db_get_profile
+
+            profile = db_get_profile(self.user_id)
+            if (
+                profile
+                and profile.get("display_name")
+                and profile["display_name"].strip()
+            ):
+                self._llm.add_message(
+                    "system",
+                    f"USER NAME: The user's name is '{profile['display_name']}'. "
+                    "Always address them by this name."
+                )
+        except Exception:
+            pass
+
         if self._git_context_cache:
             self._llm.add_message(
                 "system",
@@ -619,6 +640,10 @@ class CoreAgent:
                 f"THINGS YOU KNOW ABOUT THE USER (use when relevant):\n{memory_context}",
             )
 
+        if self._injected_history:
+            for msg in self._injected_history:
+                self._llm.add_message(msg["role"], msg["content"])
+
         self._llm.add_message("user", task)
 
     def _retrieve_memories(self, query: str) -> list[dict]:
@@ -630,7 +655,7 @@ class CoreAgent:
             try:
                 from src.core.memory import retrieve_relevant_memories
 
-                return retrieve_relevant_memories(self.user_id, query, top_k=6)
+                return retrieve_relevant_memories(self.user_id, query, top_k=10)
             except Exception as e:
                 logger.exception(f"[CoreAgent] Memory retrieval failed: {e}")
                 return []

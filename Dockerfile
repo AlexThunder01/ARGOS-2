@@ -6,6 +6,7 @@ WORKDIR /app
 # Install system dependencies (including Tesseract for OCR)
 RUN apt-get update && apt-get install -y \
     build-essential \
+    curl \
     tesseract-ocr \
     tesseract-ocr-eng \
     tesseract-ocr-ita \

@@ -303,27 +303,7 @@ async def sse_agent_stream(task: str, history: list[dict], user_id: int):
             allowed_tools=DASHBOARD_TOOLS_WHITELIST,
         )
 
-        # Load user profile and inject display name into system prompt
-        try:
-            from src.telegram.db import db_get_profile
-
-            profile = db_get_profile(user_id)
-            if (
-                profile
-                and profile.get("display_name")
-                and profile["display_name"].strip()
-            ):
-                agent._llm.system_prompt += (
-                    f"\n\nUSER NAME: The user's name is '{profile['display_name']}'. "
-                    "Always address them by this name."
-                )
-        except Exception:
-            pass
-
-        # Pre-load previous conversational context (except the very last msg which is the task)
-        agent._llm._init_history()
-        for msg in history[-10:]:  # Keep last 10 messages for context
-            agent._llm.add_message(msg["role"], msg["content"])
+        agent._injected_history = history[-10:] if history else []
 
         return agent.run_task(task)
 
@@ -375,17 +355,24 @@ async def chat_stream(req: ChatRequest):
 
     # Step 1: Check if user is CORRECTING a wrong name ("non mi chiamo X")
     negation_match = re.search(
-        r"(?:non mi chiamo|non sono|don't call me|not my name)",
+        r"(?i:non mi chiamo|non sono|don't call me|not my name)",
         req.task,
-        re.IGNORECASE,
     )
 
     # Step 2: Detect the actual name with broader patterns
+    # Using (?i:...) for the prefix to make only the prefix case-insensitive.
+    # The name itself MUST start with a capital letter or it won't match "sono un ..."
     name_match = re.search(
-        r"(?:mi chiamo|il mio nome è|chiamami|my name is|sono|I'm|i am)\s+([A-ZÀ-Ú][a-zA-Zà-ú]+)",
+        r"(?i:\bmi\s+chiamo\b|\bil\s+mio\s+nome\s+è\b|\bchiamami\b|\bmy\s+name\s+is\b|\bsono\b|\bI'm\b|\bi\s+am\b)\s+([A-ZÀ-Ú][a-zA-Zà-ú]+)",
         req.task,
-        re.IGNORECASE,
     )
+    
+    # Fallback to catch lowercase when explicitly using "mi chiamo"
+    if not name_match:
+        name_match = re.search(
+            r"(?i:\bmi\s+chiamo\b|\bil\s+mio\s+nome\s+è\b)\s+([a-zA-ZÀ-Úà-ú]{2,})",
+            req.task,
+        )
 
     if name_match and not negation_match:
         try:

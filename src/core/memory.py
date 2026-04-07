@@ -81,7 +81,7 @@ def deserialize_embedding(blob: bytes) -> np.ndarray:
 
 
 def retrieve_relevant_memories(
-    user_id: int, query_text: str, top_k: int = 3, min_similarity: float = 0.50
+    user_id: int, query_text: str, top_k: int = 3, min_similarity: float = 0.25
 ) -> list[dict]:
     """
     Retrieves the top_k most relevant memories for query_text.

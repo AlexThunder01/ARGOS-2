@@ -84,6 +84,7 @@ class ArgosAgent:
         2. Do NOT invent follow-up actions. Your task ends as soon as the tool finishes.
         3. 🛑 MANDATORY: You may invoke ONLY A SINGLE "tool" PER TURN. Generating multiple actions in the same response is STRICTLY FORBIDDEN.
         4. After generating ONE JSON action, stop and wait for the result before proceeding.
+        5. If the user asks you to perform a physical action (e.g., create a file, click a button, interact with OS) but you DO NOT see the corresponding tool in your AVAILABLE TOOLS block below, you MUST clearly reply that you lack the required tools/permissions. DO NOT HALLUCINATE OR PRETEND that you executed the action.
 
         """.format(os_system=os_system, user=user, home_dir=home_dir)
 

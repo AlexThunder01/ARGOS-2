@@ -61,6 +61,10 @@ class _Ctx:
 
     def close(self):
         if DB_BACKEND == "postgres":
+            try:
+                self.conn.rollback()
+            except Exception:
+                pass
             return_pg_connection(self.conn)
         # SQLite connections are thread-local, never closed here
 
@@ -372,7 +376,7 @@ def db_count_memories(user_id: int = 0) -> int:
 
 # pgvector-native similarity search (used by core/memory.py when backend=postgres)
 def db_vector_search(
-    user_id: int, query_vec: list[float], top_k: int = 3, min_similarity: float = 0.70
+    user_id: int, query_vec: list[float], top_k: int = 3, min_similarity: float = 0.25
 ) -> list[dict]:
     """
     Performs HNSW-accelerated cosine similarity search using pgvector.

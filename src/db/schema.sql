@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS tg_memory_vectors (
     id             SERIAL PRIMARY KEY,
     user_id        BIGINT NOT NULL REFERENCES tg_users(user_id) ON DELETE CASCADE,
     content        TEXT NOT NULL,
-    embedding      vector(768) NOT NULL,
+    embedding      vector(1024) NOT NULL,
     category       TEXT DEFAULT 'general'
                    CHECK(category IN ('preference','fact','task','interest','general')),
     source_turn_id INTEGER,

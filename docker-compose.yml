@@ -55,7 +55,7 @@ services:
       - HOST_WORKSPACE_DIR=${HOST_WORKSPACE_DIR:-${PWD}/data/workspace}
       - WORKSPACE_DIR=/app/data/workspace
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --spider http://localhost:8000/health || exit 1"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5

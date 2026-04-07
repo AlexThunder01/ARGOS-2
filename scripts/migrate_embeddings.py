@@ -1,106 +1,87 @@
-#!/usr/bin/env python3
-"""
-ARGOS-2 Memory Embeddings Migration Script
-
-This script re-embeds all existing memories in the SQLite database to match
-a new embedding provider or model. It reads all memories, generates new vectors
-using the specified (or default configured) API, and updates the database.
-
-Usage:
-    python3 scripts/migrate_embeddings.py \
-        --from-url https://api.groq.com/openai/v1 \
-        --to-url http://localhost:11434/v1 \
-        --model nomic-embed-text
-"""
-
-import argparse
 import os
 import sys
 
-import numpy as np
-import requests
-
-# Ensure we can import from src
+# Assicuriamoci che l'import parta dalla root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.db.connection import get_connection
+from src.db.connection import get_connection, DB_BACKEND
+from src.core.memory import get_embedding, serialize_embedding
+import logging
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("migration")
 
-def serialize_embedding(vec: np.ndarray) -> bytes:
-    return vec.tobytes()
-
-
-def generate_embedding(url: str, api_key: str, model: str, text: str) -> bytes:
-    headers = {"Content-Type": "application/json"}
-    if api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-
-    endpoint = f"{url.rstrip('/')}/embeddings"
-    response = requests.post(
-        endpoint, headers=headers, json={"model": model, "input": text}, timeout=30
-    )
-    response.raise_for_status()
-    vec = response.json()["data"][0]["embedding"]
-    return serialize_embedding(np.array(vec, dtype=np.float32))
-
-
-def migrate(to_url: str, model: str, api_key: str):
+def run():
+    logger.info(f"Avvio migrazione embedding. Backend database: {DB_BACKEND}")
+    
     conn = get_connection()
-    # Fetch all memory blobs
-    print("[*] Fetching memories from DB to migrate...")
-    rows = conn.execute("SELECT id, content FROM tg_memory_vectors").fetchall()
-    total = len(rows)
-    print(f"[*] Found {total} memories.")
-
-    if total == 0:
-        print("[*] No memories to migrate.")
+    raw_memories = []
+    
+    # 1. Carica tutte le memorie esistenti
+    try:
+        if DB_BACKEND == "postgres":
+            cur = conn.cursor()
+            cur.execute("SELECT user_id, content, category FROM tg_memory_vectors")
+            rows = cur.fetchall()
+            cur.close()
+        else:
+            cur = conn.execute("SELECT user_id, content, category FROM tg_memory_vectors")
+            rows = cur.fetchall()
+            
+        for row in rows:
+            raw_memories.append({
+                "user_id": row["user_id"],
+                "content": row["content"],
+                "category": row["category"]
+            })
+        logger.info(f"Lette {len(raw_memories)} memorie dal database.")
+    except Exception as e:
+        logger.error(f"Impossibile leggere memorie col vecchio formato: {e}")
         return
 
-    print(f"[*] Re-embedding {total} memories using {to_url} (model: {model})...")
+    # 2. Modifica la struttura del database (se Postgres)
+    if DB_BACKEND == "postgres":
+        cur = conn.cursor()
+        logger.info("Dropping table data and updating pgvector dimension to 1024...")
+        cur.execute("DROP INDEX IF EXISTS idx_tg_mem_hnsw")
+        cur.execute("TRUNCATE TABLE tg_memory_vectors RESTART IDENTITY CASCADE")
+        cur.execute("ALTER TABLE tg_memory_vectors ALTER COLUMN embedding TYPE vector(1024)")
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_tg_mem_hnsw ON tg_memory_vectors
+            USING hnsw (embedding vector_cosine_ops)
+            WITH (m = 16, ef_construction = 64)
+        """)
+        cur.close()
+        conn.commit()
+    else:
+        logger.info("Truncating SQLite table...")
+        conn.execute("DELETE FROM tg_memory_vectors")
+        conn.commit()
 
-    success = 0
-    errors = 0
-    for i, row in enumerate(rows, 1):
-        mem_id = row["id"]
-        content = row["content"]
+    # 3. Ri-calcola e inserisci con il nuovo modello
+    logger.info("Rigenerazione degli embeddings con bge-m3...")
+    for mem in raw_memories:
         try:
-            new_blob = generate_embedding(to_url, api_key, model, content)
-            conn.execute(
-                "UPDATE tg_memory_vectors SET embedding = ? WHERE id = ?",
-                (new_blob, mem_id),
-            )
-            success += 1
-            if i % 10 == 0:
-                print(f"    progress: {i}/{total}")
+            vec = get_embedding(mem["content"])
+            if DB_BACKEND == "postgres":
+                cur = conn.cursor()
+                vec_str = "[" + ",".join(f"{v:.8f}" for v in vec.tolist()) + "]"
+                cur.execute(
+                    "INSERT INTO tg_memory_vectors (user_id, content, embedding, category) VALUES (%s, %s, %s::vector, %s)",
+                    (mem["user_id"], mem["content"], vec_str, mem["category"])
+                )
+                cur.close()
+            else:
+                blob = serialize_embedding(vec)
+                conn.execute(
+                    "INSERT INTO tg_memory_vectors (user_id, content, embedding, category) VALUES (?, ?, ?, ?)",
+                    (mem["user_id"], mem["content"], blob, mem["category"])
+                )
         except Exception as e:
-            errors += 1
-            print(f"[!] Error migrating memory {mem_id}: {e}")
-
+            logger.error(f"Fallito re-embedding per '{mem['content']}': {e}")
+    
     conn.commit()
-    print(f"\n[*] Migration complete. {success} succeeded, {errors} failed.")
-
+    logger.info("Migrazione completata con successo! Potete riavviare Argos.")
 
 if __name__ == "__main__":
-    from src.config import EMBEDDING_API_KEY, EMBEDDING_BASE_URL, EMBEDDING_MODEL
-
-    parser = argparse.ArgumentParser(description="Migrate ARGOS-2 Memory Embeddings")
-    parser.add_argument(
-        "--from-url", help="Old embedding URL (informational only)", default=""
-    )
-    parser.add_argument(
-        "--to-url", help="New embedding URL", default=EMBEDDING_BASE_URL
-    )
-    parser.add_argument("--model", help="New embedding model", default=EMBEDDING_MODEL)
-    parser.add_argument(
-        "--api-key", help="API key for the new provider", default=EMBEDDING_API_KEY
-    )
-
-    args = parser.parse_args()
-
-    print("=== ARGOS-2 Memory Migration ===")
-    if args.from_url:
-        print(f"From: {args.from_url}")
-    print(f"To:   {args.to_url}")
-    print(f"Model:{args.model}\n")
-
-    migrate(args.to_url, args.model, args.api_key)
+    run()
