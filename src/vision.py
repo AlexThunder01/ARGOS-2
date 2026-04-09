@@ -269,7 +269,35 @@ def analyze_screen_for_coordinates(description):
     return None
 
 
-# --- FUNZIONE 2: DESCRIZIONE SCHERMO (PULITA) ---
+# --- FUNZIONE 2: ANALISI IMMAGINE DA FILE ---
+def analyze_image_file(path: str, question: str = "Describe this image in detail.") -> str:
+    """
+    Analyzes an arbitrary image file using the vision backend.
+    Accepts PNG, JPEG, GIF, BMP, WEBP files.
+    Used by the analyze_image tool for GAIA-style tasks with embedded images.
+    """
+    if not os.path.exists(path):
+        return f"Error: File '{path}' not found."
+
+    supported = (".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".tiff", ".tif")
+    if not path.lower().endswith(supported):
+        return f"Error: Unsupported image format. Supported: {', '.join(supported)}"
+
+    try:
+        image = Image.open(path)
+        # Resize to max 1500px on longest side to keep payload small
+        image.thumbnail((1500, 1500), Image.Resampling.LANCZOS)
+        img_b64 = encode_image_to_base64_high_quality(image)
+    except Exception as e:
+        return f"Error loading image: {e}"
+
+    content = _call_vlm(question, img_b64)
+    if not content:
+        return "Error: Vision backend returned no response."
+    return content
+
+
+# --- FUNZIONE 3: DESCRIZIONE SCHERMO (PULITA) ---
 def describe_screen_content(question):
     print("📸 Analisi visiva schermo (Descrizione)...")
     screen = take_screenshot_robust()

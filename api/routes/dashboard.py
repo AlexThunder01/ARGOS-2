@@ -359,18 +359,33 @@ async def chat_stream(req: ChatRequest):
         req.task,
     )
 
-    # Step 2: Detect the actual name with broader patterns
-    # Using (?i:...) for the prefix to make only the prefix case-insensitive.
-    # The name itself MUST start with a capital letter or it won't match "sono un ..."
+    # Step 2: Detect the actual name.
+    #
+    # Group 1 — unambiguous introductions (case-insensitive name):
+    # NOTE: \bsono\b excluded from this group — it's too broad in Italian
+    # ("sono nella Scrivania", "sono stanco", etc. → false positives).
     name_match = re.search(
-        r"(?i:\bmi\s+chiamo\b|\bil\s+mio\s+nome\s+è\b|\bchiamami\b|\bmy\s+name\s+is\b|\bsono\b|\bI'm\b|\bi\s+am\b)\s+([A-ZÀ-Ú][a-zA-Zà-ú]+)",
+        r"(?i:\bmi\s+chiamo\b|\bil\s+mio\s+nome\s+è\b|\bchiamami\b"
+        r"|\bmy\s+name\s+is\b|\bI'm\b|\bi\s+am\b)"
+        r"\s+([A-ZÀ-Ú][a-zA-Zà-ú]+)",
         req.task,
     )
-    
-    # Fallback to catch lowercase when explicitly using "mi chiamo"
+
+    # Fallback group 1b — "mi chiamo / il mio nome è" with lowercase name
     if not name_match:
         name_match = re.search(
             r"(?i:\bmi\s+chiamo\b|\bil\s+mio\s+nome\s+è\b)\s+([a-zA-ZÀ-Úà-ú]{2,})",
+            req.task,
+        )
+
+    # Group 2 — correction context + "sono" + CapitalizedName only.
+    # Matches "no sono Benito", "adesso sono Benito", "ora sono Benito", etc.
+    # The capital-letter requirement blocks adjectives/participles (stanco, pronto).
+    if not name_match:
+        name_match = re.search(
+            r"(?i:\bno[,.\s]+sono\b|\badesso\s+sono\b|\bora\s+sono\b"
+            r"|\bin\s+realtà\s+sono\b|\banzi\s+sono\b)"
+            r"\s+([A-ZÀ-Ú][a-zA-Zà-ú]+)",
             req.task,
         )
 

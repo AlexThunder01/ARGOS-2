@@ -17,6 +17,12 @@ yfinance==1.2.0
 # --- Document Parsing (Advanced) ---
 pypdf==5.4.0
 html2text==2025.4.15
+openpyxl==3.1.5
+pandas==2.2.3
+
+# --- Browser Automation (Playwright — headless Chromium) ---
+# After pip install, run: playwright install chromium
+playwright==1.51.0
 
 # --- Voice & Audio ---
 gTTS==2.5.4

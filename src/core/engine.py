@@ -59,8 +59,9 @@ _FILESYSTEM_MUTATING_TOOLS: frozenset[str] = frozenset(
 # ── Diminishing returns constants ──────────────────────────────────────────
 # If LLM response length drops below this for DIMINISHING_STEPS consecutive
 # steps, we consider the loop to be spinning and stop early.
-DIMINISHING_THRESHOLD = 120  # characters
-DIMINISHING_STEPS = 3
+# Override via env: ARGOS_DIMINISHING_THRESHOLD, ARGOS_DIMINISHING_STEPS
+DIMINISHING_THRESHOLD: int = int(os.getenv("ARGOS_DIMINISHING_THRESHOLD", "80"))
+DIMINISHING_STEPS: int = int(os.getenv("ARGOS_DIMINISHING_STEPS", "5"))
 
 # ── Permission audit log ───────────────────────────────────────────────────
 _AUDIT_PATH = Path(os.getenv("ARGOS_PERMISSION_AUDIT", "logs/argos_permissions.jsonl"))
@@ -206,7 +207,7 @@ class CoreAgent:
         self,
         memory_mode: str = "off",
         user_id: Optional[int] = None,
-        max_steps: int = 10,
+        max_steps: Optional[int] = None,
         require_confirmation: bool = False,
         confirmation_callback: Optional[Callable] = None,
         allowed_tools: Optional[Set[str]] = None,
@@ -218,7 +219,7 @@ class CoreAgent:
             )
 
         self.memory_mode = memory_mode
-        self.max_steps = max_steps
+        self.max_steps = max_steps if max_steps is not None else int(os.getenv("ARGOS_MAX_STEPS", "20"))
         self.require_confirmation = require_confirmation
         self.confirmation_callback = confirmation_callback
         self.inject_git_context = inject_git_context
@@ -252,7 +253,10 @@ class CoreAgent:
         # Context cache: computed once per task, cleared between tasks
         self._git_context_cache: Optional[str] = None
 
-        logger.info(
+        # Task counter used for memory extraction debounce
+        self._task_count: int = 0
+
+        logger.debug(
             f"[CoreAgent] Initialized | memory={memory_mode} | "
             f"user_id={self.user_id} | backend={self._llm.backend} | "
             f"model={self._llm.model} | tools={len(self._available_tools)}/{len(REGISTRY)}"
@@ -345,13 +349,15 @@ class CoreAgent:
             )
 
             # ── Phase 5: Memory extraction ────────────────────────────────
+            self._task_count += 1
             if self.memory_mode != "off" and final_response:
                 with tracer.start_as_current_span("core.extract_memories"):
                     await asyncio.to_thread(
-                        self._maybe_extract_memories, task, relevant_memories
+                        self._maybe_extract_memories, task, relevant_memories, self._task_count
                     )
 
             self._git_context_cache = None
+            self._injected_history = []
             root_span.set_attribute("result.success", loop_success)
 
             task_result = TaskResult(
@@ -410,13 +416,21 @@ class CoreAgent:
                     f"[CoreAgent] Diminishing returns after {step_num + 1} steps "
                     f"(lengths={list(response_lengths)}). Stopping."
                 )
-                final_response = decision.response or raw
+                # decision.response is None when the LLM was mid-action (done=False).
+                # Never leak the raw JSON action to the user.
+                if decision.response:
+                    final_response = decision.response
+                else:
+                    final_response = (
+                        "Non sono riuscito a completare il task dopo diversi tentativi. "
+                        "Prova a fornire maggiori dettagli o a riformulare la richiesta."
+                    )
                 root_span.set_attribute("stop_reason", "diminishing_returns")
                 break
 
             if decision.done:
                 final_response = decision.response or raw
-                logger.info(f"[CoreAgent] Task completed in {step_num + 1} step(s).")
+                logger.debug(f"[CoreAgent] Task completed in {step_num + 1} step(s).")
                 root_span.set_attribute("steps.total", step_num + 1)
                 break
 
@@ -614,8 +628,9 @@ class CoreAgent:
             ):
                 self._llm.add_message(
                     "system",
-                    f"USER NAME: The user's name is '{profile['display_name']}'. "
-                    "Always address them by this name."
+                    f"USER NAME: The user has previously introduced themselves as "
+                    f"'{profile['display_name']}'. Use this name, but if they explicitly "
+                    "state a different name in this conversation, use the new one instead.",
                 )
         except Exception:
             pass
@@ -678,7 +693,9 @@ class CoreAgent:
                 if any(w in m["content"].lower() for w in query_words)
             ][:top_k]
 
-    def _maybe_extract_memories(self, user_message: str, existing_memories: list[dict]):
+    def _maybe_extract_memories(
+        self, user_message: str, existing_memories: list[dict], task_count: int = 1
+    ):
         if self.memory_mode == "session":
             if len(user_message) > EXTRACT_MIN_LENGTH:
                 self._session_memories.append(
@@ -693,7 +710,7 @@ class CoreAgent:
                     should_extract_memory,
                 )
 
-                if should_extract_memory(user_message, 5):
+                if should_extract_memory(user_message, task_count):
                     facts = extract_memories_from_text(
                         user_message, existing_memories, self._llm.call_lightweight
                     )

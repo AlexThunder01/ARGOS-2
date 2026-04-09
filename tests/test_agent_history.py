@@ -226,7 +226,12 @@ class TestHistoryManagement:
         agent = ArgosAgent()
         # La regola "un solo tool per turno" deve essere nel prompt
         prompt = agent.history[0]["content"]
-        assert "SINGLE" in prompt or "single" in prompt or "ONE" in prompt.upper() or "ONLY" in prompt.upper()
+        assert (
+            "SINGLE" in prompt
+            or "single" in prompt
+            or "ONE" in prompt.upper()
+            or "ONLY" in prompt.upper()
+        )
 
     def test_system_prompt_no_how_can_i_help_rule(self):
         agent = ArgosAgent()
@@ -236,7 +241,11 @@ class TestHistoryManagement:
     def test_system_prompt_no_split_write_actions(self):
         agent = ArgosAgent()
         prompt = agent.history[0]["content"]
-        assert "split" in prompt.lower() or "SINGLE" in prompt or "single" in prompt.lower()
+        assert (
+            "split" in prompt.lower()
+            or "SINGLE" in prompt
+            or "single" in prompt.lower()
+        )
 
 
 # ==========================================================================
@@ -280,9 +289,7 @@ class TestThinkSync:
         """think() deve chiamare trim_history() prima della call LLM."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": "ok"}}]
-        }
+        mock_resp.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
         mock_post.return_value = mock_resp
 
         agent = ArgosAgent()
@@ -350,7 +357,9 @@ class TestThinkSync:
 # ==========================================================================
 
 
-def _make_httpx_mock(status: int, json_body: dict | None = None, exc: Exception | None = None) -> AsyncMock:
+def _make_httpx_mock(
+    status: int, json_body: dict | None = None, exc: Exception | None = None
+) -> AsyncMock:
     """
     Costruisce il mock corretto per httpx.AsyncClient.
 
@@ -503,7 +512,9 @@ def _make_stream_mock_anthropic(chunks: list[str]) -> MagicMock:
 class TestThinkStream:
     @patch("src.agent.requests.post")
     def test_stream_openai_yields_chunks(self, mock_post):
-        mock_post.side_effect = _make_stream_mock_openai(["Ciao ", "mondo", "!"]).side_effect or None
+        mock_post.side_effect = (
+            _make_stream_mock_openai(["Ciao ", "mondo", "!"]).side_effect or None
+        )
         # Configurazione corretta tramite sostituzione
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -531,7 +542,7 @@ class TestThinkStream:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         lines = [
-            b'data: {"choices": [{"delta": {}}]}',         # nessun content
+            b'data: {"choices": [{"delta": {}}]}',  # nessun content
             b'data: {"choices": [{"delta": {"content": ""}}]}',  # content vuoto
             b'data: {"choices": [{"delta": {"content": "ok"}}]}',
             b"data: [DONE]",
@@ -685,7 +696,9 @@ class TestThinkWithMessages:
     def test_think_with_messages_anthropic(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.json.return_value = {"content": [{"text": "risposta anthropic telegram"}]}
+        mock_resp.json.return_value = {
+            "content": [{"text": "risposta anthropic telegram"}]
+        }
         mock_post.return_value = mock_resp
 
         agent = ArgosAgent()

@@ -185,11 +185,28 @@ class ToolRegistry:
         """Nomi dei tool con dashboard_allowed=True."""
         return {name for name, spec in self._specs.items() if spec.dashboard_allowed}
 
+    # Tools that must always be co-selected together.
+    # If any key in a pair is selected by RAG, its companions are added automatically.
+    # This prevents the agent from having read_file without list_files (exploration gap).
+    _COSELECT_PAIRS: dict[str, set[str]] = {
+        "read_file": {"list_files"},
+        "read_pdf": {"list_files"},
+        "read_csv": {"list_files"},
+        "read_json": {"list_files"},
+        "modify_file": {"list_files", "read_file"},
+        "delete_file": {"list_files"},
+        "rename_file": {"list_files"},
+    }
+
     def select_for_query(self, query: str, top_k: int = 12) -> "ToolRegistry":
         """
         Returns a filtered ToolRegistry with the top_k tools most relevant to query,
         ranked by TF-IDF cosine similarity on (name + description + category).
         Falls back to the full registry if sklearn is unavailable or top_k >= len.
+
+        After TF-IDF selection, co-selection rules (_COSELECT_PAIRS) are applied:
+        if a tool that requires a companion (e.g. read_file needs list_files) is
+        selected, its companions are added automatically regardless of their score.
         """
         if len(self._specs) <= top_k:
             return self
@@ -211,6 +228,14 @@ class ToolRegistry:
             scores = cosine_similarity(vec[-1], vec[:-1]).flatten()
             top_indices = scores.argsort()[-top_k:][::-1]
             selected = {names[i] for i in top_indices}
+
+            # Apply co-selection: add mandatory companions that were not in top_k
+            for tool_name, companions in self._COSELECT_PAIRS.items():
+                if tool_name in selected:
+                    for companion in companions:
+                        if companion in self._specs:
+                            selected.add(companion)
+
             return self.filter(selected)
         except Exception:
             return self

@@ -103,7 +103,7 @@ def get_weather_tool(query):
     try:
         # Step 1: Geocoding (City name -> Lat/Lon)
         encoded_loc = urllib.parse.quote(location)
-        geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={encoded_loc}&count=1&language=it&format=json"
+        geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={encoded_loc}&count=1&format=json"
         geo_res = requests.get(geo_url, timeout=10)
         if geo_res.status_code != 200:
             return f"Geocoding error: HTTP {geo_res.status_code}"

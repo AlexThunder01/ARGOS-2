@@ -13,6 +13,8 @@ Dependencies:
 
 import requests as http_client
 
+from src.config import SCRAPER_TIMEOUT
+
 from .helpers import _get_arg
 
 # Maximum page size to download (5MB)
@@ -21,8 +23,8 @@ MAX_DOWNLOAD_BYTES = 5 * 1024 * 1024
 # Maximum output text length
 MAX_OUTPUT_CHARS = 8000
 
-# Request timeout
-TIMEOUT = 15
+# Request timeout (configurable via SCRAPER_TIMEOUT env var)
+TIMEOUT = SCRAPER_TIMEOUT
 
 # User-Agent header to avoid bot-blocking
 HEADERS = {

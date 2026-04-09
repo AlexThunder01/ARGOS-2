@@ -38,6 +38,7 @@ from src.world_model.state import WorldState
 # Helper — ToolSpec minimale sicuro (risk=none)
 # ==========================================================================
 
+
 class _EchoInput(ToolInput):
     pass
 
@@ -81,12 +82,14 @@ def _done_response(text: str = "Fatto!") -> str:
 
 
 def _tool_response(tool: str, inp: dict | None = None) -> str:
-    return json.dumps({
-        "thought": f"uso {tool}",
-        "action": {"tool": tool, "input": inp or {}},
-        "confidence": 0.9,
-        "done": False,
-    })
+    return json.dumps(
+        {
+            "thought": f"uso {tool}",
+            "action": {"tool": tool, "input": inp or {}},
+            "confidence": 0.9,
+            "done": False,
+        }
+    )
 
 
 # ==========================================================================
@@ -106,6 +109,7 @@ def _make_tracer():
 
 def _run_loop(agent, task="test") -> tuple:
     """Esegue _reasoning_loop in modo sincrono e ritorna (response, records, success)."""
+
     async def _inner():
         state = WorldState()
         state.current_task = task
@@ -119,7 +123,9 @@ class TestReasoningLoop:
     def test_loop_done_immediately(self):
         """LLM restituisce done=true al primo step: nessun tool eseguito."""
         agent = _make_agent()
-        with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think:
+        with patch.object(
+            agent._llm, "think_async", new_callable=AsyncMock
+        ) as mock_think:
             mock_think.return_value = _done_response("Completato al volo.")
             response, records, success = _run_loop(agent)
 
@@ -133,9 +139,12 @@ class TestReasoningLoop:
         agent = _make_agent()
         success_result = ActionResult(status=ActionStatus.SUCCESS, message="echo ok")
 
-        with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think, \
-             patch("src.core.engine.execute_with_retry", return_value=success_result):
-
+        with (
+            patch.object(
+                agent._llm, "think_async", new_callable=AsyncMock
+            ) as mock_think,
+            patch("src.core.engine.execute_with_retry", return_value=success_result),
+        ):
             mock_think.side_effect = [
                 _tool_response("test_echo"),
                 _done_response("Tutto fatto."),
@@ -152,12 +161,18 @@ class TestReasoningLoop:
         """Tool non presente in _available_tools → loop_success=False."""
         agent = _make_agent()
 
-        with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think:
+        with patch.object(
+            agent._llm, "think_async", new_callable=AsyncMock
+        ) as mock_think:
             mock_think.return_value = _tool_response("strumento_inesistente")
             response, records, success = _run_loop(agent)
 
         assert success is False
-        assert "strumento_inesistente" in response or "Unknown" in response or "restricted" in response
+        assert (
+            "strumento_inesistente" in response
+            or "Unknown" in response
+            or "restricted" in response
+        )
 
     def test_loop_max_steps_without_done(self):
         """Se l'LLM non dice mai done, il loop si ferma al max_steps."""
@@ -166,17 +181,22 @@ class TestReasoningLoop:
 
         # La risposta deve essere >= DIMINISHING_THRESHOLD (120 chars) per evitare
         # che il check "diminishing returns" si attivi prima del max_steps.
-        long_tool_json = json.dumps({
-            "thought": "Sto eseguendo il tool di test in modo continuativo come richiesto dall'utente, pensiero lungo per superare la soglia",
-            "action": {"tool": "test_echo", "input": {}},
-            "confidence": 0.9,
-            "done": False,
-        })
+        long_tool_json = json.dumps(
+            {
+                "thought": "Sto eseguendo il tool di test in modo continuativo come richiesto dall'utente, pensiero lungo per superare la soglia",
+                "action": {"tool": "test_echo", "input": {}},
+                "confidence": 0.9,
+                "done": False,
+            }
+        )
         assert len(long_tool_json) >= DIMINISHING_THRESHOLD
 
-        with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think, \
-             patch("src.core.engine.execute_with_retry", return_value=success_result):
-
+        with (
+            patch.object(
+                agent._llm, "think_async", new_callable=AsyncMock
+            ) as mock_think,
+            patch("src.core.engine.execute_with_retry", return_value=success_result),
+        ):
             mock_think.return_value = long_tool_json
             response, records, success = _run_loop(agent)
 
@@ -191,17 +211,21 @@ class TestReasoningLoop:
         agent = _make_agent(max_steps=10)
         success_result = ActionResult(status=ActionStatus.SUCCESS, message="ok")
 
-        short_tool_json = json.dumps({
-            "thought": "x",
-            "action": {"tool": "test_echo", "input": {}},
-            "confidence": 0.9,
-            "done": False,
-        })
+        short_tool_json = json.dumps(
+            {
+                "thought": "x",
+                "action": {"tool": "test_echo", "input": {}},
+                "done": False,
+            }
+        )
         assert len(short_tool_json) < DIMINISHING_THRESHOLD
 
-        with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think, \
-             patch("src.core.engine.execute_with_retry", return_value=success_result):
-
+        with (
+            patch.object(
+                agent._llm, "think_async", new_callable=AsyncMock
+            ) as mock_think,
+            patch("src.core.engine.execute_with_retry", return_value=success_result),
+        ):
             mock_think.return_value = short_tool_json
             _run_loop(agent)
 
@@ -217,7 +241,9 @@ class TestReasoningLoop:
         )
         agent = _make_agent()
 
-        with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think:
+        with patch.object(
+            agent._llm, "think_async", new_callable=AsyncMock
+        ) as mock_think:
             mock_think.return_value = _tool_response("test_echo")
             response, records, success = _run_loop(agent)
 
@@ -230,7 +256,9 @@ class TestReasoningLoop:
         """In API mode (require_confirmation=True) i tool rischiosi sono bloccati."""
         agent = _make_agent(require_confirmation=True)
 
-        with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think:
+        with patch.object(
+            agent._llm, "think_async", new_callable=AsyncMock
+        ) as mock_think:
             mock_think.return_value = _tool_response("test_risky")
             response, records, success = _run_loop(agent)
 
@@ -241,7 +269,9 @@ class TestReasoningLoop:
         """Quando un tool viene negato, 'ACTION DENIED BY USER' viene iniettato in history."""
         agent = _make_agent(require_confirmation=True)
 
-        with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think:
+        with patch.object(
+            agent._llm, "think_async", new_callable=AsyncMock
+        ) as mock_think:
             mock_think.return_value = _tool_response("test_risky")
             _run_loop(agent)
 
@@ -253,7 +283,9 @@ class TestReasoningLoop:
         callback = MagicMock(return_value=False)
         agent = _make_agent(confirmation_callback=callback)
 
-        with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think:
+        with patch.object(
+            agent._llm, "think_async", new_callable=AsyncMock
+        ) as mock_think:
             mock_think.return_value = _tool_response("test_risky")
             _, _, success = _run_loop(agent)
 
@@ -264,11 +296,16 @@ class TestReasoningLoop:
     def test_loop_tool_failure_sets_loop_success_false(self):
         """Se execute_with_retry ritorna FAILED, loop_success diventa False."""
         agent = _make_agent()
-        fail_result = ActionResult(status=ActionStatus.FAILED, message="Error: file not found")
+        fail_result = ActionResult(
+            status=ActionStatus.FAILED, message="Error: file not found"
+        )
 
-        with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think, \
-             patch("src.core.engine.execute_with_retry", return_value=fail_result):
-
+        with (
+            patch.object(
+                agent._llm, "think_async", new_callable=AsyncMock
+            ) as mock_think,
+            patch("src.core.engine.execute_with_retry", return_value=fail_result),
+        ):
             mock_think.side_effect = [
                 _tool_response("test_echo"),
                 _done_response("Fallito."),
@@ -281,11 +318,16 @@ class TestReasoningLoop:
     def test_loop_tool_result_injected_in_history(self):
         """Il risultato del tool deve essere aggiunto alla history come TOOL RESULT."""
         agent = _make_agent()
-        success_result = ActionResult(status=ActionStatus.SUCCESS, message="risultato tool specifico")
+        success_result = ActionResult(
+            status=ActionStatus.SUCCESS, message="risultato tool specifico"
+        )
 
-        with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think, \
-             patch("src.core.engine.execute_with_retry", return_value=success_result):
-
+        with (
+            patch.object(
+                agent._llm, "think_async", new_callable=AsyncMock
+            ) as mock_think,
+            patch("src.core.engine.execute_with_retry", return_value=success_result),
+        ):
             mock_think.side_effect = [
                 _tool_response("test_echo"),
                 _done_response("Ok."),
@@ -306,7 +348,9 @@ class TestRunTaskAsync:
     def test_returns_task_result_on_success(self):
         async def run():
             agent = _make_agent()
-            with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think:
+            with patch.object(
+                agent._llm, "think_async", new_callable=AsyncMock
+            ) as mock_think:
                 mock_think.return_value = _done_response("Completato!")
                 return await agent.run_task_async("fai qualcosa")
 
@@ -320,8 +364,14 @@ class TestRunTaskAsync:
         async def run():
             agent = _make_agent()
             success_result = ActionResult(status=ActionStatus.SUCCESS, message="ok")
-            with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think, \
-                 patch("src.core.engine.execute_with_retry", return_value=success_result):
+            with (
+                patch.object(
+                    agent._llm, "think_async", new_callable=AsyncMock
+                ) as mock_think,
+                patch(
+                    "src.core.engine.execute_with_retry", return_value=success_result
+                ),
+            ):
                 mock_think.side_effect = [
                     _tool_response("test_echo"),
                     _done_response("Fatto."),
@@ -335,7 +385,9 @@ class TestRunTaskAsync:
     def test_task_result_memories_used_zero_when_off(self):
         async def run():
             agent = _make_agent(memory_mode="off")
-            with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think:
+            with patch.object(
+                agent._llm, "think_async", new_callable=AsyncMock
+            ) as mock_think:
                 mock_think.return_value = _done_response("ok")
                 return await agent.run_task_async("test")
 
@@ -359,7 +411,9 @@ class TestRunTaskAsync:
 
         async def run():
             agent = _make_agent()
-            with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think:
+            with patch.object(
+                agent._llm, "think_async", new_callable=AsyncMock
+            ) as mock_think:
                 mock_think.return_value = _done_response("ok")
                 await agent.run_task_async("test hook")
 
@@ -371,10 +425,13 @@ class TestRunTaskAsync:
 
     def test_git_context_cache_cleared_after_task(self):
         """_git_context_cache viene resettato a None dopo run_task_async."""
+
         async def run():
             agent = _make_agent()
             agent._git_context_cache = "branch: main"
-            with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think:
+            with patch.object(
+                agent._llm, "think_async", new_callable=AsyncMock
+            ) as mock_think:
                 mock_think.return_value = _done_response("ok")
                 await agent.run_task_async("test")
             return agent._git_context_cache
@@ -406,6 +463,7 @@ class TestBuildLlmContext:
         contents = self._get_history_contents(agent)
         # La data deve essere nel contesto
         from datetime import datetime
+
         today = datetime.now().strftime("%Y-%m-%d")
         assert today in contents
 
@@ -528,6 +586,7 @@ class TestAuthorizationEndToEnd:
         agent = _make_agent()
         # web_search esiste nel REGISTRY globale ed è risk=none
         from src.tools.registry import REGISTRY
+
         web_search = REGISTRY.get("web_search")
         if web_search and not web_search.requires_confirmation():
             assert agent._authorize_tool("web_search", {}) is True

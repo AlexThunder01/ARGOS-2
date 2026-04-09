@@ -96,7 +96,11 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
             action = data.get("action", {})
             tool_name = action.get("tool") if isinstance(action, dict) else None
             tool_input = action.get("input") if isinstance(action, dict) else None
-            confidence = float(data.get("confidence", 1.0))
+            try:
+                confidence = float(data.get("confidence", 1.0))
+            except (TypeError, ValueError):
+                confidence = 1.0
+            confidence = min(1.0, max(0.0, confidence))
 
             # Compatibilità retroattiva: vecchio formato {"tool": ..., "input": ...}
             if not tool_name and "tool" in data:

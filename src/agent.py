@@ -54,6 +54,9 @@ class ArgosAgent:
         os_system = platform.system()
         home_dir = os.path.expanduser("~")
 
+        from src.tools.helpers import _get_desktop_path
+        desktop_path = _get_desktop_path()
+
         if registry is None:
             from src.tools.registry import REGISTRY
 
@@ -67,7 +70,7 @@ class ArgosAgent:
         - Operating System: {os_system}
         - Current User: {user}
         - Home Directory: {home_dir}
-        - When creating files on the desktop, use ONLY the correct path for the host OS (e.g., /home/{user}/Desktop on Linux).
+        - When creating files on the desktop, use ONLY this exact path: {desktop_path}
         - NEVER use Windows-style paths (C:/...) when running on Linux.
 
         RESPONSE STYLE:
@@ -80,13 +83,16 @@ class ArgosAgent:
         7. If a visual action fails, ask the user to reposition the window or retry.
 
         FUNDAMENTAL RULES:
+        0. INITIATIVE: If the user asks you to "do something", "show what you can do", or gives you free rein without specifying a task, choose a useful and concrete action autonomously (e.g., create a demo file, check the weather, list files) and execute it immediately. Do NOT ask for clarification in this case.
         1. Execute ONLY EXACTLY what the user requests. If the user says "Click on X", click on X and STOP. Do NOT read the file, do NOT open it, do NOT perform any action not explicitly requested.
         2. Do NOT invent follow-up actions. Your task ends as soon as the tool finishes.
         3. 🛑 MANDATORY: You may invoke ONLY A SINGLE "tool" PER TURN. Generating multiple actions in the same response is STRICTLY FORBIDDEN.
         4. After generating ONE JSON action, stop and wait for the result before proceeding.
         5. If the user asks you to perform a physical action (e.g., create a file, click a button, interact with OS) but you DO NOT see the corresponding tool in your AVAILABLE TOOLS block below, you MUST clearly reply that you lack the required tools/permissions. DO NOT HALLUCINATE OR PRETEND that you executed the action.
+        6. FILESYSTEM — EXPLORE BEFORE READING: If the user asks to read, open, or inspect a file without specifying an exact path, ALWAYS call `list_files` first to discover what files actually exist. NEVER invent or guess file paths. Every path you use in `read_file` or any other file tool MUST come from a prior `list_files` result in this conversation.
+        7. FILE NOT FOUND — NO GUESSING: If any file operation returns "File not found" or "not found", do NOT retry with a different invented path. Call `list_files` on the relevant directory to discover real paths, then retry with a real one. Guessing a different path repeatedly is always wrong.
 
-        """.format(os_system=os_system, user=user, home_dir=home_dir)
+        """.format(os_system=os_system, user=user, home_dir=home_dir, desktop_path=desktop_path)
 
         self._static_context = static_context
         self._prompt_suffix = "\n\n" + build_system_prompt_suffix()
@@ -106,7 +112,7 @@ class ArgosAgent:
 
     def add_message(self, role: str, content: str):
         """Appends a new message to the memory buffer."""
-        self.history.append({"role": role, "content": str(content)})
+        self.history.append({"role": role.lower(), "content": str(content)})
 
     def trim_history(self):
         """
@@ -314,6 +320,9 @@ class ArgosAgent:
                     resp = await client.post(url, headers=headers, json=payload)
 
                 if resp.status_code == 429:
+                    logger.warning(
+                        f"[LLM/async] 429 received (attempt={attempt}): {resp.text[:300]}"
+                    )
                     if current_key:
                         exhausted.add(current_key)
                     remaining = [k for k in available_keys if k not in exhausted]

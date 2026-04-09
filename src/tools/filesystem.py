@@ -165,11 +165,10 @@ def delete_file_tool(inp):
         return f"Error: {e}"
     if not os.path.exists(path):
         return "File not found."
+    if os.path.isdir(path):
+        return f"Error: '{os.path.basename(path)}' is a directory. Use delete_directory instead."
     try:
-        if os.path.isdir(path):
-            shutil.rmtree(path)
-        else:
-            os.remove(path)
+        os.remove(path)
         return f"🗑️ Deleted: {path}"
     except Exception as e:
         return f"Error: {e}"

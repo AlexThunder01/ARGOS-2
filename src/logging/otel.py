@@ -31,7 +31,7 @@ def init_otel():
     service_name = os.environ.get("OTEL_SERVICE_NAME", "argos-api")
 
     if not endpoint:
-        logger.info(
+        logger.debug(
             "[OTel] Tracing disabled — set OTEL_EXPORTER_OTLP_ENDPOINT to enable "
             "(e.g. http://localhost:4317 for a local Jaeger instance). "
             "All spans are silently dropped via no-op tracer."

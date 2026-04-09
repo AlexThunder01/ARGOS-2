@@ -18,7 +18,21 @@ from .automation import (
     visual_click_tool,
 )
 from .code_exec import bash_exec_tool, python_repl_tool
-from .documents import read_csv_tool, read_json_tool, read_pdf_tool
+from .browser import (
+    browser_click_tool,
+    browser_get_content_tool,
+    browser_navigate_tool,
+    browser_type_tool,
+)
+from .documents import (
+    analyze_image_tool,
+    query_table_tool,
+    read_csv_tool,
+    read_excel_tool,
+    read_json_tool,
+    read_pdf_tool,
+    transcribe_audio_tool,
+)
 from .filesystem import (
     create_directory_tool,
     create_file_tool,
@@ -161,6 +175,81 @@ class ReadJsonInput(ToolInput):
     filename: str = Field(
         description="JSON filename or path",
         examples=["config.json"],
+    )
+
+
+class ReadExcelInput(ToolInput):
+    filename: str = Field(
+        description="Excel filename or path (.xlsx/.xls/.xlsm)",
+        examples=["data.xlsx"],
+    )
+    sheet: Optional[str] = Field(
+        default=None, description="Sheet name to read (defaults to active sheet)"
+    )
+    rows: int = Field(default=20, description="Number of rows to read (max 100)")
+
+
+class AnalyzeImageInput(ToolInput):
+    filename: str = Field(
+        description="Image file path (PNG, JPEG, GIF, BMP, WEBP, TIFF)",
+        examples=["chart.png"],
+    )
+    question: Optional[str] = Field(
+        default=None,
+        description="Question to answer about the image (default: describe in detail)",
+    )
+
+
+class BrowserNavigateInput(ToolInput):
+    url: str = Field(description="Full URL to navigate to", examples=["https://en.wikipedia.org/wiki/Python"])
+
+
+class BrowserClickInput(ToolInput):
+    text: Optional[str] = Field(default=None, description="Visible text of the element to click")
+    selector: Optional[str] = Field(default=None, description="CSS selector of the element to click")
+
+
+class BrowserTypeInput(ToolInput):
+    selector: str = Field(description="CSS selector, placeholder, or aria-label of the input field")
+    text: str = Field(description="Text to type into the field")
+    press_enter: bool = Field(default=False, description="Press Enter after typing")
+
+
+class QueryTableInput(ToolInput):
+    filename: str = Field(
+        description="CSV or Excel file path",
+        examples=["data.csv", "results.xlsx"],
+    )
+    filter: Optional[str] = Field(
+        default=None,
+        description="Pandas query string to filter rows, e.g. \"year == 2020 and value > 100\"",
+    )
+    select: Optional[list] = Field(
+        default=None,
+        description="List of columns to select, e.g. [\"name\", \"value\"]",
+    )
+    aggregate: Optional[str] = Field(
+        default=None,
+        description="Aggregation: sum, mean, count, max, min, median, std",
+    )
+    group_by: Optional[str] = Field(
+        default=None,
+        description="Column name to group by before aggregating",
+    )
+    sheet: Optional[str] = Field(
+        default=None,
+        description="Sheet name (Excel only)",
+    )
+
+
+class TranscribeAudioInput(ToolInput):
+    filename: str = Field(
+        description="Audio file path (.wav, .flac, .ogg, .aiff)",
+        examples=["recording.wav"],
+    )
+    language: str = Field(
+        default="en-US",
+        description="BCP-47 language code, e.g. 'en-US', 'it-IT', 'fr-FR'",
     )
 
 
@@ -438,6 +527,103 @@ REGISTRY = ToolRegistry(
             category="documents",
             icon="📋",
             label="Read JSON",
+            dashboard_allowed=True,
+            group="research",
+        ),
+        ToolSpec(
+            name="read_excel",
+            description="Reads Excel files (.xlsx/.xls/.xlsm), supports sheet selection",
+            input_schema=ReadExcelInput,
+            executor=read_excel_tool,
+            risk="none",
+            category="documents",
+            icon="📗",
+            label="Read Excel",
+            dashboard_allowed=True,
+            group="research",
+        ),
+        ToolSpec(
+            name="analyze_image",
+            description="Analyzes an image file with the vision model (PNG, JPEG, GIF, BMP, WEBP, TIFF)",
+            input_schema=AnalyzeImageInput,
+            executor=analyze_image_tool,
+            risk="none",
+            category="documents",
+            icon="🖼️",
+            label="Analyze Image",
+            dashboard_allowed=True,
+            group="research",
+        ),
+        ToolSpec(
+            name="query_table",
+            description="Runs pandas filter/aggregate on a CSV or Excel file (filter, group_by, aggregate, select)",
+            input_schema=QueryTableInput,
+            executor=query_table_tool,
+            risk="none",
+            category="documents",
+            icon="🔢",
+            label="Query Table",
+            dashboard_allowed=True,
+            group="research",
+        ),
+        ToolSpec(
+            name="transcribe_audio",
+            description="Transcribes a WAV/FLAC/OGG/AIFF audio file to text via speech recognition",
+            input_schema=TranscribeAudioInput,
+            executor=transcribe_audio_tool,
+            risk="none",
+            category="documents",
+            icon="🎤",
+            label="Transcribe Audio",
+            dashboard_allowed=True,
+            group="research",
+        ),
+        # ── Browser ─────────────────────────────────────────────────────────
+        ToolSpec(
+            name="browser_navigate",
+            description="Opens a URL in a headless browser and returns rendered page content (handles JS-heavy pages)",
+            input_schema=BrowserNavigateInput,
+            executor=browser_navigate_tool,
+            risk="none",
+            category="web",
+            icon="🌍",
+            label="Browser Navigate",
+            dashboard_allowed=True,
+            group="research",
+        ),
+        ToolSpec(
+            name="browser_click",
+            description="Clicks an element on the current browser page by visible text or CSS selector",
+            input_schema=BrowserClickInput,
+            executor=browser_click_tool,
+            risk="low",
+            category="web",
+            icon="🖱️",
+            label="Browser Click",
+            dashboard_allowed=True,
+            group="research",
+        ),
+        ToolSpec(
+            name="browser_type",
+            description="Types text into a form field on the current browser page; optionally presses Enter",
+            input_schema=BrowserTypeInput,
+            executor=browser_type_tool,
+            risk="low",
+            category="web",
+            icon="⌨️",
+            label="Browser Type",
+            dashboard_allowed=True,
+            group="research",
+        ),
+        ToolSpec(
+            name="browser_get_content",
+            description="Returns the text content of the current browser page (use after browser_click)",
+            input_schema=NoInput,
+            executor=browser_get_content_tool,
+            risk="none",
+            category="web",
+            icon="📄",
+            label="Browser Get Content",
             dashboard_allowed=True,
             group="research",
         ),

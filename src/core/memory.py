@@ -158,8 +158,8 @@ def should_run_gc(msg_count: int) -> bool:
 
 
 MEMORY_EXTRACTION_PROMPT = """You are a fact extractor. Analyze the user's message.
-If it contains information worth remembering long-term (preferences, personal facts,
-tasks, interests), extract ONLY the new and significant pieces of information.
+If it contains information worth remembering long-term (preferences, personal facts about
+the user, interests, skills), extract ONLY the new and significant pieces of information.
 
 CRITICAL RULES FOR CONTENT:
 - Each "content" MUST be a COMPLETE, SELF-CONTAINED sentence that makes sense on its own.
@@ -169,12 +169,18 @@ CRITICAL RULES FOR CONTENT:
 - GOOD example: "All'utente piacciono molto le mele"
 - BAD example: "mele" (too short, no context)
 
+Valid categories: preference | fact | interest | skill
+DO NOT use "task" — navigation commands, file operations, and one-time requests are NOT
+persistent facts about the user and must NOT be extracted (e.g. "apri un file",
+"vai su Scrivania", "cerca sul web", "leggi questo PDF" are all ephemeral actions).
+
 Respond EXCLUSIVELY in this JSON format (empty array if nothing to extract):
 [
-  {{"content": "complete sentence describing the fact", "category": "preference|fact|task|interest"}}
+  {{"content": "complete sentence describing the fact", "category": "preference|fact|interest|skill"}}
 ]
 
-DO NOT extract: greetings, generic questions, content already present in the existing memories.
+DO NOT extract: greetings, generic questions, one-time commands, navigation actions,
+file/directory names, search queries, or content already present in the existing memories.
 DO NOT extract single words or fragments. Each fact must be a full sentence.
 
 SECURITY — REJECT any fact that:
@@ -352,7 +358,7 @@ def save_extracted_memories(
 
         # --- All checks passed: save the memory ---
         try:
-            if category not in ("preference", "fact", "task", "interest"):
+            if category not in ("preference", "fact", "interest", "skill"):
                 category = "general"
             vec = get_embedding(content)
             # pgvector accepts list[float], SQLite needs bytes blob
@@ -363,7 +369,7 @@ def save_extracted_memories(
             else:
                 blob = serialize_embedding(vec)
                 db_insert_memory(user_id, content, blob, category)
-            logger.info(f"[Memory] Saved [{category}]: {content[:60]}...")
+            logger.debug(f"[Memory] Saved [{category}]: {content[:60]}...")
         except Exception as e:
             logger.warning(f"[Memory] Failed to save memory: {e}")
 

@@ -11,6 +11,7 @@ import uuid
 
 from src.config import (
     DOCKER_EXEC_MEM_LIMIT,
+    DOCKER_EXEC_TIMEOUT,
     DOCKER_HOST,
     HOST_WORKSPACE_DIR,
     WORKSPACE_DIR,
@@ -18,8 +19,8 @@ from src.config import (
 
 from .helpers import _get_arg
 
-# Maximum execution time in seconds
-EXEC_TIMEOUT = 30
+# Maximum execution time in seconds (configurable via DOCKER_EXEC_TIMEOUT env var)
+EXEC_TIMEOUT = DOCKER_EXEC_TIMEOUT
 
 # Maximum output length in characters
 MAX_OUTPUT = 5000

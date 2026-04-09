@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 import os
+import re
 import sys
 
 # Project root on sys.path
@@ -38,7 +39,6 @@ def cli_confirmation_callback(tool_name: str, tool_input: dict) -> bool:
     print(f"{'=' * 40}")
     choice = input("👉 Authorize execution? (y/N): ").lower().strip()
     if choice != "y":
-        print("🚫 ACTION DENIED BY USER.")
         return False
     return True
 
@@ -94,6 +94,20 @@ Memory Modes:
 # ==========================================================================
 # Main Loop
 # ==========================================================================
+
+
+def _format_step_preview(result: str, max_len: int = 120) -> str:
+    """Formats a tool result for single-line terminal display.
+
+    Collapses newlines into spaces and appends '…' if the text was truncated,
+    so the preview is always one readable line with no dangling sentence fragments.
+    """
+    flat = " ".join(result.split())
+    if len(flat) <= max_len:
+        return flat
+    # Truncate at the last word boundary within max_len
+    truncated = flat[:max_len].rsplit(" ", 1)[0]
+    return truncated + "…"
 
 
 def main():
@@ -169,9 +183,14 @@ def main():
         if result.history:
             for step in result.history:
                 status = "✅" if step.success else "❌"
-                print(f"  {status} [{step.tool}] {step.result[:120]}")
+                print(f"  {status} [{step.tool}] {_format_step_preview(step.result)}")
         print(f"🤖 Argos: {result.response}")
         return
+
+    # Conversation history — maintained across turns for multi-turn coherence.
+    # Injected into each task via _injected_history so the LLM has context
+    # from prior exchanges (last 10 messages = 5 turns).
+    conversation_history: list[dict] = []
 
     # Interactive loop
     while True:
@@ -190,16 +209,70 @@ def main():
                     stop_hybrid_listener()
                 break
 
+            # Detect name introduction/correction and update DB profile BEFORE
+            # run_task so _build_llm_context immediately reads the correct name.
+            #
+            # Two pattern groups:
+            #  1. Unambiguous introductions: "mi chiamo X", "il mio nome è X", ...
+            #  2. Correction context: "no sono X", "adesso sono X", "ora sono X" —
+            #     only when X starts with uppercase (blocks "sono stanco", "sono sicuro").
+            #
+            # NOTE: bare \bsono\b is intentionally excluded from group 1 (too
+            # broad — matches "sono nella Scrivania", etc.).
+            if memory_mode == "persistent":
+                _negation = re.search(
+                    r"(?i:non mi chiamo|non sono|don't call me|not my name)",
+                    user_input,
+                )
+                # Group 1 — unambiguous phrases (case-insensitive name)
+                _name_m = re.search(
+                    r"(?i:\bmi\s+chiamo\b|\bil\s+mio\s+nome\s+è\b|\bchiamami\b"
+                    r"|\bmy\s+name\s+is\b|\bI'm\b|\bi\s+am\b)"
+                    r"\s+([A-Za-zÀ-Úà-ú]{2,})",
+                    user_input,
+                )
+                # Group 2 — correction context + "sono" + CapitalizedName only
+                if not _name_m:
+                    _name_m = re.search(
+                        r"(?i:\bno[,.\s]+sono\b|\badesso\s+sono\b|\bora\s+sono\b"
+                        r"|\bin\s+realtà\s+sono\b|\banzi\s+sono\b)"
+                        r"\s+([A-ZÀ-Ú][a-zA-Zà-ú]+)",
+                        user_input,
+                    )
+                if _name_m and not _negation:
+                    try:
+                        from src.telegram.db import db_update_profile
+                        db_update_profile(agent.user_id, display_name=_name_m.group(1).capitalize())
+                    except Exception:
+                        pass
+                elif _negation:
+                    try:
+                        from src.telegram.db import db_update_profile
+                        db_update_profile(agent.user_id, display_name="")
+                    except Exception:
+                        pass
+
+            # Inject prior conversation so the LLM retains context between tasks
+            agent._injected_history = conversation_history[-10:]
+
             # Execute through CoreAgent
             print("⏳ ...", end="\r")
             result = agent.run_task(user_input)
             print(" " * 10, end="\r")
 
+            # Accumulate history for next turn (kept to last 10 messages)
+            conversation_history.append({"role": "user", "content": user_input})
+            conversation_history.append({"role": "assistant", "content": result.response})
+            if len(conversation_history) > 10:
+                conversation_history = conversation_history[-10:]
+
             # Display result
             if result.history:
                 for step in result.history:
+                    if not step.success and step.result in ("Denied by user.", "ACTION DENIED BY USER. STOP."):
+                        continue
                     status = "✅" if step.success else "❌"
-                    print(f"  {status} [{step.tool}] {step.result[:120]}")
+                    print(f"  {status} [{step.tool}]")
 
             print(f"🤖 Argos: {result.response}")
 
