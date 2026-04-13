@@ -62,13 +62,27 @@ def extract_json(text):
     if start == -1:
         return None
 
-    count = 0
+    depth = 0
+    in_string = False
+    escape_next = False
     for i in range(start, len(text)):
-        if text[i] == "{":
-            count += 1
-        elif text[i] == "}":
-            count -= 1
-            if count == 0:
+        ch = text[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if ch == "\\" and in_string:
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            if depth == 0:
                 try:
                     return json.loads(text[start : i + 1])
                 except json.JSONDecodeError:

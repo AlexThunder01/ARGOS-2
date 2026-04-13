@@ -52,7 +52,7 @@ def get_embedding(text: str) -> np.ndarray:
 
 def check_embedding_dimensions():
     """Boot-time dimension check to prevent DB incompatibility when switching models."""
-    from src.telegram.db import db_get_one_memory_blob
+    from src.db.repository import db_get_one_memory_blob
 
     blob = db_get_one_memory_blob()
     if blob is not None:
@@ -99,12 +99,12 @@ def retrieve_relevant_memories(
 
     # --- PostgreSQL: Native pgvector search ---
     if DB_BACKEND == "postgres":
-        from src.telegram.db import db_vector_search
+        from src.db.repository import db_vector_search
 
         return db_vector_search(user_id, query_vec.tolist(), top_k, min_similarity)
 
     # --- SQLite: Python numpy fallback ---
-    from src.telegram.db import db_get_all_memory_blobs, db_update_memory_access
+    from src.db.repository import db_get_all_memory_blobs, db_update_memory_access
 
     rows = db_get_all_memory_blobs(user_id)
     if not rows:
@@ -163,11 +163,11 @@ the user, interests, skills), extract ONLY the new and significant pieces of inf
 
 CRITICAL RULES FOR CONTENT:
 - Each "content" MUST be a COMPLETE, SELF-CONTAINED sentence that makes sense on its own.
-- The extracted fact MUST BE IN ITALIAN (the language of the user).
-- GOOD example: "L'utente si chiama Alex"
+- The extracted fact MUST be written in the SAME language used by the user in their message.
+- GOOD example (Italian): "L'utente si chiama Alex"
 - BAD example: "Alex" (too short, no context)
-- GOOD example: "All'utente piacciono molto le mele"
-- BAD example: "mele" (too short, no context)
+- GOOD example (English): "The user's name is Alex"
+- BAD example: "apple" (too short, no context)
 
 Valid categories: preference | fact | interest | skill
 DO NOT use "task" — navigation commands, file operations, and one-time requests are NOT
@@ -314,7 +314,7 @@ def save_extracted_memories(
     Runs the 4-layer anti-poisoning pipeline when enabled.
     Uses the centralized security module from src.core.security.
     """
-    from src.telegram.db import (
+    from src.db.repository import (
         db_insert_memory,
         db_log_suspicious_memory,
         db_prune_suspicious,

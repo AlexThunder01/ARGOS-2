@@ -51,6 +51,48 @@ def _strip_think_tags(text: str) -> str:
     return text.strip()
 
 
+def _stream_filter_think(
+    gen: "Generator[str, None, None]",
+) -> "Generator[str, None, None]":
+    """Filters <think>...</think> blocks from a streaming text generator.
+
+    Buffers incoming chunks to detect tag boundaries that may span multiple
+    chunks. Text outside think blocks is yielded immediately once safe.
+    """
+    buffer = ""
+    in_think = False
+    # Minimum chars to hold back to catch a partial opening/closing tag
+    _OPEN_TAG = "<think>"
+    _CLOSE_TAG = "</think>"
+    _HOLD = max(len(_OPEN_TAG), len(_CLOSE_TAG)) - 1
+
+    for chunk in gen:
+        buffer += chunk
+        while True:
+            if not in_think:
+                pos = buffer.find(_OPEN_TAG)
+                if pos == -1:
+                    safe = buffer[:-_HOLD] if len(buffer) > _HOLD else ""
+                    if safe:
+                        yield safe
+                        buffer = buffer[len(safe) :]
+                    break
+                if pos > 0:
+                    yield buffer[:pos]
+                buffer = buffer[pos + len(_OPEN_TAG) :]
+                in_think = True
+            else:
+                pos = buffer.find(_CLOSE_TAG)
+                if pos == -1:
+                    buffer = buffer[-_HOLD:] if len(buffer) > _HOLD else buffer
+                    break
+                buffer = buffer[pos + len(_CLOSE_TAG) :]
+                in_think = False
+
+    if buffer and not in_think:
+        yield buffer
+
+
 from .config import LLM_BACKEND, LLM_MODEL
 
 if TYPE_CHECKING:
@@ -62,6 +104,10 @@ DEFAULT_TOKEN_BUDGET = int(os.getenv("MAX_HISTORY_TOKENS", "8000"))
 # LLM HTTP timeout — increase for slow local/tunneled models (e.g. Ollama on Kaggle).
 # Override via LLM_TIMEOUT_S env var.
 _LLM_TIMEOUT: int = int(os.getenv("LLM_TIMEOUT_S", "300"))
+
+# Anthropic max_tokens — increase for complex responses (file gen, long analysis).
+# Override via ANTHROPIC_MAX_TOKENS env var.
+_ANTHROPIC_MAX_TOKENS: int = int(os.getenv("ANTHROPIC_MAX_TOKENS", "4096"))
 
 
 def _count_tokens(text: str) -> int:
@@ -165,7 +211,7 @@ class ArgosAgent:
                 kept.append(msg)
                 total += msg_tokens
             else:
-                break
+                continue
 
         self.history = [system_msg] + list(reversed(kept))
 
@@ -278,7 +324,7 @@ class ArgosAgent:
             "model": model_override or self.model,
             "system": system_msg.strip(),
             "messages": user_msgs,
-            "max_tokens": 1024,
+            "max_tokens": _ANTHROPIC_MAX_TOKENS,
             "temperature": temperature,
         }
 
@@ -434,7 +480,7 @@ class ArgosAgent:
             "model": model_override or self.model,
             "system": system_msg.strip(),
             "messages": user_msgs,
-            "max_tokens": 1024,
+            "max_tokens": _ANTHROPIC_MAX_TOKENS,
             "temperature": temperature,
         }
 
@@ -463,15 +509,15 @@ class ArgosAgent:
     # ──────────────────────────────────────────────────────────────────────
 
     def think_stream(self) -> Generator[str, None, None]:
-        """Yields text chunks as they arrive from the LLM (sync streaming)."""
+        """Yields text chunks as they arrive from the LLM (sync streaming).
+        <think>...</think> blocks are filtered in real-time before yielding."""
         self.trim_history()
         try:
             if self.backend == "anthropic":
-                yield from self._call_anthropic_stream(self.history, temperature=0.0)
+                raw = self._call_anthropic_stream(self.history, temperature=0.0)
             else:
-                yield from self._call_openai_compatible_stream(
-                    self.history, temperature=0.0
-                )
+                raw = self._call_openai_compatible_stream(self.history, temperature=0.0)
+            yield from _stream_filter_think(raw)
         except Exception as e:
             yield f"LLM Error: {e}"
 
@@ -561,7 +607,7 @@ class ArgosAgent:
             "model": model_override or self.model,
             "system": system_msg.strip(),
             "messages": user_msgs,
-            "max_tokens": 1024,
+            "max_tokens": _ANTHROPIC_MAX_TOKENS,
             "temperature": temperature,
             "stream": True,
         }

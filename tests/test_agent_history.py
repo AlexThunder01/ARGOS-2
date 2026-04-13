@@ -597,7 +597,7 @@ class TestThinkStream:
         agent.add_message("user", "test")
 
         chunks = list(agent.think_stream())
-        assert chunks == ["solo questo"]
+        assert "".join(chunks) == "solo questo"
 
     @patch("src.agent.requests.post")
     def test_stream_returns_error_on_http_error(self, mock_post):
@@ -612,8 +612,8 @@ class TestThinkStream:
         agent.add_message("user", "test")
 
         chunks = list(agent.think_stream())
-        assert len(chunks) == 1
-        assert "Error" in chunks[0] or "error" in chunks[0].lower()
+        joined = "".join(chunks)
+        assert "Error" in joined or "error" in joined.lower()
 
     @patch("src.agent.requests.post")
     def test_stream_handles_malformed_json_lines(self, mock_post):

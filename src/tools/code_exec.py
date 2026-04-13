@@ -48,7 +48,7 @@ def _run_in_docker(image: str, command: list, timeout: int = EXEC_TIMEOUT) -> st
 
     volumes = {}
     if HOST_WORKSPACE_DIR:
-        volumes[HOST_WORKSPACE_DIR] = {"bind": "/workspace", "mode": "rw"}
+        volumes[HOST_WORKSPACE_DIR] = {"bind": "/workspace", "mode": "ro"}
 
     try:
         try:
