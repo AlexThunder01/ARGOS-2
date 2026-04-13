@@ -33,7 +33,6 @@ from src.hooks.registry import HOOK_REGISTRY, HookEvent
 from src.tools.spec import ToolInput, ToolSpec
 from src.world_model.state import WorldState
 
-
 # ==========================================================================
 # Helper — ToolSpec minimale sicuro (risk=none)
 # ==========================================================================

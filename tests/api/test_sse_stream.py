@@ -42,7 +42,9 @@ client = TestClient(app, raise_server_exceptions=False)
 # ==========================================================================
 
 
-def _task_result(response: str = "Risposta di test.", success: bool = True) -> TaskResult:
+def _task_result(
+    response: str = "Risposta di test.", success: bool = True
+) -> TaskResult:
     return TaskResult(
         success=success,
         task="test",
@@ -90,7 +92,9 @@ def _post_stream(task: str = "test task", history=None, max_steps: int = 5):
 class TestSseStreamTermination:
     def test_stream_ends_with_done_on_success(self):
         """Su risposta normale, l'ultimo marker deve essere [DONE]."""
-        with patch("src.core.engine.CoreAgent.run_task", return_value=_task_result("Ciao!")):
+        with patch(
+            "src.core.engine.CoreAgent.run_task", return_value=_task_result("Ciao!")
+        ):
             r = _post_stream()
 
         assert r.status_code == 200
@@ -158,7 +162,9 @@ class TestSseChunkFormat:
     def test_chunks_assemble_full_response(self):
         """Concatenando tutti i chunk (eccetto il primo '[Pensando...]') si ottiene la risposta."""
         risposta = "Questa è la risposta completa dell'agente."
-        with patch("src.core.engine.CoreAgent.run_task", return_value=_task_result(risposta)):
+        with patch(
+            "src.core.engine.CoreAgent.run_task", return_value=_task_result(risposta)
+        ):
             r = _post_stream()
 
         _, chunks = _collect_sse(r)
@@ -247,10 +253,7 @@ class TestSseInjectedHistory:
             return _task_result("ok")
 
         # Invia 15 messaggi
-        history = [
-            {"role": "user", "content": f"msg {i}"}
-            for i in range(15)
-        ]
+        history = [{"role": "user", "content": f"msg {i}"} for i in range(15)]
 
         with patch("src.core.engine.CoreAgent.run_task", capture_run_task):
             _post_stream(task="task", history=history)
@@ -282,6 +285,8 @@ class TestSseMaxSteps:
     @pytest.mark.parametrize("steps", [1, 10, 20])
     def test_valid_max_steps_returns_200(self, steps):
         """max_steps nei valori validi (1–20) non deve causare errori HTTP."""
-        with patch("src.core.engine.CoreAgent.run_task", return_value=_task_result("ok")):
+        with patch(
+            "src.core.engine.CoreAgent.run_task", return_value=_task_result("ok")
+        ):
             r = _post_stream(max_steps=steps)
         assert r.status_code == 200

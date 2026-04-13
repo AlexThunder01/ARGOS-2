@@ -13,14 +13,13 @@ Coverage:
   - Casi limite: nome corto, nome con accento, maiuscola richiesta nei correttivi
 """
 
-import re
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
-
 
 # ==========================================================================
 # Replica esatta dei pattern da scripts/main.py e api/routes/dashboard.py
@@ -60,7 +59,11 @@ def _detect_name(text: str):
     if negation:
         return None  # cancellazione esplicita
 
-    m = _RE_INTRO.search(text) or _RE_INTRO_LOWER.search(text) or _RE_CORRECTION.search(text)
+    m = (
+        _RE_INTRO.search(text)
+        or _RE_INTRO_LOWER.search(text)
+        or _RE_CORRECTION.search(text)
+    )
     return m.group(1).capitalize() if m else None
 
 
@@ -68,19 +71,23 @@ def _detect_name(text: str):
 # Introduzioni canoniche
 # ==========================================================================
 
+
 class TestIntroductionPhrases:
-    @pytest.mark.parametrize("text, expected", [
-        ("mi chiamo Alessandro",          "Alessandro"),
-        ("Mi chiamo alessnadro",           "Alessnadro"),    # lowercase tollerato dal fallback
-        ("Il mio nome è Marco",            "Marco"),
-        ("chiamami Luca",                  "Luca"),
-        ("my name is Sarah",              "Sarah"),
-        ("I'm Giulia",                    "Giulia"),
-        ("I am Roberto",                  "Roberto"),
-        # Con testo prima/dopo
-        ("Ciao! Mi chiamo Francesca, piacere.", "Francesca"),
-        ("mi chiamo Alessnadro e mi piacciono le banane!", "Alessnadro"),
-    ])
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("mi chiamo Alessandro", "Alessandro"),
+            ("Mi chiamo alessnadro", "Alessnadro"),  # lowercase tollerato dal fallback
+            ("Il mio nome è Marco", "Marco"),
+            ("chiamami Luca", "Luca"),
+            ("my name is Sarah", "Sarah"),
+            ("I'm Giulia", "Giulia"),
+            ("I am Roberto", "Roberto"),
+            # Con testo prima/dopo
+            ("Ciao! Mi chiamo Francesca, piacere.", "Francesca"),
+            ("mi chiamo Alessnadro e mi piacciono le banane!", "Alessnadro"),
+        ],
+    )
     def test_introduction_detected(self, text, expected):
         assert _detect_name(text) == expected
 
@@ -96,19 +103,23 @@ class TestIntroductionPhrases:
 # Pattern correttivi (bug "No sono Benito" e "adesso sono Benito")
 # ==========================================================================
 
+
 class TestCorrectionPatterns:
-    @pytest.mark.parametrize("text, expected", [
-        ("No sono Benito",                   "Benito"),
-        ("No, sono Benito",                  "Benito"),
-        ("no sono Benito",                   "Benito"),   # case-insensitive prefix
-        ("adesso sono Benito",               "Benito"),
-        ("Adesso sono Benito!",              "Benito"),
-        ("ora sono Benito",                  "Benito"),
-        ("in realtà sono Marco",             "Marco"),
-        ("anzi sono Laura",                  "Laura"),
-        # Frase complessa dal log dell'utente
-        ("Ho cambiato nome adesso sono Benito!", "Benito"),
-    ])
+    @pytest.mark.parametrize(
+        "text, expected",
+        [
+            ("No sono Benito", "Benito"),
+            ("No, sono Benito", "Benito"),
+            ("no sono Benito", "Benito"),  # case-insensitive prefix
+            ("adesso sono Benito", "Benito"),
+            ("Adesso sono Benito!", "Benito"),
+            ("ora sono Benito", "Benito"),
+            ("in realtà sono Marco", "Marco"),
+            ("anzi sono Laura", "Laura"),
+            # Frase complessa dal log dell'utente
+            ("Ho cambiato nome adesso sono Benito!", "Benito"),
+        ],
+    )
     def test_correction_detected(self, text, expected):
         assert _detect_name(text) == expected
 
@@ -117,17 +128,21 @@ class TestCorrectionPatterns:
 # False positive bloccati — nomi con minuscola dopo il contesto correttivo
 # ==========================================================================
 
+
 class TestFalsePositivesBlocked:
-    @pytest.mark.parametrize("false_positive", [
-        "adesso sono stanco",          # "stanco" è minuscolo
-        "adesso sono pronto",          # "pronto" è minuscolo
-        "adesso sono sicuro di questo",
-        "No sono molto occupato",      # "molto" è minuscolo
-        "ora sono felice",
-        "in realtà sono libero",
-        # Il classico bug "Scrivania"
-        "Sono nella Scrivania del desktop",  # "nella" è il token diretto dopo "sono"
-    ])
+    @pytest.mark.parametrize(
+        "false_positive",
+        [
+            "adesso sono stanco",  # "stanco" è minuscolo
+            "adesso sono pronto",  # "pronto" è minuscolo
+            "adesso sono sicuro di questo",
+            "No sono molto occupato",  # "molto" è minuscolo
+            "ora sono felice",
+            "in realtà sono libero",
+            # Il classico bug "Scrivania"
+            "Sono nella Scrivania del desktop",  # "nella" è il token diretto dopo "sono"
+        ],
+    )
     def test_false_positive_not_detected(self, false_positive):
         result = _detect_name(false_positive)
         # Non deve estrarre parole comuni come nomi propri
@@ -143,14 +158,18 @@ class TestFalsePositivesBlocked:
 # Negazione / cancellazione nome
 # ==========================================================================
 
+
 class TestNegationPatterns:
-    @pytest.mark.parametrize("text", [
-        "non mi chiamo Alessandoro",
-        "Non mi chiamo Scrivania!",
-        "non sono Marco",
-        "don't call me Bob",
-        "that's not my name",
-    ])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "non mi chiamo Alessandoro",
+            "Non mi chiamo Scrivania!",
+            "non sono Marco",
+            "don't call me Bob",
+            "that's not my name",
+        ],
+    )
     def test_negation_returns_none(self, text):
         assert _detect_name(text) is None
 
@@ -162,6 +181,7 @@ class TestNegationPatterns:
 # ==========================================================================
 # Casi limite
 # ==========================================================================
+
 
 class TestEdgeCases:
     def test_empty_string(self):
@@ -183,5 +203,5 @@ class TestEdgeCases:
 
     def test_correction_requires_uppercase_name(self):
         """In contesto correttivo, il nome DEVE iniziare con maiuscola."""
-        assert _detect_name("no sono benito") is None   # minuscola → no match
+        assert _detect_name("no sono benito") is None  # minuscola → no match
         assert _detect_name("no sono Benito") == "Benito"  # maiuscola → match

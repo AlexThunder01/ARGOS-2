@@ -227,9 +227,13 @@ def browser_type_tool(inp):
             # Try each strategy separately to avoid CSS injection issues when selector
             # itself contains quotes or special characters (e.g. "input[name='q']")
             for strategy in [
-                lambda: page.get_by_placeholder(selector).first.fill(text, timeout=3000),
+                lambda: page.get_by_placeholder(selector).first.fill(
+                    text, timeout=3000
+                ),
                 lambda: page.get_by_label(selector).first.fill(text, timeout=3000),
-                lambda: page.locator(f"[name='{selector}']").first.fill(text, timeout=3000),
+                lambda: page.locator(f"[name='{selector}']").first.fill(
+                    text, timeout=3000
+                ),
                 lambda: page.locator("input, textarea").first.fill(text, timeout=3000),
             ]:
                 try:

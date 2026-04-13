@@ -29,7 +29,6 @@ import pytest
 from src.planner.planner import PlannerDecision, parse_planner_response
 from src.utils import extract_json
 
-
 # ==========================================================================
 # extract_json() — utility standalone
 # ==========================================================================
@@ -91,12 +90,14 @@ class TestExtractJson:
 class TestPlannerCanonicalFormats:
     def test_action_format(self):
         """Formato canonico azione: done=False con tool + input."""
-        raw = json.dumps({
-            "thought": "cerco informazioni",
-            "action": {"tool": "web_search", "input": {"query": "meteo Roma"}},
-            "confidence": 0.85,
-            "done": False,
-        })
+        raw = json.dumps(
+            {
+                "thought": "cerco informazioni",
+                "action": {"tool": "web_search", "input": {"query": "meteo Roma"}},
+                "confidence": 0.85,
+                "done": False,
+            }
+        )
         d = parse_planner_response(raw)
 
         assert d.done is False
@@ -108,11 +109,13 @@ class TestPlannerCanonicalFormats:
 
     def test_done_format(self):
         """Formato canonico risposta finale: done=True con response."""
-        raw = json.dumps({
-            "thought": "task completato",
-            "response": "Ecco la risposta finale.",
-            "done": True,
-        })
+        raw = json.dumps(
+            {
+                "thought": "task completato",
+                "response": "Ecco la risposta finale.",
+                "done": True,
+            }
+        )
         d = parse_planner_response(raw)
 
         assert d.done is True
@@ -142,7 +145,9 @@ class TestPlannerEmbeddedJson:
 
     def test_json_before_trailing_text(self):
         """JSON seguito da testo dopo la chiusura della parentesi."""
-        raw = '{"thought":"ok","response":"Risposta.","done":true}\nTesto dopo ignorato.'
+        raw = (
+            '{"thought":"ok","response":"Risposta.","done":true}\nTesto dopo ignorato.'
+        )
         d = parse_planner_response(raw)
         assert d.done is True
         assert d.response == "Risposta."
@@ -213,33 +218,39 @@ class TestPlannerEdgeCases:
 
     def test_action_without_tool_field(self):
         """action senza 'tool' → nessun tool name → degradato a done=True."""
-        raw = json.dumps({
-            "thought": "x",
-            "action": {"input": {"query": "test"}},
-            "confidence": 0.9,
-            "done": False,
-        })
+        raw = json.dumps(
+            {
+                "thought": "x",
+                "action": {"input": {"query": "test"}},
+                "confidence": 0.9,
+                "done": False,
+            }
+        )
         d = parse_planner_response(raw)
         assert d.done is True
         assert d.tool is None
 
     def test_empty_action_dict(self):
         """action={} (senza tool né input) → done=True."""
-        raw = json.dumps({
-            "thought": "y",
-            "action": {},
-            "done": False,
-        })
+        raw = json.dumps(
+            {
+                "thought": "y",
+                "action": {},
+                "done": False,
+            }
+        )
         d = parse_planner_response(raw)
         assert d.done is True
 
     def test_done_false_with_response_field(self):
         """Se 'response' è presente, viene trattato come done=True indipendentemente da done."""
-        raw = json.dumps({
-            "thought": "z",
-            "response": "Testo di risposta.",
-            "done": False,  # contraddittorio ma deve essere gestito
-        })
+        raw = json.dumps(
+            {
+                "thought": "z",
+                "response": "Testo di risposta.",
+                "done": False,  # contraddittorio ma deve essere gestito
+            }
+        )
         d = parse_planner_response(raw)
         # La presenza di "response" prevale → done=True
         assert d.done is True
@@ -247,38 +258,44 @@ class TestPlannerEdgeCases:
 
     def test_missing_thought_field(self):
         """Manca 'thought' → usa stringa vuota, no crash."""
-        raw = json.dumps({
-            "action": {"tool": "web_search", "input": {"query": "test"}},
-            "confidence": 0.7,
-            "done": False,
-        })
+        raw = json.dumps(
+            {
+                "action": {"tool": "web_search", "input": {"query": "test"}},
+                "confidence": 0.7,
+                "done": False,
+            }
+        )
         d = parse_planner_response(raw)
         assert d is not None
         assert d.thought == ""
 
     def test_tool_input_is_none(self):
         """input esplicitamente null → tool_input è None, no crash."""
-        raw = json.dumps({
-            "thought": "w",
-            "action": {"tool": "list_files", "input": None},
-            "confidence": 0.9,
-            "done": False,
-        })
+        raw = json.dumps(
+            {
+                "thought": "w",
+                "action": {"tool": "list_files", "input": None},
+                "confidence": 0.9,
+                "done": False,
+            }
+        )
         d = parse_planner_response(raw)
         assert d.tool == "list_files"
         assert d.tool_input is None
 
     def test_deeply_nested_action(self):
         """Input con dizionario annidato → no crash, preservato."""
-        raw = json.dumps({
-            "thought": "v",
-            "action": {
-                "tool": "create_file",
-                "input": {"path": "/tmp/test.py", "content": "x = 1\n"},
-            },
-            "confidence": 0.95,
-            "done": False,
-        })
+        raw = json.dumps(
+            {
+                "thought": "v",
+                "action": {
+                    "tool": "create_file",
+                    "input": {"path": "/tmp/test.py", "content": "x = 1\n"},
+                },
+                "confidence": 0.95,
+                "done": False,
+            }
+        )
         d = parse_planner_response(raw)
         assert d.tool == "create_file"
         assert d.tool_input["path"] == "/tmp/test.py"
@@ -291,66 +308,78 @@ class TestPlannerEdgeCases:
 
 class TestPlannerConfidence:
     def test_confidence_within_range(self):
-        raw = json.dumps({
-            "thought": "x",
-            "action": {"tool": "web_search", "input": {"query": "q"}},
-            "confidence": 0.75,
-            "done": False,
-        })
+        raw = json.dumps(
+            {
+                "thought": "x",
+                "action": {"tool": "web_search", "input": {"query": "q"}},
+                "confidence": 0.75,
+                "done": False,
+            }
+        )
         d = parse_planner_response(raw)
         assert d.confidence == 0.75
 
     def test_confidence_above_1_clamped(self):
         """confidence > 1.0 → clampato a 1.0."""
-        raw = json.dumps({
-            "thought": "x",
-            "action": {"tool": "web_search", "input": {"query": "q"}},
-            "confidence": 5.0,
-            "done": False,
-        })
+        raw = json.dumps(
+            {
+                "thought": "x",
+                "action": {"tool": "web_search", "input": {"query": "q"}},
+                "confidence": 5.0,
+                "done": False,
+            }
+        )
         d = parse_planner_response(raw)
         assert d.confidence == 1.0
 
     def test_confidence_below_0_clamped(self):
         """confidence < 0.0 → clampato a 0.0."""
-        raw = json.dumps({
-            "thought": "x",
-            "action": {"tool": "web_search", "input": {"query": "q"}},
-            "confidence": -0.5,
-            "done": False,
-        })
+        raw = json.dumps(
+            {
+                "thought": "x",
+                "action": {"tool": "web_search", "input": {"query": "q"}},
+                "confidence": -0.5,
+                "done": False,
+            }
+        )
         d = parse_planner_response(raw)
         assert d.confidence == 0.0
 
     def test_confidence_string_falls_back_to_1(self):
         """confidence come stringa non numerica → fallback a 1.0, no crash."""
-        raw = json.dumps({
-            "thought": "x",
-            "action": {"tool": "web_search", "input": {"query": "q"}},
-            "confidence": "high",
-            "done": False,
-        })
+        raw = json.dumps(
+            {
+                "thought": "x",
+                "action": {"tool": "web_search", "input": {"query": "q"}},
+                "confidence": "high",
+                "done": False,
+            }
+        )
         d = parse_planner_response(raw)
         assert d.confidence == 1.0
 
     def test_confidence_missing_defaults_to_1(self):
         """confidence assente → 1.0 di default."""
-        raw = json.dumps({
-            "thought": "x",
-            "action": {"tool": "web_search", "input": {"query": "q"}},
-            "done": False,
-        })
+        raw = json.dumps(
+            {
+                "thought": "x",
+                "action": {"tool": "web_search", "input": {"query": "q"}},
+                "done": False,
+            }
+        )
         d = parse_planner_response(raw)
         assert d.confidence == 1.0
 
     def test_confidence_zero_exact(self):
         """confidence esattamente 0.0 → preservato."""
-        raw = json.dumps({
-            "thought": "x",
-            "action": {"tool": "web_search", "input": {"query": "q"}},
-            "confidence": 0.0,
-            "done": False,
-        })
+        raw = json.dumps(
+            {
+                "thought": "x",
+                "action": {"tool": "web_search", "input": {"query": "q"}},
+                "confidence": 0.0,
+                "done": False,
+            }
+        )
         d = parse_planner_response(raw)
         assert d.confidence == 0.0
 
@@ -361,21 +390,26 @@ class TestPlannerConfidence:
 
 
 class TestPlannerMaliciousToolNames:
-    @pytest.mark.parametrize("malicious_name", [
-        "../../../etc/passwd",
-        "'; DROP TABLE tools; --",
-        "web_search\x00hidden",
-        "",
-        "a" * 500,
-    ])
+    @pytest.mark.parametrize(
+        "malicious_name",
+        [
+            "../../../etc/passwd",
+            "'; DROP TABLE tools; --",
+            "web_search\x00hidden",
+            "",
+            "a" * 500,
+        ],
+    )
     def test_malicious_tool_name_no_crash(self, malicious_name):
         """Tool name con caratteri speciali non deve causare crash nel parser."""
-        raw = json.dumps({
-            "thought": "x",
-            "action": {"tool": malicious_name, "input": {}},
-            "confidence": 0.9,
-            "done": False,
-        })
+        raw = json.dumps(
+            {
+                "thought": "x",
+                "action": {"tool": malicious_name, "input": {}},
+                "confidence": 0.9,
+                "done": False,
+            }
+        )
         d = parse_planner_response(raw)
         # Il parser non deve crashare. Il loop rejecting è responsabilità del CoreAgent.
         assert d is not None
@@ -389,13 +423,15 @@ class TestPlannerMaliciousToolNames:
 class TestPlannerLegacyFormat:
     def test_legacy_top_level_tool_field(self):
         """Vecchio formato {"tool": ..., "input": ...} senza "action" wrapper."""
-        raw = json.dumps({
-            "thought": "uso il vecchio formato",
-            "tool": "web_search",
-            "input": {"query": "legacy test"},
-            "confidence": 0.8,
-            "done": False,
-        })
+        raw = json.dumps(
+            {
+                "thought": "uso il vecchio formato",
+                "tool": "web_search",
+                "input": {"query": "legacy test"},
+                "confidence": 0.8,
+                "done": False,
+            }
+        )
         d = parse_planner_response(raw)
         assert d.tool == "web_search"
         assert d.tool_input == {"query": "legacy test"}
@@ -403,11 +439,13 @@ class TestPlannerLegacyFormat:
 
     def test_legacy_format_with_done_true(self):
         """Vecchio formato con done=true → risposta finale."""
-        raw = json.dumps({
-            "thought": "finito",
-            "response": "Completato!",
-            "done": True,
-        })
+        raw = json.dumps(
+            {
+                "thought": "finito",
+                "response": "Completato!",
+                "done": True,
+            }
+        )
         d = parse_planner_response(raw)
         assert d.done is True
         assert d.response == "Completato!"
@@ -451,23 +489,29 @@ class TestToolResultRoleRegression:
         agent = CoreAgent(memory_mode="off", inject_git_context=False)
         agent._available_tools["test_echo_reg"] = echo_spec
 
-        tool_response = json.dumps({
-            "thought": "uso echo",
-            "action": {"tool": "test_echo_reg", "input": {}},
-            "confidence": 0.9,
-            "done": False,
-        })
-        done_response = json.dumps({
-            "thought": "fatto",
-            "response": "OK",
-            "done": True,
-        })
+        tool_response = json.dumps(
+            {
+                "thought": "uso echo",
+                "action": {"tool": "test_echo_reg", "input": {}},
+                "confidence": 0.9,
+                "done": False,
+            }
+        )
+        done_response = json.dumps(
+            {
+                "thought": "fatto",
+                "response": "OK",
+                "done": True,
+            }
+        )
 
-        success_result = ActionResult(status=ActionStatus.SUCCESS, message="risultato_echo")
+        success_result = ActionResult(
+            status=ActionStatus.SUCCESS, message="risultato_echo"
+        )
 
         async def run():
-            from src.world_model.state import WorldState
             from unittest.mock import MagicMock
+
             tracer = MagicMock()
             span = MagicMock()
             span.__enter__ = MagicMock(return_value=span)
@@ -478,8 +522,12 @@ class TestToolResultRoleRegression:
             state.current_task = "test"
 
             with (
-                patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think,
-                patch("src.core.engine.execute_with_retry", return_value=success_result),
+                patch.object(
+                    agent._llm, "think_async", new_callable=AsyncMock
+                ) as mock_think,
+                patch(
+                    "src.core.engine.execute_with_retry", return_value=success_result
+                ),
             ):
                 mock_think.side_effect = [tool_response, done_response]
                 await agent._reasoning_loop("test", state, tracer, MagicMock())
@@ -487,8 +535,7 @@ class TestToolResultRoleRegression:
         asyncio.run(run())
 
         tool_result_msgs = [
-            m for m in agent._llm.history
-            if "TOOL RESULT" in m.get("content", "")
+            m for m in agent._llm.history if "TOOL RESULT" in m.get("content", "")
         ]
         assert len(tool_result_msgs) >= 1, "Nessun TOOL RESULT iniettato in history"
         for msg in tool_result_msgs:

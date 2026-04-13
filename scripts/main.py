@@ -242,12 +242,16 @@ def main():
                 if _name_m and not _negation:
                     try:
                         from src.telegram.db import db_update_profile
-                        db_update_profile(agent.user_id, display_name=_name_m.group(1).capitalize())
+
+                        db_update_profile(
+                            agent.user_id, display_name=_name_m.group(1).capitalize()
+                        )
                     except Exception:
                         pass
                 elif _negation:
                     try:
                         from src.telegram.db import db_update_profile
+
                         db_update_profile(agent.user_id, display_name="")
                     except Exception:
                         pass
@@ -262,14 +266,19 @@ def main():
 
             # Accumulate history for next turn (kept to last 10 messages)
             conversation_history.append({"role": "user", "content": user_input})
-            conversation_history.append({"role": "assistant", "content": result.response})
+            conversation_history.append(
+                {"role": "assistant", "content": result.response}
+            )
             if len(conversation_history) > 10:
                 conversation_history = conversation_history[-10:]
 
             # Display result
             if result.history:
                 for step in result.history:
-                    if not step.success and step.result in ("Denied by user.", "ACTION DENIED BY USER. STOP."):
+                    if not step.success and step.result in (
+                        "Denied by user.",
+                        "ACTION DENIED BY USER. STOP.",
+                    ):
                         continue
                     status = "✅" if step.success else "❌"
                     print(f"  {status} [{step.tool}]")

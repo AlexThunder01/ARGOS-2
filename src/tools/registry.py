@@ -17,13 +17,13 @@ from .automation import (
     launch_app_tool,
     visual_click_tool,
 )
-from .code_exec import bash_exec_tool, python_repl_tool
 from .browser import (
     browser_click_tool,
     browser_get_content_tool,
     browser_navigate_tool,
     browser_type_tool,
 )
+from .code_exec import bash_exec_tool, python_repl_tool
 from .documents import (
     analyze_image_tool,
     query_table_tool,
@@ -33,6 +33,7 @@ from .documents import (
     read_pdf_tool,
     transcribe_audio_tool,
 )
+from .downloader import download_file_tool
 from .filesystem import (
     create_directory_tool,
     create_file_tool,
@@ -43,7 +44,6 @@ from .filesystem import (
     read_file_tool,
     rename_file_tool,
 )
-from .downloader import download_file_tool
 from .finance import crypto_price_tool, finance_price_tool
 from .scraper import web_scrape_tool
 from .spec import ToolInput, ToolRegistry, ToolSpec
@@ -213,16 +213,25 @@ class AnalyzeImageInput(ToolInput):
 
 
 class BrowserNavigateInput(ToolInput):
-    url: str = Field(description="Full URL to navigate to", examples=["https://en.wikipedia.org/wiki/Python"])
+    url: str = Field(
+        description="Full URL to navigate to",
+        examples=["https://en.wikipedia.org/wiki/Python"],
+    )
 
 
 class BrowserClickInput(ToolInput):
-    text: Optional[str] = Field(default=None, description="Visible text of the element to click")
-    selector: Optional[str] = Field(default=None, description="CSS selector of the element to click")
+    text: Optional[str] = Field(
+        default=None, description="Visible text of the element to click"
+    )
+    selector: Optional[str] = Field(
+        default=None, description="CSS selector of the element to click"
+    )
 
 
 class BrowserTypeInput(ToolInput):
-    selector: str = Field(description="CSS selector, placeholder, or aria-label of the input field")
+    selector: str = Field(
+        description="CSS selector, placeholder, or aria-label of the input field"
+    )
     text: str = Field(description="Text to type into the field")
     press_enter: bool = Field(default=False, description="Press Enter after typing")
 
@@ -234,11 +243,11 @@ class QueryTableInput(ToolInput):
     )
     filter: Optional[str] = Field(
         default=None,
-        description="Pandas query string to filter rows, e.g. \"year == 2020 and value > 100\"",
+        description='Pandas query string to filter rows, e.g. "year == 2020 and value > 100"',
     )
     select: Optional[list] = Field(
         default=None,
-        description="List of columns to select, e.g. [\"name\", \"value\"]",
+        description='List of columns to select, e.g. ["name", "value"]',
     )
     aggregate: Optional[str] = Field(
         default=None,

@@ -220,7 +220,11 @@ class CoreAgent:
             )
 
         self.memory_mode = memory_mode
-        self.max_steps = max_steps if max_steps is not None else int(os.getenv("ARGOS_MAX_STEPS", "20"))
+        self.max_steps = (
+            max_steps
+            if max_steps is not None
+            else int(os.getenv("ARGOS_MAX_STEPS", "20"))
+        )
         self.require_confirmation = require_confirmation
         self.confirmation_callback = confirmation_callback
         self.inject_git_context = inject_git_context
@@ -354,7 +358,10 @@ class CoreAgent:
             if self.memory_mode != "off" and final_response:
                 with tracer.start_as_current_span("core.extract_memories"):
                     await asyncio.to_thread(
-                        self._maybe_extract_memories, task, relevant_memories, self._task_count
+                        self._maybe_extract_memories,
+                        task,
+                        relevant_memories,
+                        self._task_count,
                     )
 
             self._git_context_cache = None
@@ -401,8 +408,10 @@ class CoreAgent:
         # Loop detection counters
         _consecutive_browser_nav = 0
         _consecutive_web_search = 0
-        _BROWSER_NAV_NUDGE_THRESHOLD = 5  # inject nudge after N consecutive browser_navigate
-        _WEB_SEARCH_NUDGE_THRESHOLD = 4   # inject nudge after N consecutive web_search
+        _BROWSER_NAV_NUDGE_THRESHOLD = (
+            5  # inject nudge after N consecutive browser_navigate
+        )
+        _WEB_SEARCH_NUDGE_THRESHOLD = 4  # inject nudge after N consecutive web_search
 
         for step_num in range(self.max_steps):
             raw = await self._llm.think_async()
@@ -463,7 +472,7 @@ class CoreAgent:
                         "You have been browsing many pages in a row. "
                         "If you already have the data you need, stop browsing and use "
                         "python_repl to compute the answer and provide FINAL ANSWER. "
-                        "If you still need data, use web_search to find specific facts faster."
+                        "If you still need data, use web_search to find specific facts faster.",
                     )
             elif tool_name == "web_search":
                 _consecutive_web_search += 1
@@ -479,7 +488,7 @@ class CoreAgent:
                         "If the search results are not giving you the structured data you need, "
                         "switch to browser_navigate to visit the full Wikipedia/article page directly, "
                         "or use python_repl to compute the answer with data you already have. "
-                        "Do not repeat the same search query."
+                        "Do not repeat the same search query.",
                     )
             else:
                 _consecutive_browser_nav = 0
@@ -487,13 +496,15 @@ class CoreAgent:
 
             # Planner signals malformed JSON action — inject correction and retry
             if tool_name == "__format_error__":
-                logger.warning("[CoreAgent] Malformed JSON from LLM — injecting format correction.")
+                logger.warning(
+                    "[CoreAgent] Malformed JSON from LLM — injecting format correction."
+                )
                 self._llm.add_message("assistant", decision.raw)
                 self._llm.add_message(
                     "user",
                     "Your last response was not valid JSON. "
                     "You MUST respond with a properly formatted JSON object matching the schema. "
-                    "Do NOT truncate the JSON. Try again."
+                    "Do NOT truncate the JSON. Try again.",
                 )
                 continue
 
@@ -508,7 +519,7 @@ class CoreAgent:
                     "user",
                     f"Tool '{tool_name}' is not available. "
                     f"Available tools: {', '.join(available)}. "
-                    f"Use only available tools to continue."
+                    f"Use only available tools to continue.",
                 )
                 continue
 

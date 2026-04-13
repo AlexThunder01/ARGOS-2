@@ -39,11 +39,29 @@ READ_TIMEOUT = 300
 # Extensions that are NEVER allowed to be downloaded
 _BLOCKED_EXTENSIONS: frozenset[str] = frozenset(
     {
-        ".exe", ".msi", ".bat", ".cmd", ".com", ".ps1", ".vbs",
-        ".sh", ".bash", ".csh", ".ksh", ".zsh",
-        ".deb", ".rpm", ".appimage", ".snap", ".flatpak",
-        ".jar", ".war", ".elf",
-        ".dll", ".so", ".dylib",
+        ".exe",
+        ".msi",
+        ".bat",
+        ".cmd",
+        ".com",
+        ".ps1",
+        ".vbs",
+        ".sh",
+        ".bash",
+        ".csh",
+        ".ksh",
+        ".zsh",
+        ".deb",
+        ".rpm",
+        ".appimage",
+        ".snap",
+        ".flatpak",
+        ".jar",
+        ".war",
+        ".elf",
+        ".dll",
+        ".so",
+        ".dylib",
     }
 )
 
@@ -61,9 +79,14 @@ def _extract_filename_from_cd(content_disposition: str) -> str | None:
     if not content_disposition:
         return None
     # Try filename*= (RFC 5987 — UTF-8 encoded)
-    match = re.search(r"filename\*=(?:UTF-8''|utf-8'')(.+?)(?:;|$)", content_disposition, re.IGNORECASE)
+    match = re.search(
+        r"filename\*=(?:UTF-8''|utf-8'')(.+?)(?:;|$)",
+        content_disposition,
+        re.IGNORECASE,
+    )
     if match:
         from urllib.parse import unquote
+
         return unquote(match.group(1).strip().strip('"'))
     # Try plain filename=
     match = re.search(r'filename="?([^";]+)"?', content_disposition, re.IGNORECASE)
@@ -75,6 +98,7 @@ def _extract_filename_from_cd(content_disposition: str) -> str | None:
 def _extract_filename_from_url(url: str) -> str:
     """Extracts a reasonable filename from the URL path."""
     from urllib.parse import unquote, urlparse
+
     path = urlparse(url).path
     name = os.path.basename(unquote(path))
     # Remove query strings that leaked into the filename
@@ -118,7 +142,9 @@ def download_file_tool(inp: dict) -> str:
         url = "https://" + url
 
     # ── Resolve save path ──────────────────────────────────────────────────
-    save_path = _get_arg(inp, ["save_path", "path", "filename", "destination"], default=None)
+    save_path = _get_arg(
+        inp, ["save_path", "path", "filename", "destination"], default=None
+    )
 
     try:
         # Start the download (streaming for large files)

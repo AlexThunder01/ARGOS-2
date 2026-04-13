@@ -154,9 +154,9 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
     # mid-action and just failed to close the JSON properly. Signal the engine to
     # inject a format-correction message and retry.
     import re as _re
-    _looks_like_action = (
-        text.startswith("{")
-        and _re.search(r'"(action|tool)"\s*:', text)
+
+    _looks_like_action = text.startswith("{") and _re.search(
+        r'"(action|tool)"\s*:', text
     )
     if _looks_like_action:
         # Try regex to salvage tool name even from truncated JSON
@@ -167,7 +167,10 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
             _input_match = _re.search(r'"input"\s*:\s*(\{[^}]*\})', text)
             try:
                 import json as _json
-                _salvaged_input = _json.loads(_input_match.group(1)) if _input_match else {}
+
+                _salvaged_input = (
+                    _json.loads(_input_match.group(1)) if _input_match else {}
+                )
             except Exception:
                 _salvaged_input = {}
             logger.warning(

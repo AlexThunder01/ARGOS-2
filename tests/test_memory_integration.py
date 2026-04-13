@@ -4,14 +4,15 @@ import sys
 # Forziamo SQLite backend per i test locali
 os.environ["DB_BACKEND"] = "sqlite"
 
-import pytest
-import numpy as np
 from unittest.mock import patch
 
+import numpy as np
+import pytest
+
 from src.core.memory import (
-    save_extracted_memories,
-    retrieve_relevant_memories,
     EMBEDDING_DIM,
+    retrieve_relevant_memories,
+    save_extracted_memories,
 )
 from src.telegram.db import db_count_memories, db_get_all_memory_blobs
 

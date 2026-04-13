@@ -247,7 +247,9 @@ def read_excel_tool(inp):
         wb.close()
 
         if not rows:
-            return f"📊 Excel '{os.path.basename(path)}': Sheet '{target_sheet}' is empty."
+            return (
+                f"📊 Excel '{os.path.basename(path)}': Sheet '{target_sheet}' is empty."
+            )
 
         header = " | ".join(rows[0])
         separator = "-" * min(len(header), 120)
@@ -292,6 +294,7 @@ def analyze_image_tool(inp):
 
     try:
         from src import vision
+
         return vision.analyze_image_file(path, question)
     except Exception as e:
         return f"Error analyzing image: {e}"
@@ -363,7 +366,12 @@ def query_table_tool(inp):
             select = inp.get("select") if isinstance(inp, dict) else None
             if select:
                 cols = select if isinstance(select, list) else [select]
-                existing = [c for c in cols if c in result.index or (hasattr(result, "columns") and c in result.columns)]
+                existing = [
+                    c
+                    for c in cols
+                    if c in result.index
+                    or (hasattr(result, "columns") and c in result.columns)
+                ]
                 if existing and hasattr(result, "columns"):
                     result = result[existing]
             return f"Result ({agg}{' by ' + group_by if group_by else ''}):\n{result.to_string()}"
@@ -375,7 +383,9 @@ def query_table_tool(inp):
         cols = inp["select"] if isinstance(inp["select"], list) else [inp["select"]]
         missing = [c for c in cols if c not in df.columns]
         if missing:
-            return f"Error: Columns not found: {missing}. Available: {df.columns.tolist()}"
+            return (
+                f"Error: Columns not found: {missing}. Available: {df.columns.tolist()}"
+            )
         df = df[cols]
 
     # Default: show head
@@ -427,7 +437,9 @@ def transcribe_audio_tool(inp):
     try:
         import speech_recognition as sr
     except ImportError:
-        return "Error: SpeechRecognition not installed. Run: pip install SpeechRecognition"
+        return (
+            "Error: SpeechRecognition not installed. Run: pip install SpeechRecognition"
+        )
 
     recognizer = sr.Recognizer()
     try:

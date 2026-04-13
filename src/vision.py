@@ -270,7 +270,9 @@ def analyze_screen_for_coordinates(description):
 
 
 # --- FUNZIONE 2: ANALISI IMMAGINE DA FILE ---
-def analyze_image_file(path: str, question: str = "Describe this image in detail.") -> str:
+def analyze_image_file(
+    path: str, question: str = "Describe this image in detail."
+) -> str:
     """
     Analyzes an arbitrary image file using the vision backend.
     Accepts PNG, JPEG, GIF, BMP, WEBP files.

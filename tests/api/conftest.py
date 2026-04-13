@@ -11,7 +11,9 @@ import os
 import sqlite3
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+sys.path.insert(
+    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+)
 
 os.environ["DB_BACKEND"] = "sqlite"
 os.environ.setdefault("ARGOS_API_KEY", "")
@@ -30,7 +32,10 @@ def _create_api_test_db() -> sqlite3.Connection:
 
     migration_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        "src", "db", "migrations", "001_telegram_module.py",
+        "src",
+        "db",
+        "migrations",
+        "001_telegram_module.py",
     )
     with open(migration_path) as f:
         content = f.read()

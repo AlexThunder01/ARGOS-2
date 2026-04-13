@@ -4,9 +4,10 @@ import sys
 # Assicuriamoci che l'import parta dalla root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.db.connection import get_connection, DB_BACKEND
-from src.core.memory import get_embedding, serialize_embedding
 import logging
+
+from src.core.memory import get_embedding, serialize_embedding
+from src.db.connection import DB_BACKEND, get_connection
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("migration")

@@ -27,7 +27,6 @@ from src.agent import ArgosAgent, _count_tokens
 from src.core.engine import CoreAgent, _tfidf_similarity
 from src.core.memory import EXTRACT_MIN_LENGTH, should_extract_memory
 
-
 # ==========================================================================
 # Policy nel system prompt di ArgosAgent
 # ==========================================================================

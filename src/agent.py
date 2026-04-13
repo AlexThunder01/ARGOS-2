@@ -50,6 +50,7 @@ def _strip_think_tags(text: str) -> str:
     text = _THINK_OPEN_RE.sub("", text)
     return text.strip()
 
+
 from .config import LLM_BACKEND, LLM_MODEL
 
 if TYPE_CHECKING:
@@ -82,6 +83,7 @@ class ArgosAgent:
         home_dir = os.path.expanduser("~")
 
         from src.tools.helpers import _get_desktop_path
+
         desktop_path = _get_desktop_path()
 
         if registry is None:
@@ -119,7 +121,9 @@ class ArgosAgent:
         6. FILESYSTEM — EXPLORE BEFORE READING: If the user asks to read, open, or inspect a file without specifying an exact path, ALWAYS call `list_files` first to discover what files actually exist. NEVER invent or guess file paths. Every path you use in `read_file` or any other file tool MUST come from a prior `list_files` result in this conversation.
         7. FILE NOT FOUND — NO GUESSING: If any file operation returns "File not found" or "not found", do NOT retry with a different invented path. Call `list_files` on the relevant directory to discover real paths, then retry with a real one. Guessing a different path repeatedly is always wrong.
 
-        """.format(os_system=os_system, user=user, home_dir=home_dir, desktop_path=desktop_path)
+        """.format(
+            os_system=os_system, user=user, home_dir=home_dir, desktop_path=desktop_path
+        )
 
         self._static_context = static_context
         self._prompt_suffix = "\n\n" + build_system_prompt_suffix()
@@ -208,7 +212,9 @@ class ArgosAgent:
                 headers["Authorization"] = f"Bearer {current_key}"
 
             try:
-                response = requests.post(url, headers=headers, json=payload, timeout=_LLM_TIMEOUT)
+                response = requests.post(
+                    url, headers=headers, json=payload, timeout=_LLM_TIMEOUT
+                )
 
                 if response.status_code == 429:
                     if current_key:
@@ -382,7 +388,7 @@ class ArgosAgent:
                     # empty choices transiently — retry before giving up
                     if attempt < max_retries:
                         logger.warning(
-                            f"[LLM/async] Empty choices on attempt {attempt+1} — retrying..."
+                            f"[LLM/async] Empty choices on attempt {attempt + 1} — retrying..."
                         )
                         await asyncio.sleep(2 * (attempt + 1))
                         continue

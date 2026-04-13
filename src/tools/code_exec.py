@@ -143,7 +143,10 @@ def python_repl_tool(inp):
                 command=["python", f"/workspace/{script_name}"],
             )
             if output2.strip() and "no output" not in output2.lower():
-                output = output2 + "\n(auto-printed variables — add explicit print() to control output)"
+                output = (
+                    output2
+                    + "\n(auto-printed variables — add explicit print() to control output)"
+                )
 
         return f"🐍 Python Result:\n{output}"
     finally:

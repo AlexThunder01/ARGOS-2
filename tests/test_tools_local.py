@@ -661,9 +661,7 @@ class TestFilesystemLLMEdgeCases:
         dst = tmp_path / "dest.txt"
         src.write_text("a")
         dst.write_text("b")
-        result = TOOLS["rename_file"](
-            {"old_name": str(src), "new_name": str(dst)}
-        )
+        result = TOOLS["rename_file"]({"old_name": str(src), "new_name": str(dst)})
         assert "already exists" in result.lower() or "error" in result.lower()
 
     def test_rename_file_source_not_found(self, tmp_path):
@@ -726,12 +724,17 @@ class TestNetworkLLMEdgeCases:
         mock_get.return_value = mock_resp
 
         result = TOOLS["web_scrape"]({"url": "https://example.com/file.bin"})
-        assert "non-text" in result.lower() or "error" in result.lower() or "cannot" in result.lower()
+        assert (
+            "non-text" in result.lower()
+            or "error" in result.lower()
+            or "cannot" in result.lower()
+        )
 
     @patch("src.tools.scraper.http_client.get")
     def test_web_scrape_http_error(self, mock_get):
         """Server returns 404."""
         import requests as req
+
         mock_resp = MagicMock()
         http_err = req.exceptions.HTTPError(response=MagicMock(status_code=404))
         mock_resp.raise_for_status.side_effect = http_err
@@ -743,6 +746,7 @@ class TestNetworkLLMEdgeCases:
     @patch("src.tools.scraper.http_client.get")
     def test_web_scrape_timeout(self, mock_get):
         import requests as req
+
         mock_get.side_effect = req.exceptions.Timeout()
         result = TOOLS["web_scrape"]({"url": "https://slow.example.com"})
         assert "timed out" in result.lower() or "error" in result.lower()
@@ -800,6 +804,7 @@ class TestNetworkLLMEdgeCases:
     @patch("requests.get")
     def test_get_weather_api_timeout(self, mock_get):
         import requests as req
+
         mock_get.side_effect = req.exceptions.Timeout()
         result = TOOLS["get_weather"]({"location": "Rome"})
         assert "error" in result.lower()

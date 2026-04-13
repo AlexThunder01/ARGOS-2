@@ -80,9 +80,13 @@ def finance_price_tool(asset):
                             price_gram_eur = price_eur / 31.1034768
                             output += f" -> Circa {price_gram_eur:,.2f} EUR al grammo"
                     else:
-                        output += " (EUR conversion unavailable: exchange rate not found)"
+                        output += (
+                            " (EUR conversion unavailable: exchange rate not found)"
+                        )
                 except Exception:
-                    output += " (EUR conversion unavailable: exchange rate fetch failed)"
+                    output += (
+                        " (EUR conversion unavailable: exchange rate fetch failed)"
+                    )
 
             return output
 

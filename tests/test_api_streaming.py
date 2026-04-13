@@ -1,7 +1,8 @@
+import json
 import os
 import time
+
 import requests
-import json
 from dotenv import load_dotenv
 
 load_dotenv(".env")
