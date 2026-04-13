@@ -16,69 +16,8 @@ os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = ""
 import pytest
 
 
-def _create_test_db():
-    """Creates an in-memory SQLite database with the full Telegram schema."""
-    conn = sqlite3.connect(":memory:", check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys=ON")
-
-    # Read migration SQL from the migration file
-    migration_path = os.path.join(
-        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "src",
-        "db",
-        "migrations",
-        "001_telegram_module.py",
-    )
-    with open(migration_path) as f:
-        content = f.read()
-    start = content.index('MIGRATION_SQL = """') + len('MIGRATION_SQL = """')
-    end = content.index('"""', start)
-    conn.executescript(content[start:end])
-
-    # Suspicious memories audit table
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS tg_suspicious_memories (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id     INTEGER NOT NULL,
-            content     TEXT NOT NULL,
-            category    TEXT,
-            risk_score  REAL,
-            blocked_by  TEXT,
-            created_at  TEXT DEFAULT (datetime('now'))
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS tg_rate_limits (
-            user_id       INTEGER NOT NULL,
-            window_start  TEXT NOT NULL,
-            hit_count     INTEGER DEFAULT 0,
-            PRIMARY KEY (user_id, window_start)
-        )
-    """)
-    conn.commit()
-    return conn
-
-
-@pytest.fixture(autouse=True)
-def patch_db(monkeypatch):
-    """Patches get_connection in the dependent modules to use an in-memory test database."""
-    conn = _create_test_db()
-
-    # Patch directly in the modules that imported it
-    import src.core.rate_limit as rl_module
-    import src.telegram.db as db_module
-
-    monkeypatch.setattr(db_module, "get_connection", lambda: conn)
-    monkeypatch.setattr(rl_module, "get_connection", lambda: conn)
-
-    # Also patch connection.get_connection just in case
-    import src.db.connection as conn_module
-
-    monkeypatch.setattr(conn_module, "get_connection", lambda: conn)
-
-    yield conn
-    conn.close()
+# NOTE: DB fixtures are provided by the root conftest.py (autouse patch_db).
+# No need to duplicate _create_test_db() here.
 
 
 # ==========================================================================

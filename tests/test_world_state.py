@@ -65,11 +65,4 @@ def test_reset():
     assert s.last_error is None
 
 
-if __name__ == "__main__":
-    test_initial_state()
-    test_record_action_success()
-    test_record_action_failure()
-    test_to_context_string_contains_task()
-    test_to_context_string_max_3_steps()
-    test_reset()
-    print("✅ Tutti i test WorldState passati.")
+

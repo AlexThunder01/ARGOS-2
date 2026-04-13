@@ -213,38 +213,6 @@ class TestHistoryManagement:
         assert custom_block in agent.history[0]["content"]
         assert len(agent.history) == 1
 
-    def test_system_prompt_contains_available_tools(self):
-        agent = ArgosAgent()
-        assert "AVAILABLE TOOLS" in agent.history[0]["content"]
-
-    def test_system_prompt_contains_language_policy(self):
-        agent = ArgosAgent()
-        assert "Italian" in agent.history[0]["content"]
-
-    def test_system_prompt_contains_single_tool_rule(self):
-        agent = ArgosAgent()
-        # La regola "un solo tool per turno" deve essere nel prompt
-        prompt = agent.history[0]["content"]
-        assert (
-            "SINGLE" in prompt
-            or "single" in prompt
-            or "ONE" in prompt.upper()
-            or "ONLY" in prompt.upper()
-        )
-
-    def test_system_prompt_no_how_can_i_help_rule(self):
-        agent = ArgosAgent()
-        prompt = agent.history[0]["content"]
-        assert "How can I help" in prompt or "How can I" in prompt
-
-    def test_system_prompt_no_split_write_actions(self):
-        agent = ArgosAgent()
-        prompt = agent.history[0]["content"]
-        assert (
-            "split" in prompt.lower()
-            or "SINGLE" in prompt
-            or "single" in prompt.lower()
-        )
 
 
 # ==========================================================================

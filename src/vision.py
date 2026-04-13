@@ -207,7 +207,8 @@ def analyze_screen_for_coordinates(description):
         screen_with_grid = add_grid_to_image(screen_resized.copy(), step=100)
 
         # Salviamo un'immagine di debug per permetterti di controllare cosa vede Jarvis
-        screen_with_grid.save("debug_visione.jpg")
+        if os.getenv("ARGOS_DEBUG_VISION"):
+            screen_with_grid.save("debug_visione.jpg")
 
         # Codifica in Base64
         img_b64 = encode_image_to_base64(screen_with_grid)

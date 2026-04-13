@@ -98,20 +98,5 @@ def test_confirmation_prompt():
     assert "eliminare" in prompt.lower()
 
 
-if __name__ == "__main__":
-    test_intent_web_search()
-    test_intent_web_search_with_suffix()
-    test_intent_launch_app_firefox()
-    test_intent_launch_app_generic()
-    test_intent_create_file()
-    test_intent_delete_file()
-    test_intent_list_files()
-    test_intent_system_stats()
-    test_intent_crypto()
-    test_intent_describe_screen()
-    test_intent_click()
-    test_intent_type()
-    test_intent_unknown_fallback()
-    test_intent_empty()
-    test_confirmation_prompt()
-    print("✅ Tutti i test IntentParser passati.")
+
+

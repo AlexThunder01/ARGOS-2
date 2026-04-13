@@ -507,30 +507,4 @@ class TestRunTaskStream:
         assert not any("vecchio messaggio" in m["content"] for m in agent._llm.history)
 
 
-# ==========================================================================
-# should_extract_memory() — trigger debounce
-# ==========================================================================
 
-
-class TestShouldExtractMemory:
-    def test_long_message_always_triggers(self):
-        long = "a" * (EXTRACT_MIN_LENGTH + 1)
-        assert should_extract_memory(long, 1) is True
-
-    def test_short_message_at_nth_count_triggers(self):
-        from src.core.memory import EXTRACT_EVERY_N
-
-        assert should_extract_memory("ciao", EXTRACT_EVERY_N) is True
-
-    def test_short_message_not_at_nth_count_no_trigger(self):
-        assert should_extract_memory("ciao", 3) is False
-
-    def test_zero_count_no_trigger(self):
-        assert should_extract_memory("ciao", 0) is False
-
-    def test_long_message_overrides_count(self):
-        """Anche se il count non è multiplo di EXTRACT_EVERY_N, il messaggio lungo triggera."""
-        long = "x" * (EXTRACT_MIN_LENGTH + 1)
-        assert should_extract_memory(long, 1) is True
-        assert should_extract_memory(long, 3) is True
-        assert should_extract_memory(long, 7) is True

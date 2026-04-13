@@ -69,11 +69,4 @@ def test_classify_error_retryable():
     assert _classify_error("Connection Error network") is True
 
 
-if __name__ == "__main__":
-    test_execute_success()
-    test_execute_fatal_error_no_retry()
-    test_execute_exception_retries()
-    test_execute_succeeds_on_second_try()
-    test_classify_error_fatal()
-    test_classify_error_retryable()
-    print("✅ Tutti i test Executor passati.")
+
