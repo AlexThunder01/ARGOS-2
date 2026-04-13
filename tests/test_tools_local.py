@@ -41,7 +41,6 @@ EXPECTED_TOOLS = [
     "create_directory",
     "delete_directory",
     "get_weather",
-    # GAIA Level-Up tools
     "python_repl",
     "bash_exec",
     "web_scrape",
@@ -56,6 +55,7 @@ EXPECTED_TOOLS = [
     "browser_click",
     "browser_type",
     "browser_get_content",
+    "download_file",
 ]
 
 

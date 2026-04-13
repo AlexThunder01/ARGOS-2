@@ -48,10 +48,19 @@ def test_parse_plain_text_fallback():
 
 
 def test_parse_malformed_json_fallback():
-    """JSON malformato → fallback a testo."""
+    """JSON troncato con tool riconoscibile → salvaged come azione (done=False)."""
     raw = '{"tool": "web_search", "input": {ROTTO'
     d = parse_planner_response(raw)
-    assert d.done is True  # fallback a testo
+    # New behaviour: planner salvages the tool name via regex instead of giving up
+    assert d.done is False
+    assert d.tool == "web_search"
+
+
+def test_parse_malformed_json_no_tool_fallback():
+    """JSON troncato senza tool riconoscibile → fallback a testo (done=True)."""
+    raw = '{"thought": "ragionamento interrotto'
+    d = parse_planner_response(raw)
+    assert d.done is True
 
 
 def test_parse_confidence_default():

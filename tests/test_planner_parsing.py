@@ -203,11 +203,13 @@ class TestPlannerPlainTextFallback:
 
 class TestPlannerEdgeCases:
     def test_truncated_json_no_crash(self):
-        """JSON troncato a metà (timeout LLM) → no crash, done=True."""
+        """JSON troncato a metà con tool riconoscibile → salvaged come azione (done=False)."""
         truncated = '{"thought":"analizzo","action":{"tool":"web_search","in'
         d = parse_planner_response(truncated)
         assert d is not None
-        assert d.done is True
+        # Salvaged via regex: better to retry the tool than treat as final text
+        assert d.done is False
+        assert d.tool == "web_search"
 
     def test_action_without_tool_field(self):
         """action senza 'tool' → nessun tool name → degradato a done=True."""

@@ -53,6 +53,7 @@ _FILESYSTEM_MUTATING_TOOLS: frozenset[str] = frozenset(
         "delete_file",
         "create_directory",
         "delete_directory",
+        "download_file",
     }
 )
 
@@ -397,6 +398,11 @@ class CoreAgent:
         final_response = ""
         loop_success = True
         response_lengths: deque[int] = deque(maxlen=DIMINISHING_STEPS)
+        # Loop detection counters
+        _consecutive_browser_nav = 0
+        _consecutive_web_search = 0
+        _BROWSER_NAV_NUDGE_THRESHOLD = 5  # inject nudge after N consecutive browser_navigate
+        _WEB_SEARCH_NUDGE_THRESHOLD = 4   # inject nudge after N consecutive web_search
 
         for step_num in range(self.max_steps):
             raw = await self._llm.think_async()
@@ -422,14 +428,20 @@ class CoreAgent:
                     final_response = decision.response
                 else:
                     final_response = (
-                        "Non sono riuscito a completare il task dopo diversi tentativi. "
-                        "Prova a fornire maggiori dettagli o a riformulare la richiesta."
+                        "Could not complete the task after several attempts. "
+                        "Try providing more details or rephrasing the request."
                     )
                 root_span.set_attribute("stop_reason", "diminishing_returns")
                 break
 
             if decision.done:
                 final_response = decision.response or raw
+                # Guard: if think-tag stripping left an empty response, provide fallback
+                if not final_response or not final_response.strip():
+                    final_response = (
+                        "Processed the request but produced no response. "
+                        "Try rephrasing the question."
+                    )
                 logger.debug(f"[CoreAgent] Task completed in {step_num + 1} step(s).")
                 root_span.set_attribute("steps.total", step_num + 1)
                 break
@@ -437,11 +449,68 @@ class CoreAgent:
             tool_name = decision.tool
             tool_input = decision.tool_input
 
+            # ── Repetitive tool loop detection ─────────────────────────────
+            if tool_name == "browser_navigate":
+                _consecutive_browser_nav += 1
+                _consecutive_web_search = 0
+                if _consecutive_browser_nav == _BROWSER_NAV_NUDGE_THRESHOLD:
+                    logger.warning(
+                        f"[CoreAgent] {_consecutive_browser_nav} consecutive browser_navigate "
+                        f"calls — injecting strategy nudge."
+                    )
+                    self._llm.add_message(
+                        "user",
+                        "You have been browsing many pages in a row. "
+                        "If you already have the data you need, stop browsing and use "
+                        "python_repl to compute the answer and provide FINAL ANSWER. "
+                        "If you still need data, use web_search to find specific facts faster."
+                    )
+            elif tool_name == "web_search":
+                _consecutive_web_search += 1
+                _consecutive_browser_nav = 0
+                if _consecutive_web_search == _WEB_SEARCH_NUDGE_THRESHOLD:
+                    logger.warning(
+                        f"[CoreAgent] {_consecutive_web_search} consecutive web_search "
+                        f"calls — injecting strategy nudge."
+                    )
+                    self._llm.add_message(
+                        "user",
+                        "You have run several web searches in a row. "
+                        "If the search results are not giving you the structured data you need, "
+                        "switch to browser_navigate to visit the full Wikipedia/article page directly, "
+                        "or use python_repl to compute the answer with data you already have. "
+                        "Do not repeat the same search query."
+                    )
+            else:
+                _consecutive_browser_nav = 0
+                _consecutive_web_search = 0
+
+            # Planner signals malformed JSON action — inject correction and retry
+            if tool_name == "__format_error__":
+                logger.warning("[CoreAgent] Malformed JSON from LLM — injecting format correction.")
+                self._llm.add_message("assistant", decision.raw)
+                self._llm.add_message(
+                    "user",
+                    "Your last response was not valid JSON. "
+                    "You MUST respond with a properly formatted JSON object matching the schema. "
+                    "Do NOT truncate the JSON. Try again."
+                )
+                continue
+
             if not tool_name or tool_name not in self._available_tools:
-                final_response = f"Unknown or restricted tool: '{tool_name}'"
-                logger.error(f"[CoreAgent] {final_response}")
-                loop_success = False
-                break
+                # Inject correction instead of aborting so LLM can recover
+                available = sorted(self._available_tools.keys())
+                logger.warning(
+                    f"[CoreAgent] LLM called unavailable tool '{tool_name}' — injecting correction."
+                )
+                self._llm.add_message("assistant", decision.raw)
+                self._llm.add_message(
+                    "user",
+                    f"Tool '{tool_name}' is not available. "
+                    f"Available tools: {', '.join(available)}. "
+                    f"Use only available tools to continue."
+                )
+                continue
 
             spec = self._available_tools[tool_name]
 

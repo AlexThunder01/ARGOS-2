@@ -48,8 +48,10 @@ RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "5"))
 
 # Isolation Workspace (Fase 8)
 DOCKER_HOST = os.getenv("DOCKER_HOST", "tcp://localhost:2375")
-HOST_WORKSPACE_DIR = os.getenv("HOST_WORKSPACE_DIR", "")
-WORKSPACE_DIR = os.getenv("WORKSPACE_DIR", "./workspace")
+WORKSPACE_DIR = os.path.abspath(os.getenv("WORKSPACE_DIR", "./workspace"))
+# HOST_WORKSPACE_DIR: path on the Docker host machine that maps to /workspace inside the container.
+# Falls back to WORKSPACE_DIR (absolute) so local runs without explicit config work out of the box.
+HOST_WORKSPACE_DIR = os.path.abspath(os.getenv("HOST_WORKSPACE_DIR") or WORKSPACE_DIR)
 DOCKER_EXEC_MEM_LIMIT = os.getenv("DOCKER_EXEC_MEM_LIMIT", "128m")
 DOCKER_EXEC_TIMEOUT = int(os.getenv("DOCKER_EXEC_TIMEOUT", "30"))
 SCRAPER_TIMEOUT = int(os.getenv("SCRAPER_TIMEOUT", "15"))

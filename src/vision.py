@@ -274,7 +274,7 @@ def analyze_image_file(path: str, question: str = "Describe this image in detail
     """
     Analyzes an arbitrary image file using the vision backend.
     Accepts PNG, JPEG, GIF, BMP, WEBP files.
-    Used by the analyze_image tool for GAIA-style tasks with embedded images.
+    Used by the analyze_image tool for tasks with embedded images.
     """
     if not os.path.exists(path):
         return f"Error: File '{path}' not found."

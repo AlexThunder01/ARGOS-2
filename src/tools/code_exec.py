@@ -81,7 +81,8 @@ def _run_in_docker(image: str, command: list, timeout: int = EXEC_TIMEOUT) -> st
         output = logs
         if not output.strip():
             output = (
-                f"(Code executed successfully with exit code {exit_code} and no output)"
+                f"(Code executed successfully with exit code {exit_code} but produced no output. "
+                f"Always use print() to display results, e.g.: print(result))"
             )
 
         if len(output) > MAX_OUTPUT:
@@ -95,9 +96,27 @@ def _run_in_docker(image: str, command: list, timeout: int = EXEC_TIMEOUT) -> st
         return f"Error: Container execution failed: {e}"
 
 
+_AUTO_PRINT_SUFFIX = """
+# --- auto-print injected by ARGOS ---
+try:
+    _ns = {k: v for k, v in vars().items()
+           if not k.startswith('_') and not callable(v) and not isinstance(v, type)}
+    if _ns:
+        for _k, _v in list(_ns.items())[-10:]:
+            print(f"{_k} = {_v!r}")
+            # Show value in thousands if large (helps with 'how many thousand X' questions)
+            if isinstance(_v, (int, float)) and 1000 <= abs(_v) < 1e9:
+                print(f"  → in thousands: {round(_v / 1000, 4)!r}")
+except Exception:
+    pass
+"""
+
+
 def python_repl_tool(inp):
     """
     Executes Python code in a sandboxed Docker container (python:3.12-slim).
+    Always use print() in your code to display results. If the code produces no
+    output the tool will automatically print all local variables as a fallback.
     """
     code = _get_arg(inp, ["code", "script", "python", "source"])
     if not code:
@@ -106,6 +125,7 @@ def python_repl_tool(inp):
     script_name = f"argos_repl_{uuid.uuid4().hex[:8]}.py"
     script_path = os.path.join(WORKSPACE_DIR, script_name)
 
+    # First pass: run user code as-is
     with open(script_path, "w") as f:
         f.write(code)
 
@@ -113,9 +133,20 @@ def python_repl_tool(inp):
         output = _run_in_docker(
             image="python:3.12-slim", command=["python", f"/workspace/{script_name}"]
         )
+
+        # If no output, re-run with auto-print suffix to surface variable values
+        if "no output" in output.lower() or not output.strip():
+            with open(script_path, "w") as f:
+                f.write(code + _AUTO_PRINT_SUFFIX)
+            output2 = _run_in_docker(
+                image="python:3.12-slim",
+                command=["python", f"/workspace/{script_name}"],
+            )
+            if output2.strip() and "no output" not in output2.lower():
+                output = output2 + "\n(auto-printed variables — add explicit print() to control output)"
+
         return f"🐍 Python Result:\n{output}"
     finally:
-        # Use os.path.islink to avoid following symlinks before removal
         if os.path.islink(script_path) or os.path.exists(script_path):
             os.remove(script_path)
 

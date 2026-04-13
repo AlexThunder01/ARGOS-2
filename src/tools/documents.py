@@ -1,8 +1,8 @@
 """
 ARGOS-2 Tool — Document Parser (PDF, CSV, JSON, Excel, Images).
 
-Extracts text content from structured documents. Critical for GAIA
-benchmark tasks that require reading and analyzing file contents.
+Extracts text content from structured documents.
+Supports reading and analyzing file contents across multiple formats.
 
 Dependencies:
   - pypdf (PDF parsing, pure Python, zero system deps)
@@ -300,7 +300,7 @@ def analyze_image_tool(inp):
 def query_table_tool(inp):
     """
     Runs a pandas query/aggregation on a CSV or Excel file.
-    Ideal for GAIA tasks that require filtering, grouping, or computing statistics.
+    Ideal for tasks that require filtering, grouping, or computing statistics.
 
     Input:
         {"filename": "data.csv", "filter": "year == 2020 and value > 100"}

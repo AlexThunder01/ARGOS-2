@@ -1,7 +1,7 @@
 """
 ARGOS-2 Tool — Stateful Playwright Browser.
 
-Enables multi-step web navigation for GAIA-level tasks.
+Enables multi-step web navigation with JavaScript support.
 Maintains a single headless browser session across tool calls within a task.
 
 Dependencies:
@@ -70,10 +70,52 @@ def _cleanup():
 atexit.register(_cleanup)
 
 
-def _page_to_text(page, max_chars: int = 6000) -> str:
+def _page_to_text(page, max_chars: int = 12000) -> str:
     """Convert current page HTML to readable markdown-ish text."""
     try:
         from html2text import html2text
+
+        # If URL has an anchor, try to surface that section first
+        current_url = page.url
+        anchor = None
+        if "#" in current_url:
+            anchor = current_url.split("#", 1)[1]
+
+        if anchor:
+            try:
+                element = page.query_selector(f"#{anchor}, [name='{anchor}']")
+                if element:
+                    # Walk siblings after the anchor, collecting text until next header
+                    section_text = page.evaluate(
+                        """(el) => {
+                            var result = '';
+                            // The anchor might be inside an <h> tag — start from parent's siblings
+                            var node = el.parentElement || el;
+                            node = node.nextElementSibling;
+                            var steps = 0;
+                            while (node && steps < 20) {
+                                var tag = node.tagName || '';
+                                if (tag === 'H1' || tag === 'H2' || tag === 'H3') break;
+                                result += (node.innerText || '') + '\\n';
+                                node = node.nextElementSibling;
+                                steps++;
+                            }
+                            return result;
+                        }""",
+                        element,
+                    )
+                    if section_text and len(section_text.strip()) > 100:
+                        full_html = page.content()
+                        full_text = html2text(full_html)
+                        combined = (
+                            f"[Section '{anchor}' content]:\n{section_text.strip()}\n\n"
+                            f"[Full page excerpt]:\n{full_text}"
+                        )
+                        if len(combined) > max_chars:
+                            combined = combined[:max_chars] + "\n... [truncated]"
+                        return combined
+            except Exception:
+                pass
 
         html = page.content()
         text = html2text(html)
@@ -173,14 +215,32 @@ def browser_type_tool(inp):
         return err
 
     try:
-        # Try CSS selector first, then aria-label / placeholder fallback
+        # Try CSS selector first, then individual fallback strategies
+        filled = False
         try:
             page.fill(selector, text, timeout=5000)
+            filled = True
         except Exception:
-            page.locator(
-                f"[placeholder*='{selector}'], [aria-label*='{selector}'], "
-                f"input[name*='{selector}'], textarea[name*='{selector}']"
-            ).first.fill(text, timeout=5000)
+            pass
+
+        if not filled:
+            # Try each strategy separately to avoid CSS injection issues when selector
+            # itself contains quotes or special characters (e.g. "input[name='q']")
+            for strategy in [
+                lambda: page.get_by_placeholder(selector).first.fill(text, timeout=3000),
+                lambda: page.get_by_label(selector).first.fill(text, timeout=3000),
+                lambda: page.locator(f"[name='{selector}']").first.fill(text, timeout=3000),
+                lambda: page.locator("input, textarea").first.fill(text, timeout=3000),
+            ]:
+                try:
+                    strategy()
+                    filled = True
+                    break
+                except Exception:
+                    continue
+
+        if not filled:
+            return f"Error typing into '{selector}': could not find field with any strategy."
 
         if press_enter:
             page.keyboard.press("Enter")

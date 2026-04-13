@@ -22,10 +22,33 @@ from typing import TYPE_CHECKING, AsyncGenerator, Generator, Optional
 
 logger = logging.getLogger("argos")
 
+import re
+
 import httpx
 import requests
 
 from src.planner.planner import build_system_prompt_suffix
+
+# Qwen-3 (and similar thinking models) wrap internal reasoning inside
+# <think>...</think> tags. These MUST be stripped before the text reaches
+# the planner or gets displayed to the user.
+# Two patterns: closed tags and unclosed tags (model truncated mid-thought).
+_THINK_CLOSED_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+_THINK_OPEN_RE = re.compile(r"<think>.*", re.DOTALL)
+
+
+def _strip_think_tags(text: str) -> str:
+    """Removes <think>...</think> blocks emitted by thinking models (e.g. Qwen-3).
+
+    Handles two cases:
+    1. Properly closed: <think>reasoning</think> actual response
+    2. Unclosed (truncated): <think>reasoning that never closes...
+    """
+    # First pass: remove properly closed <think>...</think> pairs
+    text = _THINK_CLOSED_RE.sub("", text)
+    # Second pass: remove unclosed <think> (model truncated mid-thought)
+    text = _THINK_OPEN_RE.sub("", text)
+    return text.strip()
 
 from .config import LLM_BACKEND, LLM_MODEL
 
@@ -34,6 +57,10 @@ if TYPE_CHECKING:
 
 # Token budget applied by trim_history(). One token ≈ 4 chars (conservative estimate).
 DEFAULT_TOKEN_BUDGET = int(os.getenv("MAX_HISTORY_TOKENS", "8000"))
+
+# LLM HTTP timeout — increase for slow local/tunneled models (e.g. Ollama on Kaggle).
+# Override via LLM_TIMEOUT_S env var.
+_LLM_TIMEOUT: int = int(os.getenv("LLM_TIMEOUT_S", "300"))
 
 
 def _count_tokens(text: str) -> int:
@@ -181,7 +208,7 @@ class ArgosAgent:
                 headers["Authorization"] = f"Bearer {current_key}"
 
             try:
-                response = requests.post(url, headers=headers, json=payload, timeout=60)
+                response = requests.post(url, headers=headers, json=payload, timeout=_LLM_TIMEOUT)
 
                 if response.status_code == 429:
                     if current_key:
@@ -212,7 +239,7 @@ class ArgosAgent:
                 if not choices:
                     logger.error("[LLM] OpenAI-compatible: empty 'choices' in response")
                     return "API Error: empty response from LLM."
-                return choices[0]["message"]["content"]
+                return _strip_think_tags(choices[0]["message"]["content"])
 
             except Exception as e:
                 return f"Connection Error: {e}"
@@ -254,7 +281,7 @@ class ArgosAgent:
                 "https://api.anthropic.com/v1/messages",
                 headers=headers,
                 json=payload,
-                timeout=60,
+                timeout=_LLM_TIMEOUT,
             )
             if response.status_code != 200:
                 logger.error(
@@ -265,7 +292,7 @@ class ArgosAgent:
             if not content_blocks:
                 logger.error("[LLM] Anthropic: empty 'content' in response")
                 return "API Error: empty response from LLM."
-            return content_blocks[0]["text"]
+            return _strip_think_tags(content_blocks[0]["text"])
         except Exception as e:
             return f"Connection Error: {e}"
 
@@ -316,7 +343,7 @@ class ArgosAgent:
                 headers["Authorization"] = f"Bearer {current_key}"
 
             try:
-                async with httpx.AsyncClient(timeout=60) as client:
+                async with httpx.AsyncClient(timeout=_LLM_TIMEOUT) as client:
                     resp = await client.post(url, headers=headers, json=payload)
 
                 if resp.status_code == 429:
@@ -351,11 +378,19 @@ class ArgosAgent:
 
                 choices = resp.json().get("choices", [])
                 if not choices:
+                    # Some providers (e.g. OpenRouter free tier) occasionally return
+                    # empty choices transiently — retry before giving up
+                    if attempt < max_retries:
+                        logger.warning(
+                            f"[LLM/async] Empty choices on attempt {attempt+1} — retrying..."
+                        )
+                        await asyncio.sleep(2 * (attempt + 1))
+                        continue
                     logger.error(
                         "[LLM/async] OpenAI-compatible: empty 'choices' in response"
                     )
                     return "API Error: empty response from LLM."
-                return choices[0]["message"]["content"]
+                return _strip_think_tags(choices[0]["message"]["content"])
 
             except httpx.TimeoutException:
                 if attempt < max_retries:
@@ -398,7 +433,7 @@ class ArgosAgent:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=60) as client:
+            async with httpx.AsyncClient(timeout=_LLM_TIMEOUT) as client:
                 resp = await client.post(
                     "https://api.anthropic.com/v1/messages",
                     headers=headers,
@@ -413,7 +448,7 @@ class ArgosAgent:
             if not content_blocks:
                 logger.error("[LLM/async] Anthropic: empty 'content' in response")
                 return "API Error: empty response from LLM."
-            return content_blocks[0]["text"]
+            return _strip_think_tags(content_blocks[0]["text"])
         except Exception as e:
             return f"Connection Error: {e}"
 
@@ -459,7 +494,7 @@ class ArgosAgent:
         try:
             url = f"{LLM_BASE_URL.rstrip('/')}/chat/completions"
             with requests.post(
-                url, headers=headers, json=payload, timeout=120, stream=True
+                url, headers=headers, json=payload, timeout=_LLM_TIMEOUT, stream=True
             ) as resp:
                 if resp.status_code != 200:
                     yield f"API Error: HTTP {resp.status_code}"
@@ -530,7 +565,7 @@ class ArgosAgent:
                 "https://api.anthropic.com/v1/messages",
                 headers=headers,
                 json=payload,
-                timeout=120,
+                timeout=_LLM_TIMEOUT,
                 stream=True,
             ) as resp:
                 if resp.status_code != 200:

@@ -32,7 +32,7 @@ MANDATORY RESPONSE FORMAT — ALWAYS use one of these two JSON structures:
 2. To reply to the user or signal completion:
 {
   "thought": "<motivation>",
-  "response": "<your response — use the same language the user wrote in>",
+  "response": "<your response>",
   "done": true
 }
 
@@ -81,16 +81,21 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
             done = bool(data.get("done", False))
 
             if done or "response" in data:
-                # Risposta finale
-                return PlannerDecision(
-                    thought=thought,
-                    tool=None,
-                    tool_input=None,
-                    confidence=1.0,
-                    done=True,
-                    response=data.get("response") or text,
-                    raw=raw_response,
-                )
+                # If done=True but no response text and an action is present,
+                # the model is confused — treat it as an action, not a final answer.
+                if done and "response" not in data and "action" in data:
+                    pass  # fall through to action handling below
+                else:
+                    # Risposta finale
+                    return PlannerDecision(
+                        thought=thought,
+                        tool=None,
+                        tool_input=None,
+                        confidence=1.0,
+                        done=True,
+                        response=data.get("response") or text,
+                        raw=raw_response,
+                    )
 
             # Azione da eseguire
             action = data.get("action", {})
@@ -106,6 +111,15 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
             if not tool_name and "tool" in data:
                 tool_name = data["tool"]
                 tool_input = data.get("input")
+
+            # Garantisce che tool_name sia sempre una stringa
+            # (il LLM può hallucinate un dict nested come tool name)
+            if tool_name is not None and not isinstance(tool_name, str):
+                logger.warning(
+                    f"[Planner] tool_name non è una stringa "
+                    f"({type(tool_name).__name__}={str(tool_name)[:60]}) — ignored"
+                )
+                tool_name = None
 
             # Se dopo tutto non c'è un tool valido, è una risposta finale mascherata
             if not tool_name:
@@ -134,7 +148,56 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
                 f"(error={parse_exc!r}, raw={raw_response[:120]!r})"
             )
 
-    # Fallback: no JSON found — treat as raw textual response
+    # Fallback: no valid JSON found.
+    # If the text looks like a truncated/malformed JSON action (starts with "{" and
+    # contains "action" or "tool"), do NOT treat it as a final answer — the LLM is
+    # mid-action and just failed to close the JSON properly. Signal the engine to
+    # inject a format-correction message and retry.
+    import re as _re
+    _looks_like_action = (
+        text.startswith("{")
+        and _re.search(r'"(action|tool)"\s*:', text)
+    )
+    if _looks_like_action:
+        # Try regex to salvage tool name even from truncated JSON
+        _tool_match = _re.search(r'"tool"\s*:\s*"([^"]+)"', text)
+        if _tool_match:
+            _salvaged_tool = _tool_match.group(1)
+            # Try to find input dict (may be incomplete — use empty dict as fallback)
+            _input_match = _re.search(r'"input"\s*:\s*(\{[^}]*\})', text)
+            try:
+                import json as _json
+                _salvaged_input = _json.loads(_input_match.group(1)) if _input_match else {}
+            except Exception:
+                _salvaged_input = {}
+            logger.warning(
+                f"[Planner] Truncated JSON action salvaged via regex: "
+                f"tool={_salvaged_tool!r} input={str(_salvaged_input)[:60]}"
+            )
+            return PlannerDecision(
+                thought="(salvaged from truncated JSON)",
+                tool=_salvaged_tool,
+                tool_input=_salvaged_input,
+                confidence=0.5,
+                done=False,
+                response=None,
+                raw=raw_response,
+            )
+        # Looks like action JSON but couldn't salvage the tool name — ask LLM to retry
+        logger.warning(
+            f"[Planner] Response looks like truncated/malformed action JSON — "
+            f"returning format error signal (raw={raw_response[:80]!r})"
+        )
+        return PlannerDecision(
+            thought="(malformed action JSON — LLM must retry with valid format)",
+            tool="__format_error__",  # sentinel: engine will inject correction message
+            tool_input={},
+            confidence=0.0,
+            done=False,
+            response=None,
+            raw=raw_response,
+        )
+
     logger.debug(
         f"[Planner] No valid JSON in LLM response — treating as final text "
         f"(raw={raw_response[:120]!r})"

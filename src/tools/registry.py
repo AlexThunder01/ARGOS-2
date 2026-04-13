@@ -43,6 +43,7 @@ from .filesystem import (
     read_file_tool,
     rename_file_tool,
 )
+from .downloader import download_file_tool
 from .finance import crypto_price_tool, finance_price_tool
 from .scraper import web_scrape_tool
 from .spec import ToolInput, ToolRegistry, ToolSpec
@@ -95,6 +96,17 @@ class WebSearchInput(ToolInput):
 
 class WebScrapeInput(ToolInput):
     url: str = Field(description="Full URL of the page to scrape")
+
+
+class DownloadFileInput(ToolInput):
+    url: str = Field(
+        description="URL of the file to download",
+        examples=["https://arxiv.org/pdf/2311.12983"],
+    )
+    save_path: Optional[str] = Field(
+        default=None,
+        description="Local path to save the file (default: Desktop with auto-detected name)",
+    )
 
 
 class CryptoPriceInput(ToolInput):
@@ -374,6 +386,17 @@ REGISTRY = ToolRegistry(
             group="research",
         ),
         ToolSpec(
+            name="download_file",
+            description="Downloads a file from a URL and saves it to disk (PDF, images, archives, etc.). HTTPS only. Blocked: executables (.exe, .sh, .bat, etc.). Max size: 100 MB.",
+            input_schema=DownloadFileInput,
+            executor=download_file_tool,
+            risk="high",
+            category="web",
+            icon="⬇️",
+            label="Download File",
+            group="research",
+        ),
+        ToolSpec(
             name="get_weather",
             description="Weather forecast (Open-Meteo)",
             input_schema=GetWeatherInput,
@@ -471,7 +494,7 @@ REGISTRY = ToolRegistry(
         # ── Code ────────────────────────────────────────────────────────────
         ToolSpec(
             name="python_repl",
-            description="Executes Python in Docker sandbox",
+            description="Executes Python in Docker sandbox. IMPORTANT: always use print() to output results, e.g. print(result). If no output, variables are auto-printed as fallback.",
             input_schema=PythonReplInput,
             executor=python_repl_tool,
             risk="medium",
