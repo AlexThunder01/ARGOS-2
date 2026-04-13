@@ -62,7 +62,7 @@ The "Local Direct Control" of ARGOS.
 ### 4. The Brain: CoreAgent Engine
 The "Reasoning" center. Located in `src/core/`, it provides the intelligence for all interfaces.
 - **Unified Logic**: One shared reasoning loop for planning and tool execution.
-- **Advanced Tools**: A modular registry of 23 tools (Code exec, Scrapers, Document parsers).
+- **Advanced Tools**: A modular registry of 32 tools (Code exec, Browser, Scrapers, Document parsers, Finance).
 - **Security Middleware**: Global "Paranoid Judge" that intercepts and validates inputs before they reach the engine.
 - **Memory Promotion**: RAG logic (embeddings, cosine similarity, extraction) is now a core capability available to both API and CLI.
 
@@ -89,13 +89,17 @@ Code execution tools (`python_repl`, `bash_exec`) run in ephemeral Docker contai
 - **No network access** (`network_mode: none`)
 - **128MB RAM limit** (OOMKill on breach)
 - **25% CPU quota**
-- Accessible only through `tecnativa/docker-socket-proxy` (filtered API — no exec, no volumes, no networks)
+- **Read-only workspace** mount (container can read input files but not write to host)
+- Accessible only through `tecnativa/docker-socket-proxy` (filtered API — no exec)
 
 ### Layer 5: Security Gate (CLI Only)
-Interactive manual authorization for powerful tools like `bash_exec`, `python_repl`, or `delete_file`.
+Interactive manual authorization for tools with `risk` level of `medium`, `high`, or `critical` via a pluggable confirmation callback.
 
 ### Layer 6: Non-Root Isolation
-Docker containers run as a restricted `argos` user to prevent host-level system escapes.
+The API container creates a restricted `argos` user (`groupadd -r argos && useradd -r -g argos`) and runs all processes as that user via `USER argos` in the Dockerfile.
+
+### Layer 7: Circuit Breaker
+API routes use `pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)` on LLM calls. After 3 consecutive failures, the circuit opens and immediately returns an error for 60 seconds, preventing thread pool saturation.
 
 ---
 

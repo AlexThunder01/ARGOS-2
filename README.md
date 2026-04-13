@@ -31,7 +31,16 @@ Open `.env` and fill in the required values:
 | `LLM_API_KEY` | Yes | API key for your LLM provider (Groq, OpenAI, etc.) |
 | `LLM_BASE_URL` | Yes | Base URL of the OpenAI-compatible endpoint |
 | `LLM_MODEL` | Yes | Model name (e.g. `llama-3.3-70b-versatile`) |
+| `LLM_LIGHTWEIGHT_MODEL` | Recommended | Model for background tasks (memory extraction). Defaults to `llama-3.1-8b-instant` |
 | `ARGOS_API_KEY` | Yes | Secret key for the internal API and dashboard auth |
+| `DB_BACKEND` | No | `sqlite` (default for local dev) or `postgres` (production with Docker) |
+| `EMBEDDING_BASE_URL` | For RAG memory | Embeddings API endpoint (default: Groq) |
+| `EMBEDDING_API_KEY` | For RAG memory | Embeddings API key |
+| `EMBEDDING_MODEL` | For RAG memory | Embedding model name (default: `nomic-embed-text-v1.5`) |
+| `EMBEDDING_DIM` | For RAG memory | Embedding vector dimensions (default: `768`) |
+| `VISION_BASE_URL` | For vision tools | Vision LLM endpoint (defaults to `LLM_BASE_URL`) |
+| `VISION_API_KEY` | For vision tools | Vision LLM API key (defaults to `LLM_API_KEY`) |
+| `VISION_MODEL` | For vision tools | Vision model name |
 | `TELEGRAM_BOT_TOKEN` | For Telegram | Token from [@BotFather](https://t.me/BotFather) |
 | `TELEGRAM_CHAT_ID` | For Telegram | Your Telegram user ID |
 | `NGROK_AUTHTOKEN` | For webhooks | ngrok auth token for external webhook tunneling |
@@ -128,14 +137,15 @@ Available user commands: `/reset`, `/status`, `/language`, `/tone`, `/name`, `/t
 CLI (scripts/main.py)  ─┐
 Dashboard (React)       ├──► FastAPI ──► CoreAgent (src/core/)
 Telegram Bot            ─┘        │         ├── Planner & Reasoning
-n8n Orchestrator ────────────────►│         ├── Tool Registry (23 tools)
-                                             ├── RAG Memory (pgvector)
+n8n Orchestrator ────────────────►│         ├── Tool Registry (32 tools)
+                                             ├── RAG Memory (pgvector / SQLite)
                                              └── Security Pipeline
 ```
 
 **Infrastructure:**
 - **PostgreSQL 17 + pgvector** — persistent storage and vector similarity search for RAG
-- **Docker Socket Proxy** — sandboxed code execution in ephemeral containers (no host network, 128 MB RAM limit)
+- **SQLite WAL** — lightweight local fallback for development (selected via `DB_BACKEND=sqlite`)
+- **Docker Socket Proxy** — sandboxed code execution in ephemeral containers (no host network, 128 MB RAM limit, read-only workspace)
 - **OpenTelemetry + Jaeger** — distributed tracing (UI at [http://localhost:16687](http://localhost:16687))
 - **ngrok** — exposes n8n webhooks to the internet via a static domain
 - **GitHub Actions** — CI runs tests against both SQLite and PostgreSQL
@@ -144,13 +154,15 @@ For a detailed breakdown, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
-## Tool Arsenal (23 tools)
+## Tool Arsenal (32 tools)
 
 | Category | Tools |
 |---|---|
 | **Code Execution** | `python_repl` (Docker sandboxed), `bash_exec` (Docker sandboxed) |
-| **Document Parsing** | `read_pdf`, `read_csv`, `read_json`, `read_file` |
-| **Web & Finance** | `web_search`, `web_scrape`, `crypto_price`, `finance_price`, `get_weather` |
+| **Document Parsing** | `read_pdf`, `read_csv`, `read_json`, `read_excel`, `read_file`, `query_table`, `analyze_image`, `transcribe_audio` |
+| **Web & Search** | `web_search`, `web_scrape`, `download_file`, `get_weather` |
+| **Browser Automation** | `browser_navigate`, `browser_click`, `browser_type`, `browser_get_content` |
+| **Finance** | `crypto_price`, `finance_price` |
 | **Filesystem** | `list_files`, `create_file`, `modify_file`, `rename_file`, `delete_file`, `create_directory`, `delete_directory` |
 | **GUI Automation** | `visual_click`, `keyboard_type`, `launch_app`, `describe_screen` |
 | **System** | `system_stats` |
@@ -168,9 +180,12 @@ ARGOS_API_KEY=<generate a strong random string>
 # Enables the LLM-based input validator on all entry points (adds latency)
 ARGOS_PARANOID_MODE=false
 
+# Bypasses API key auth entirely (local dev only — NEVER use in production)
+ARGOS_PERMISSIVE_MODE=false
+
 # Rate limiting (applies to both API and Telegram)
 RATE_LIMIT_PER_HOUR=50
-RATE_LIMIT_PER_MINUTE=10
+RATE_LIMIT_PER_MINUTE=5
 
 # Docker sandbox (set automatically by docker-compose; override only for local dev)
 DOCKER_HOST=tcp://argos-docker-proxy:2375
@@ -178,11 +193,14 @@ WORKSPACE_DIR=./workspace
 ```
 
 Security layers:
-1. **API Key Auth** — all endpoints require `X-ARGOS-API-KEY`
-2. **Paranoid Judge** — optional LLM middleware that validates every input for prompt injection
-3. **Risk Scoring** — real-time threat evaluation stored in the database
-4. **Rate Limiting** — atomic sliding-window quotas via PostgreSQL (no Redis required)
-5. **Docker Sandbox** — code execution isolated in ephemeral containers via `docker-socket-proxy`
+1. **API Key Auth** — all endpoints require `X-ARGOS-API-KEY` (bypass with `ARGOS_PERMISSIVE_MODE` for local dev)
+2. **Paranoid Judge** — optional LLM middleware that validates every input for prompt injection (`ARGOS_PARANOID_MODE`)
+3. **Risk Scoring** — heuristic-based (regex + structural patterns) threat evaluation for memory inputs
+4. **LLM Judge** — secondary model validates suspicious memories before storage (anti-poisoning)
+5. **Rate Limiting** — atomic sliding-window quotas via PostgreSQL (no Redis required)
+6. **Docker Sandbox** — code execution isolated in ephemeral containers via `docker-socket-proxy` (read-only workspace, no network, 128 MB RAM)
+7. **Non-Root Container** — the API container runs as a restricted `argos` user
+8. **Circuit Breaker** — `pybreaker` on API routes prevents thread pool saturation when LLM is down
 
 ---
 

@@ -31,17 +31,18 @@ Crucially, the RAG memory system (embeddings, sliding window, and extraction) ha
 1. **Webhook**: Incoming Telegram message (text-only).
 2. **FastAPI (`api/routes/telegram.py`)**: Sanitizes input and authenticates the user.
 3. **CoreAgent Engine**: 
-   - Retrieves the last 20 messages (Sliding Window).
-   - Retrieves top-3 relevant memories from `tg_memory_vectors` (Cosine Similarity).
-   - Constructs the system prompt (Persona + Profile).
-   - Executes the tool-equipped reasoning loop (Advanced Tools).
+   - Retrieves the last N messages (Sliding Window, default: 20 via `config.yaml`).
+   - Applies token-budget trimming (`MAX_HISTORY_TOKENS`, default: 8000) to keep within LLM context limits.
+   - Retrieves top-3 relevant memories from the vector store (Cosine Similarity, threshold from `config.yaml`).
+   - Constructs the system prompt (Persona + Profile + Tool RAG).
+   - Executes the tool-equipped reasoning loop (32 tools).
 4. **Memory Extraction**: A background task analyzes the final turn to extract new facts or preferences.
 
 ---
 
 ## 4. Advanced Reasoning Tools in Chat
 
-The Telegram assistant now has access to the same 23-tool arsenal as the CLI, including:
+The Telegram assistant now has access to the same 32-tool arsenal as the CLI, including:
 - **`web_search` & `web_scrape`**: To answer real-time questions and read links.
 - **`read_pdf` & `read_csv`**: To analyze documents sent to the assistant.
 - **`python_repl`**: To perform precise mathematical and data operations.
@@ -59,4 +60,4 @@ The Telegram assistant now has access to the same 23-tool arsenal as the CLI, in
 
 ## 6. Implementation Notes
 
-The module is built on **SQLite in WAL Mode** and uses the `requests` library for model-agnostic LLM calls (Groq, OpenAI, Anthropic, or local). All behavioral logic (tone, context window, RAG similarity) is hot-reloadable via `config.yaml`.
+The module is built on **SQLite in WAL Mode** (with PostgreSQL + pgvector as the production alternative, selectable via `DB_BACKEND` env var) and uses `httpx.AsyncClient` / `requests` for model-agnostic LLM calls (OpenAI-compatible or Anthropic). All behavioral logic (tone, context window, RAG similarity) is hot-reloadable via `config.yaml`.
