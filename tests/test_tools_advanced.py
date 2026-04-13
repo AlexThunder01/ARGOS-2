@@ -599,7 +599,7 @@ class TestBrowserClick:
         page.click.side_effect = [Exception("not found"), None]
         bm._state["page"] = page
 
-        result = TOOLS["browser_click"]({"selector": "button.submit"})
+        TOOLS["browser_click"]({"selector": "button.submit"})
         assert page.click.call_count == 2
 
     def test_click_error_returns_message(self):

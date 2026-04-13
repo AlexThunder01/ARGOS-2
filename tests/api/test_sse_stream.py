@@ -139,7 +139,7 @@ class TestSseChunkFormat:
 
         raw_lines, chunks = _collect_sse(r)
         # Verifica che tutte le righe non-DONE siano JSON validi con campo "chunk"
-        non_done = [l for l in raw_lines if l != "[DONE]"]
+        non_done = [line for line in raw_lines if line != "[DONE]"]
         assert len(non_done) > 0
 
         for line in non_done:
@@ -225,8 +225,6 @@ class TestSseInjectedHistory:
     def test_history_passed_to_agent(self):
         """La history fornita dal client deve essere passata all'agente."""
         captured_history = []
-
-        original_run_task = None
 
         def capture_run_task(self_agent, task):
             captured_history.extend(self_agent._injected_history)

@@ -818,7 +818,7 @@ class TestSystemToolsLLMEdgeCases:
     def test_launch_app_empty_name(self):
         """LLM passes empty app_name — should not launch anything."""
         with patch("src.tools.automation.subprocess.Popen") as mock_popen:
-            result = TOOLS["launch_app"]({"app_name": ""})
+            TOOLS["launch_app"]({"app_name": ""})
             # Either error or Popen was NOT called with an empty command
             if mock_popen.called:
                 args = mock_popen.call_args[0][0]

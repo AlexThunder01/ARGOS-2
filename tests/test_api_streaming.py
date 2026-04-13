@@ -67,7 +67,7 @@ def run_suite():
     # Svuoto la memoria a breve termine per forzare la lettura tramite RAG dal DB PostgreSQL.
     h_rag = []
     q_r1 = "Qual è il mio frutto preferito e il mio lavoro reale di cui ti ho parlato precedentemente? Te ne avevo parlato molto tempo fa, frugati bene in memoria."
-    a_r1 = chat(q_r1, h_rag)
+    chat(q_r1, h_rag)
 
     print(f"{c.BOLD}=== FINE TESTING COMPLETO ==={c.END}")
 
