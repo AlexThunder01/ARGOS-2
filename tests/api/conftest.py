@@ -16,8 +16,8 @@ sys.path.insert(
 )
 
 os.environ["DB_BACKEND"] = "sqlite"
-os.environ.setdefault("ARGOS_API_KEY", "")
-os.environ.setdefault("ARGOS_PERMISSIVE_MODE", "true")
+os.environ["ARGOS_API_KEY"] = ""
+os.environ["ARGOS_PERMISSIVE_MODE"] = "true"
 os.environ.setdefault("ADMIN_CHAT_ID", "12345")
 os.environ.setdefault("OTEL_EXPORTER_OTLP_ENDPOINT", "")
 
