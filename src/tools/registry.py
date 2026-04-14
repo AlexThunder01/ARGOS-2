@@ -134,6 +134,13 @@ class NoInput(ToolInput):
     pass
 
 
+class SearchToolsInput(ToolInput):
+    query: str = Field(
+        description="Natural language description of what you want to do",
+        examples=["read a CSV file and compute statistics"],
+    )
+
+
 class LaunchAppInput(ToolInput):
     app_name: str = Field(
         description="Application name or command to launch",
@@ -272,6 +279,26 @@ class TranscribeAudioInput(ToolInput):
         default="en-US",
         description="BCP-47 language code, e.g. 'en-US', 'it-IT', 'fr-FR'",
     )
+
+
+# ─── search_tools executor ────────────────────────────────────────────────────
+# Uses Python late binding: REGISTRY is looked up at call time (not definition
+# time), so this function can safely reference the module-level variable even
+# though it is defined before the assignment below.
+
+
+def _search_tools_executor(inp: dict) -> str:
+    query = inp.get("query", "").strip()
+    if not query:
+        return "Provide a natural language query to search for tools."
+    top = REGISTRY.select_for_query(query, top_k=5)
+    if not top.names():
+        return "No tools found for that query."
+    lines = [f"Tools relevant to '{query}':"]
+    for name in top.names():
+        spec = top[name]
+        lines.append(f"  - {spec.name}: {spec.description}")
+    return "\n".join(lines)
 
 
 # ─── Registry ─────────────────────────────────────────────────────────────────
@@ -454,6 +481,21 @@ REGISTRY = ToolRegistry(
             label="System Stats",
             dashboard_allowed=True,
             group="automation",
+        ),
+        ToolSpec(
+            name="search_tools",
+            description=(
+                "Searches available tools by natural language query and returns the "
+                "top matches with descriptions. Use this when you think a tool exists "
+                "for a task but it was not included in your current tool list."
+            ),
+            input_schema=SearchToolsInput,
+            executor=_search_tools_executor,
+            risk="none",
+            category="system",
+            icon="🔎",
+            label="Search Tools",
+            dashboard_allowed=False,
         ),
         ToolSpec(
             name="launch_app",

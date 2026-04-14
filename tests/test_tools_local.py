@@ -56,6 +56,7 @@ EXPECTED_TOOLS = [
     "browser_type",
     "browser_get_content",
     "download_file",
+    "search_tools",
 ]
 
 

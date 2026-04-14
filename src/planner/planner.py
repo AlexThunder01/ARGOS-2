@@ -13,13 +13,27 @@ If the model produces free-form text (final response), it is treated as "done: t
 """
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Optional
 
 logger = logging.getLogger("argos")
 
+# Strip <analysis>...</analysis> scratchpad blocks before parsing.
+# The LLM may use this block as a chain-of-thought scratch area; it is never
+# part of the structured output and must not reach the parser or the user.
+_ANALYSIS_RE = re.compile(r"<analysis>.*?</analysis>", re.DOTALL | re.IGNORECASE)
+
 PLANNER_RESPONSE_SCHEMA = """
 MANDATORY RESPONSE FORMAT — ALWAYS use one of these two JSON structures:
+
+OPTIONAL: You may prepend an <analysis> block for complex reasoning before the JSON.
+It is stripped automatically and never shown to the user.
+
+<analysis>
+Your private chain-of-thought here. Think through the problem step by step.
+Consider which tool to use and why. This block is ignored by the parser.
+</analysis>
 
 1. To execute a tool action:
 {
@@ -36,7 +50,7 @@ MANDATORY RESPONSE FORMAT — ALWAYS use one of these two JSON structures:
   "done": true
 }
 
-NEVER write any text outside the JSON block.
+NEVER write any text outside the <analysis> block and the JSON block.
 """
 
 
@@ -69,6 +83,23 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
     3. Testo puro → trattato come risposta finale (done=True)
     """
     text = raw_response.strip()
+
+    # Strip <analysis>...</analysis> scratchpad before any JSON extraction.
+    # The model may use this for chain-of-thought; it must never reach the parser.
+    if "<analysis>" in text:
+        text = _ANALYSIS_RE.sub("", text).strip()
+        if not text:
+            # Model returned only an <analysis> block — treat as no structured output
+            logger.debug("[Planner] Response was only <analysis> — treating as final text")
+            return PlannerDecision(
+                thought="(analysis block only, no JSON)",
+                tool=None,
+                tool_input=None,
+                confidence=1.0,
+                done=True,
+                response=raw_response,
+                raw=raw_response,
+            )
 
     # Tenta il parse diretto usando il nuovo estrattore basato sul conteggio parentesi
     from src.utils import extract_json

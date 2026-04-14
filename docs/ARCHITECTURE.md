@@ -62,11 +62,33 @@ The "Local Direct Control" of ARGOS.
 ### 4. The Brain: CoreAgent Engine
 The "Reasoning" center. Located in `src/core/`, it provides the intelligence for all interfaces.
 - **Unified Logic**: One shared reasoning loop for planning and tool execution.
-- **Advanced Tools**: A modular registry of 32 tools (Code exec, Browser, Scrapers, Document parsers, Finance).
+- **Advanced Tools**: A modular registry of 33 tools (Code exec, Browser, Scrapers, Document parsers, Finance, plus `search_tools` for runtime tool discovery).
 - **Security Middleware**: Global "Paranoid Judge" that intercepts and validates inputs before they reach the engine.
 - **Memory Promotion**: RAG logic (embeddings, cosine similarity, extraction) is now a core capability available to both API and CLI.
 
-### 5. The Data Layer
+### 5. Context Management Pipeline
+
+Located in `src/agent.py` and `src/core/`, the context pipeline keeps the conversation within the token budget across long multi-tool tasks.
+
+**Three-tier compaction** (called inside `ArgosAgent.trim_history()`):
+
+1. **Tier 1 — Micro-compact** (>80 % budget, no LLM call): clears the content of old tool results, WorldState snapshots, and raw JSON tool calls, keeping only the `MICRO_COMPACT_KEEP_RECENT` (default 5) most recent. Message count unchanged, only stale content replaced with `"[cleared]"`.
+2. **Tier 2 — Structured compaction** (>90 % budget, opt-in via `ARGOS_ENABLE_COMPACTION=1`, ≥5 messages): calls the lightweight model to produce a 9-section structured summary. The entire history is replaced with 3 messages: system + summary + ack. Falls back transparently on any error.
+3. **Tier 3 — Drop** (>100 % budget): drops oldest non-system messages until budget fits. Original behaviour, always present as last resort.
+
+**Time-based micro-compact**: if `ARGOS_MC_TTL_MINUTES` (default 60) of idle time elapse since the last LLM call, `_check_time_based_mc()` fires micro-compact pre-emptively before the next call — the server-side prompt cache has expired so there is nothing to lose.
+
+**Session working memory** (`src/core/session_memory.py`): after every `ARGOS_SESSION_MEMORY_UPDATE_EVERY` (default 5) tool calls, an `asyncio.create_task` + `to_thread` background write updates `.argos_session_memory.md` with a lightweight-model summary of the current task state. The file is injected into the LLM context at the start of the next task, bridging context across consecutive sessions without blocking the reasoning loop.
+
+**Tool RAG** (`ToolRegistry.select_for_query()`): at the start of each task, TF-IDF cosine similarity selects the top-12 most relevant tools from the full registry. The `search_tools` tool (always included) lets the model discover additional tools at runtime by issuing a `search_tools` call with a natural language query.
+
+**`<analysis>` scratchpad** (`src/planner/planner.py`): the planner schema allows the model to prepend `<analysis>...</analysis>` to its output for private chain-of-thought. It is stripped by `_ANALYSIS_RE` before any JSON parsing and never surfaces to the user.
+
+**Post-compact cleanup**: when Tier 2 fires, the engine detects the `_compact_count` increment on `ArgosAgent` and immediately resets `_git_context_cache` and clears the session memory file so stale cached state does not pollute the compacted history.
+
+**Activity summary**: an `asyncio.Task` running in the background of `_reasoning_loop` logs `[ActivitySummary] [step N/max] <task>` every 30 seconds via `logger.info`. An optional `status_callback` on `CoreAgent` can forward these messages to any consumer (SSE, Telegram, etc.).
+
+### 7. The Data Layer
 - **PostgreSQL 17 + pgvector**: Production vector database for RAG memory and similarity search.
 - **SQLite WAL**: Lightweight local fallback for development and testing.
 - **Connection Pooling**: `psycopg_pool` for efficient concurrent PostgreSQL access.

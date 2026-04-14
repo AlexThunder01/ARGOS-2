@@ -47,6 +47,11 @@ Open `.env` and fill in the required values:
 | `NGROK_DOMAIN` | For webhooks | Your static ngrok domain |
 | `GOOGLE_CLIENT_ID` | For Gmail | OAuth2 client ID for Gmail workflow |
 | `GOOGLE_CLIENT_SECRET` | For Gmail | OAuth2 client secret for Gmail workflow |
+| `ARGOS_ENABLE_COMPACTION` | No | Set to `1` to enable Tier-2 structured compaction (LLM-based context summarisation) |
+| `ARGOS_MC_TTL_MINUTES` | No | Minutes of idle time before a pre-emptive micro-compact fires (default: `60`) |
+| `ARGOS_MICRO_COMPACT_KEEP` | No | Number of recent compactable messages preserved by micro-compact (default: `5`) |
+| `ARGOS_SESSION_MEMORY_PATH` | No | Path for the session working-memory file (default: `.argos_session_memory.md`) |
+| `ARGOS_SESSION_MEMORY_UPDATE_EVERY` | No | Tool calls between session-memory refreshes (default: `5`) |
 
 ### 2. Build the dashboard
 
@@ -137,7 +142,8 @@ Available user commands: `/reset`, `/status`, `/language`, `/tone`, `/name`, `/t
 CLI (scripts/main.py)  ─┐
 Dashboard (React)       ├──► FastAPI ──► CoreAgent (src/core/)
 Telegram Bot            ─┘        │         ├── Planner & Reasoning
-n8n Orchestrator ────────────────►│         ├── Tool Registry (32 tools)
+n8n Orchestrator ────────────────►│         ├── Tool Registry (33 tools)
+                                             ├── Context Management (micro-compact, session memory)
                                              ├── RAG Memory (pgvector / SQLite)
                                              └── Security Pipeline
 ```
@@ -154,7 +160,7 @@ For a detailed breakdown, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ---
 
-## Tool Arsenal (32 tools)
+## Tool Arsenal (33 tools)
 
 | Category | Tools |
 |---|---|
@@ -165,7 +171,26 @@ For a detailed breakdown, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 | **Finance** | `crypto_price`, `finance_price` |
 | **Filesystem** | `list_files`, `create_file`, `modify_file`, `rename_file`, `delete_file`, `create_directory`, `delete_directory` |
 | **GUI Automation** | `visual_click`, `keyboard_type`, `launch_app`, `describe_screen` |
-| **System** | `system_stats` |
+| **System** | `system_stats`, `search_tools` |
+
+---
+
+## Context Management
+
+ARGOS uses a three-tier pipeline to keep the conversation context within the LLM token budget while preserving reasoning quality.
+
+| Tier | Trigger | Mechanism | LLM call? |
+|---|---|---|---|
+| **Micro-compact** | >80 % of budget | Clears content of old tool results, WorldState snapshots, and raw JSON tool calls. Keeps the `ARGOS_MICRO_COMPACT_KEEP` most recent. | No |
+| **Structured compaction** | >90 % of budget, ≥5 messages, `ARGOS_ENABLE_COMPACTION=1` | Calls the lightweight LLM to summarise the conversation into a 9-section structured summary. Replaces all history with 3 messages. Falls back silently on error. | Yes (lightweight model) |
+| **Drop** | >100 % of budget | Drops the oldest non-system messages until the budget fits. Original behaviour, always available as last resort. | No |
+
+Additional context features:
+- **Time-based micro-compact**: if >`ARGOS_MC_TTL_MINUTES` of idle time pass since the last LLM call (cache TTL likely expired), micro-compact fires pre-emptively before the next call.
+- **Session working memory**: every `ARGOS_SESSION_MEMORY_UPDATE_EVERY` tool calls, a background task writes a compact task-state summary to `.argos_session_memory.md` via the lightweight model. Injected into the next task's context to bridge consecutive sessions.
+- **Tool RAG**: at the start of each task, only the top-12 most relevant tools (TF-IDF cosine similarity) are injected into the system prompt. The `search_tools` tool lets the model discover additional tools at runtime if it suspects it needs one not in its current context.
+- **`<analysis>` scratchpad**: the planner schema allows the model to prepend an `<analysis>` block for chain-of-thought reasoning. It is stripped automatically before parsing and never reaches the user.
+- **Post-compact cleanup**: after a structured compaction, git context cache and session memory are reset so stale derived state is not carried into the compacted history.
 
 ---
 

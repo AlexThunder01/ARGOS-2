@@ -142,6 +142,12 @@ def _is_compactable_message(msg: dict) -> bool:
     return False
 
 
+# Time-based micro-compact: if the gap since the last LLM call exceeds this
+# threshold, the server-side prompt cache has likely expired. A pre-emptive
+# micro-compact runs before the next call to avoid a full cache-miss on a large
+# context. Override via ARGOS_MC_TTL_MINUTES env var.
+_TIME_BASED_MC_TTL_S: int = int(os.getenv("ARGOS_MC_TTL_MINUTES", "60")) * 60
+
 # LLM HTTP timeout — increase for slow local/tunneled models (e.g. Ollama on Kaggle).
 # Override via LLM_TIMEOUT_S env var.
 _LLM_TIMEOUT: int = int(os.getenv("LLM_TIMEOUT_S", "300"))
@@ -187,6 +193,14 @@ class ArgosAgent:
         self.backend = LLM_BACKEND
         self.model = LLM_MODEL
         self.token_budget = DEFAULT_TOKEN_BUDGET
+
+        # Time-based micro-compact: monotonic timestamp of the last LLM call.
+        # 0.0 means no call has been made yet in this session.
+        self._last_llm_call_time: float = 0.0
+
+        # Counts how many times Tier-2 structured compaction ran.
+        # engine.py reads this to detect compaction and trigger post-compact cleanup.
+        self._compact_count: int = 0
 
         user = os.environ.get("USER", "user")
         os_system = platform.system()
@@ -254,6 +268,26 @@ class ArgosAgent:
     def add_message(self, role: str, content: str):
         """Appends a new message to the memory buffer."""
         self.history.append({"role": role.lower(), "content": str(content)})
+
+    def _check_time_based_mc(self) -> None:
+        """Pre-emptive micro-compact when the server-side prompt cache TTL has expired.
+
+        If more than _TIME_BASED_MC_TTL_S seconds have passed since the last LLM
+        call, the server-side cache is almost certainly gone. Running micro-compact
+        before the next call avoids paying a full cache-miss penalty on a large,
+        stale context.  Resets _last_llm_call_time so the check does not fire twice.
+        """
+        if self._last_llm_call_time <= 0:
+            return
+        gap = time.monotonic() - self._last_llm_call_time
+        if gap > _TIME_BASED_MC_TTL_S:
+            cleared = self.micro_compact()
+            logger.info(
+                f"[TimeBasedMC] Cache TTL exceeded ({gap / 60:.0f}m idle) "
+                f"— pre-emptive micro-compact cleared {cleared} messages."
+            )
+            # Reset so we don't fire again immediately on the next call
+            self._last_llm_call_time = 0.0
 
     def micro_compact(self) -> int:
         """
@@ -349,8 +383,9 @@ class ArgosAgent:
                 new_history = compact_conversation(self.history, self._call_for_compaction)
                 if len(new_history) < len(self.history):
                     self.history = new_history
+                    self._compact_count += 1
                     logger.info(
-                        f"[TrimHistory] Structured compaction: "
+                        f"[TrimHistory] Structured compaction #{self._compact_count}: "
                         f"{len(new_history)} messages remain"
                     )
                     return
@@ -382,12 +417,15 @@ class ArgosAgent:
     def think(self) -> str:
         """Executes one step of the agent's reasoning loop (blocking).
         Use think_async() when calling from an async context (FastAPI)."""
+        self._check_time_based_mc()
         self.trim_history()
         try:
             if self.backend == "anthropic":
-                return self._call_anthropic(self.history, temperature=0.0)
+                result = self._call_anthropic(self.history, temperature=0.0)
             else:
-                return self._call_openai_compatible(self.history, temperature=0.0)
+                result = self._call_openai_compatible(self.history, temperature=0.0)
+            self._last_llm_call_time = time.monotonic()
+            return result
         except Exception as e:
             return f"LLM Error: {e}"
 
@@ -511,14 +549,17 @@ class ArgosAgent:
         Non-blocking version of think(). Uses httpx.AsyncClient.
         Does not block the FastAPI event loop under concurrent load.
         """
+        self._check_time_based_mc()
         self.trim_history()
         try:
             if self.backend == "anthropic":
-                return await self._call_anthropic_async(self.history, temperature=0.0)
+                result = await self._call_anthropic_async(self.history, temperature=0.0)
             else:
-                return await self._call_openai_compatible_async(
+                result = await self._call_openai_compatible_async(
                     self.history, temperature=0.0
                 )
+            self._last_llm_call_time = time.monotonic()
+            return result
         except Exception as e:
             return f"LLM Error: {e}"
 
@@ -659,7 +700,9 @@ class ArgosAgent:
     def think_stream(self) -> Generator[str, None, None]:
         """Yields text chunks as they arrive from the LLM (sync streaming).
         <think>...</think> blocks are filtered in real-time before yielding."""
+        self._check_time_based_mc()
         self.trim_history()
+        self._last_llm_call_time = time.monotonic()
         try:
             if self.backend == "anthropic":
                 raw = self._call_anthropic_stream(self.history, temperature=0.0)

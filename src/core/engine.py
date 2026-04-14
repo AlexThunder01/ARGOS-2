@@ -214,6 +214,7 @@ class CoreAgent:
         confirmation_callback: Optional[Callable] = None,
         allowed_tools: Optional[Set[str]] = None,
         inject_git_context: bool = True,
+        status_callback: Optional[Callable[[str], None]] = None,
     ):
         if memory_mode not in MEMORY_MODES:
             raise ValueError(
@@ -229,6 +230,7 @@ class CoreAgent:
         self.require_confirmation = require_confirmation
         self.confirmation_callback = confirmation_callback
         self.inject_git_context = inject_git_context
+        self.status_callback = status_callback
 
         # Build filtered or full ToolSpec registry
         active_registry = (
@@ -413,13 +415,53 @@ class CoreAgent:
         # Loop detection counters
         _consecutive_browser_nav = 0
         _consecutive_web_search = 0
+
+        # ── Activity summary background task ──────────────────────────────
+        # Every 30 seconds, emits a brief status line so long-running tasks
+        # remain visible to the user and to log monitoring.
+        _activity_stop = asyncio.Event()
+
+        async def _emit_activity(stop: asyncio.Event) -> None:
+            while True:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(stop.wait()), timeout=30.0
+                    )
+                    return  # stop event fired
+                except asyncio.TimeoutError:
+                    msg = (
+                        f"[step {state.step_count}/{self.max_steps}] "
+                        f"{task[:60]}"
+                    )
+                    logger.info(f"[ActivitySummary] {msg}")
+                    if self.status_callback:
+                        try:
+                            self.status_callback(msg)
+                        except Exception:
+                            pass
+
+        _activity_task = asyncio.create_task(_emit_activity(_activity_stop))
         _BROWSER_NAV_NUDGE_THRESHOLD = (
             5  # inject nudge after N consecutive browser_navigate
         )
         _WEB_SEARCH_NUDGE_THRESHOLD = 4  # inject nudge after N consecutive web_search
 
+        _compact_count_before = self._llm._compact_count
+
         for step_num in range(self.max_steps):
             raw = await self._llm.think_async()
+
+            # ── Post-compact cleanup ───────────────────────────────────────
+            # If Tier-2 structured compaction ran inside think_async, the history
+            # was replaced.  Any derived caches (git context, in-flight session
+            # memory) are now stale and must be regenerated on the next step.
+            if self._llm._compact_count != _compact_count_before:
+                _compact_count_before = self._llm._compact_count
+                self._git_context_cache = None
+                self._session_memory.clear()
+                logger.info(
+                    "[CoreAgent] Post-compact cleanup: git cache + session memory reset."
+                )
             decision = parse_planner_response(raw)
             log_decision(
                 logger, decision.thought, decision.tool or "done", decision.confidence
@@ -663,6 +705,10 @@ class CoreAgent:
                 if action_result.success
                 else f"Step failure: {action_result.message}"
             )
+
+        # Stop the activity summary background task
+        _activity_stop.set()
+        _activity_task.cancel()
 
         return final_response, step_records, loop_success
 
