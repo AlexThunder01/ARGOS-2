@@ -106,6 +106,9 @@ data/
 workspace/
 /tmp/
 
+# Session working-memory file (ephemeral per-session, not for VCS)
+.argos_session_memory.md
+
 # Large local TTS/ML models
 Qwen3-TTS-12Hz-1.7B-VoiceDesign/
 Qwen3-TTS-local/

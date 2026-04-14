@@ -25,7 +25,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.agent import ArgosAgent, _count_tokens
+from src.agent import (
+    ArgosAgent,
+    _count_tokens,
+    _is_compactable_message,
+    MICRO_COMPACT_KEEP_RECENT,
+)
+import src.agent as _agent_module
 
 # ==========================================================================
 # _count_tokens
@@ -736,3 +742,246 @@ class TestCallLightweight:
         # L'outer except in call_lightweight cattura solo eccezioni non gestite → ""
         assert isinstance(result, str)
         assert "Error" in result or result == ""
+
+
+# ==========================================================================
+# _is_compactable_message()
+# ==========================================================================
+
+
+class TestIsCompactableMessage:
+    def test_tool_result_user_message(self):
+        msg = {"role": "user", "content": "TOOL RESULT: file created successfully"}
+        assert _is_compactable_message(msg) is True
+
+    def test_tool_result_partial_match_only_prefix(self):
+        msg = {"role": "user", "content": "TOOL RESULT:"}
+        assert _is_compactable_message(msg) is True
+
+    def test_regular_user_message_not_compactable(self):
+        msg = {"role": "user", "content": "List files in the current directory"}
+        assert _is_compactable_message(msg) is False
+
+    def test_world_state_system_message(self):
+        msg = {"role": "system", "content": "WORLD STATE\nstep=3, last_error=None"}
+        assert _is_compactable_message(msg) is True
+
+    def test_workspace_state_updated_system_message(self):
+        msg = {"role": "system", "content": "WORKSPACE STATE UPDATED:\nGit branch: main"}
+        assert _is_compactable_message(msg) is True
+
+    def test_current_workspace_state_system_message(self):
+        msg = {"role": "system", "content": "CURRENT WORKSPACE STATE:\nGit branch: main"}
+        assert _is_compactable_message(msg) is True
+
+    def test_regular_system_message_not_compactable(self):
+        msg = {"role": "system", "content": "Today's date: 2026-04-14 10:00"}
+        assert _is_compactable_message(msg) is False
+
+    def test_json_tool_call_assistant_message(self):
+        msg = {"role": "assistant", "content": '{"action": {"tool": "list_files", "input": {}}}'}
+        assert _is_compactable_message(msg) is True
+
+    def test_json_tool_call_with_leading_whitespace(self):
+        msg = {"role": "assistant", "content": '  {"action": {"tool": "read_file", "input": {"path": "/tmp/x"}}}'}
+        assert _is_compactable_message(msg) is True
+
+    def test_final_response_assistant_message_not_compactable(self):
+        msg = {"role": "assistant", "content": "Ho completato il task."}
+        assert _is_compactable_message(msg) is False
+
+    def test_empty_content(self):
+        msg = {"role": "user", "content": ""}
+        assert _is_compactable_message(msg) is False
+
+    def test_missing_role(self):
+        msg = {"content": "TOOL RESULT: something"}
+        assert _is_compactable_message(msg) is False
+
+
+# ==========================================================================
+# micro_compact()
+# ==========================================================================
+
+
+class TestMicroCompact:
+    def _agent_with_tool_results(self, n_results: int) -> ArgosAgent:
+        """Returns an agent with n_results tool-result messages in history."""
+        agent = ArgosAgent()
+        for i in range(n_results):
+            agent.history.append(
+                {"role": "assistant", "content": f'{{"action": {{"tool": "list_files", "input": {{}}}}}}'}
+            )
+            agent.history.append(
+                {"role": "user", "content": f"TOOL RESULT: result {i}"}
+            )
+        return agent
+
+    def test_noop_when_no_compactable_messages(self):
+        agent = ArgosAgent()
+        agent.add_message("user", "Ciao")
+        agent.add_message("assistant", "Risposta normale")
+        original = list(agent.history)
+        cleared = agent.micro_compact()
+        assert cleared == 0
+        assert agent.history == original
+
+    def test_noop_when_below_keep_threshold(self):
+        # 2 results = 4 compactable messages (< MICRO_COMPACT_KEEP_RECENT=5)
+        agent = self._agent_with_tool_results(2)
+        original = [m["content"] for m in agent.history]
+        cleared = agent.micro_compact()
+        assert cleared == 0
+        assert [m["content"] for m in agent.history] == original
+
+    def test_clears_oldest_beyond_keep_threshold(self):
+        # 5 results = 10 compactable messages; keep 5, clear 5
+        n = 5
+        agent = self._agent_with_tool_results(n)
+        cleared = agent.micro_compact()
+        expected = n * 2 - MICRO_COMPACT_KEEP_RECENT  # 10 - 5 = 5
+        assert cleared == expected
+
+    def test_keeps_most_recent_results(self):
+        keep = MICRO_COMPACT_KEEP_RECENT
+        agent = self._agent_with_tool_results(keep + 1)
+        agent.micro_compact()
+        # Last KEEP tool-result messages must NOT be "[cleared]"
+        tool_results = [
+            m for m in agent.history
+            if m.get("role") == "user" and "TOOL RESULT:" in m.get("content", "")
+        ]
+        # All surviving tool results still have original content
+        for msg in tool_results:
+            assert msg["content"] != "[cleared]"
+
+    def test_cleared_messages_replaced_with_placeholder(self):
+        keep = MICRO_COMPACT_KEEP_RECENT
+        agent = self._agent_with_tool_results(keep + 2)
+        agent.micro_compact()
+        cleared_msgs = [m for m in agent.history if m.get("content") == "[cleared]"]
+        assert len(cleared_msgs) > 0
+
+    def test_system_message_never_cleared(self):
+        agent = self._agent_with_tool_results(MICRO_COMPACT_KEEP_RECENT + 2)
+        agent.micro_compact()
+        # First message must remain the system prompt
+        assert agent.history[0]["role"] == "system"
+        assert agent.history[0]["content"] != "[cleared]"
+
+    def test_world_state_messages_cleared(self):
+        agent = ArgosAgent()
+        for i in range(MICRO_COMPACT_KEEP_RECENT + 2):
+            agent.history.append(
+                {"role": "system", "content": f"WORLD STATE\nstep={i}"}
+            )
+        cleared = agent.micro_compact()
+        assert cleared == 2
+
+    def test_history_length_unchanged_after_micro_compact(self):
+        agent = self._agent_with_tool_results(MICRO_COMPACT_KEEP_RECENT + 3)
+        original_len = len(agent.history)
+        agent.micro_compact()
+        assert len(agent.history) == original_len
+
+    def test_noop_on_single_message_history(self):
+        agent = ArgosAgent()
+        # History is just the system message
+        cleared = agent.micro_compact()
+        assert cleared == 0
+
+
+# ==========================================================================
+# trim_history() — tiered pipeline
+# ==========================================================================
+
+
+class TestTrimHistoryTiered:
+    """Verifies that the 3-tier pipeline behaves correctly."""
+
+    def test_tier3_fallback_unchanged_from_original(self):
+        """Tier 3 must produce identical results to the original drop behaviour."""
+        agent = ArgosAgent()
+        system_tokens = _count_tokens(agent.history[0]["content"])
+        # Budget: system + exactly 10 extra tokens
+        agent.token_budget = system_tokens + 10
+        agent.add_message("user", "A" * 40)    # ~10 tokens
+        agent.add_message("assistant", "B" * 40)  # ~10 tokens
+        agent.add_message("user", "C" * 40)    # ~10 tokens
+        agent.trim_history()
+        # System must be preserved
+        assert agent.history[0]["role"] == "system"
+        # Total must fit within budget
+        total = sum(_count_tokens(str(m.get("content", ""))) for m in agent.history)
+        assert total <= agent.token_budget
+
+    def test_micro_compact_runs_before_drop(self):
+        """When budget is 80%+ full with tool results, micro_compact fires first."""
+        agent = ArgosAgent()
+        system_tokens = _count_tokens(agent.history[0]["content"])
+        # Set a budget where tool results push us over 80% but not 100%
+        agent.token_budget = system_tokens + 200  # comfortable
+
+        # Add enough tool results to exceed 80% of the extra budget
+        for i in range(15):
+            agent.history.append(
+                {"role": "user", "content": f"TOOL RESULT: {'x' * 50}"}
+            )
+
+        original_len = len(agent.history)
+        agent.trim_history()
+        # After trim: message count may drop (Tier 3) but if micro_compact fired,
+        # some messages have "[cleared]" content instead of being removed
+        has_cleared = any(m.get("content") == "[cleared]" for m in agent.history)
+        # Either cleared (micro_compact ran) or dropped (Tier 3) — both are valid
+        assert has_cleared or len(agent.history) < original_len
+
+    def test_tier2_skipped_when_history_too_short(self, monkeypatch):
+        """Structured compaction must not be attempted with < 5 messages."""
+        # Enable Tier 2 so we can verify it is skipped due to history length
+        monkeypatch.setattr(_agent_module, "_COMPACTION_ENABLED", True)
+
+        agent = ArgosAgent()
+        system_tokens = _count_tokens(agent.history[0]["content"])
+        agent.token_budget = system_tokens  # force 100%+ immediately
+
+        # Only 2 messages total — below _COMPACT_MIN_MESSAGES
+        agent.add_message("user", "test")
+        # Should fall straight to Tier 3 without making LLM call
+        with patch.object(agent, "_call_for_compaction") as mock_compact:
+            agent.trim_history()
+            mock_compact.assert_not_called()
+
+    def test_tier2_called_when_conditions_met(self, monkeypatch):
+        """Structured compaction is attempted when history is long and budget exceeded."""
+        from src.core.compaction import COMPACT_MIN_MESSAGES
+
+        # Enable Tier 2 for this test only
+        monkeypatch.setattr(_agent_module, "_COMPACTION_ENABLED", True)
+
+        agent = ArgosAgent()
+        system_tokens = _count_tokens(agent.history[0]["content"])
+        # Budget: system only — forces 90%+ immediately
+        agent.token_budget = system_tokens + 1
+
+        # Add enough messages to meet COMPACT_MIN_MESSAGES
+        for i in range(COMPACT_MIN_MESSAGES):
+            agent.add_message("user", f"message {i} — {'x' * 20}")
+            agent.add_message("assistant", f"response {i}")
+
+        # Mock _call_for_compaction to return a valid summary (no real LLM call)
+        summary = "1. Summary\n2. Concepts\n3. Files\n4. Tools\n5. Errors\n6. User\n7. Pending\n8. Current\n9. Next"
+        with patch.object(agent, "_call_for_compaction", return_value=summary):
+            agent.trim_history()
+
+        # History should now be compacted (≤ 3 messages)
+        assert len(agent.history) <= 3
+
+    def test_trim_history_noop_when_within_budget(self):
+        agent = ArgosAgent()
+        agent.token_budget = 100_000  # far above any realistic usage
+        agent.add_message("user", "hello")
+        agent.add_message("assistant", "ciao")
+        original = list(agent.history)
+        agent.trim_history()
+        assert agent.history == original

@@ -33,6 +33,7 @@ from typing import Callable, Generator, Optional, Set
 
 from src.agent import ArgosAgent
 from src.core.memory import EXTRACT_MIN_LENGTH
+from src.core.session_memory import SessionMemory
 from src.executor.executor import execute_with_retry
 from src.hooks.registry import HOOK_REGISTRY, HookEvent
 from src.logging.otel import get_tracer
@@ -251,6 +252,10 @@ class CoreAgent:
 
         # Session memory (RAM-only, cleared on exit)
         self._session_memories: deque[dict] = deque(maxlen=500)
+
+        # Session working-memory file — bridges context across consecutive tasks
+        # and anchors structured compaction to current working state.
+        self._session_memory = SessionMemory()
 
         # Prior conversation messages to inject before the current task (set by callers)
         self._injected_history: list[dict] = []
@@ -635,6 +640,22 @@ class CoreAgent:
             )
             self._llm.add_message("user", f"TOOL RESULT: {action_result.message}")
 
+            # ── Session memory update (background, non-blocking) ───────────
+            self._session_memory.record_tool_call()
+            if self._session_memory.should_update():
+                history_snapshot = list(self._llm.history)
+                try:
+                    asyncio.create_task(
+                        asyncio.to_thread(
+                            self._session_memory.update,
+                            history_snapshot,
+                            self._llm.call_lightweight,
+                        )
+                    )
+                except RuntimeError:
+                    # No running event loop (e.g. sync test context) — skip silently
+                    pass
+
             if not action_result.success:
                 loop_success = False
             final_response = (
@@ -733,6 +754,14 @@ class CoreAgent:
             self._llm.add_message(
                 "system",
                 f"THINGS YOU KNOW ABOUT THE USER (use when relevant):\n{memory_context}",
+            )
+
+        # Inject session working-memory if available (bridges consecutive tasks).
+        session_mem = self._session_memory.load()
+        if session_mem:
+            self._llm.add_message(
+                "system",
+                f"SESSION WORKING MEMORY (recent task state — use as context):\n{session_mem}",
             )
 
         if self._injected_history:

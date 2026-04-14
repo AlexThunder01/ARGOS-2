@@ -101,6 +101,47 @@ if TYPE_CHECKING:
 # Token budget applied by trim_history(). One token ≈ 4 chars (conservative estimate).
 DEFAULT_TOKEN_BUDGET = int(os.getenv("MAX_HISTORY_TOKENS", "8000"))
 
+# Micro-compaction: number of recent compactable messages to preserve.
+# Override via ARGOS_MICRO_COMPACT_KEEP env var.
+MICRO_COMPACT_KEEP_RECENT: int = int(os.getenv("ARGOS_MICRO_COMPACT_KEEP", "5"))
+
+# Minimum history length (including system message) before attempting structured
+# compaction. Below this threshold the LLM summary call is not worth it.
+_COMPACT_MIN_MESSAGES: int = 5
+
+# Structured compaction is opt-in to avoid unexpected LLM calls in environments
+# where the API key is configured but tests should remain deterministic.
+# Set ARGOS_ENABLE_COMPACTION=1 in production .env to activate Tier 2.
+_COMPACTION_ENABLED: bool = os.getenv("ARGOS_ENABLE_COMPACTION", "0") == "1"
+
+# Content markers that identify compactable (clearable) messages.
+_TOOL_RESULT_PREFIX = "TOOL RESULT:"
+_WORLD_STATE_MARKERS = (
+    "WORLD STATE",
+    "WORKSPACE STATE UPDATED",
+    "CURRENT WORKSPACE STATE",
+)
+
+
+def _is_compactable_message(msg: dict) -> bool:
+    """Returns True if this message can be cleared during micro-compaction.
+
+    Compactable messages carry transient execution data (tool outputs, git context
+    snapshots, raw JSON tool calls) whose token cost far exceeds their long-term
+    value. The most recent MICRO_COMPACT_KEEP_RECENT are preserved; older ones
+    are replaced with "[cleared]".
+    """
+    role = msg.get("role", "")
+    content = str(msg.get("content", ""))
+    if role == "user" and content.startswith(_TOOL_RESULT_PREFIX):
+        return True
+    if role == "system" and any(marker in content for marker in _WORLD_STATE_MARKERS):
+        return True
+    if role == "assistant" and content.strip().startswith('{"action":'):
+        return True
+    return False
+
+
 # LLM HTTP timeout — increase for slow local/tunneled models (e.g. Ollama on Kaggle).
 # Override via LLM_TIMEOUT_S env var.
 _LLM_TIMEOUT: int = int(os.getenv("LLM_TIMEOUT_S", "300"))
@@ -214,12 +255,110 @@ class ArgosAgent:
         """Appends a new message to the memory buffer."""
         self.history.append({"role": role.lower(), "content": str(content)})
 
-    def trim_history(self):
+    def micro_compact(self) -> int:
         """
-        Maintains the conversation history within the token budget.
-        Drops the oldest non-system messages until the history fits within token_budget.
+        Tier-1 context management: clears the content of old tool results,
+        WorldState snapshots, and raw JSON tool calls — keeping only the most
+        recent MICRO_COMPACT_KEEP_RECENT of each.
+
+        No LLM call is made. The message list length is unchanged; only the
+        *content* of old compactable messages is replaced with "[cleared]".
+
+        Returns:
+            Number of messages whose content was cleared.
         """
         if len(self.history) <= 1:
+            return 0
+
+        compactable_indices = [
+            i
+            for i, msg in enumerate(self.history[1:], start=1)
+            if _is_compactable_message(msg)
+        ]
+
+        # Keep the most recent MICRO_COMPACT_KEEP_RECENT; clear everything older.
+        if len(compactable_indices) <= MICRO_COMPACT_KEEP_RECENT:
+            return 0
+
+        to_clear = compactable_indices[:-MICRO_COMPACT_KEEP_RECENT]
+        for i in to_clear:
+            self.history[i] = {**self.history[i], "content": "[cleared]"}
+
+        logger.debug(
+            f"[MicroCompact] Cleared {len(to_clear)} old messages "
+            f"(kept {MICRO_COMPACT_KEEP_RECENT} recent)"
+        )
+        return len(to_clear)
+
+    def _call_for_compaction(self, messages: list[dict]) -> str:
+        """Lightweight LLM call used exclusively by structured compaction (Tier 2).
+
+        Uses the lightweight model with max_retries=1 so a slow/unavailable
+        service fails fast and falls through to Tier 3 without blocking long.
+        """
+        from .config import LLM_LIGHTWEIGHT_MODEL
+
+        if self.backend == "anthropic":
+            return self._call_anthropic(
+                messages,
+                temperature=0.0,
+                model_override=LLM_LIGHTWEIGHT_MODEL,
+            )
+        return self._call_openai_compatible(
+            messages,
+            temperature=0.0,
+            model_override=LLM_LIGHTWEIGHT_MODEL,
+            max_retries=1,
+        )
+
+    def trim_history(self):
+        """
+        Three-tier context management pipeline.
+
+        Tier 1 — Micro-compaction (>80% budget, no LLM call):
+            Clears content of old tool results, WorldState snapshots, and JSON
+            tool calls. Preserves the most recent MICRO_COMPACT_KEEP_RECENT.
+
+        Tier 2 — Structured compaction (>90% budget, LLM call, ≥5 messages):
+            Calls the lightweight LLM to summarise the conversation into a
+            structured 9-section summary. The summary replaces all history.
+            Falls back transparently if the LLM call fails.
+
+        Tier 3 — Drop (>100% budget, no LLM call, original behaviour):
+            Drops the oldest non-system messages until the budget is satisfied.
+        """
+        if len(self.history) <= 1:
+            return
+
+        total = sum(_count_tokens(str(m.get("content", ""))) for m in self.history)
+
+        # ── Tier 1: Micro-compaction ──────────────────────────────────────
+        if total > self.token_budget * 0.8:
+            self.micro_compact()
+            total = sum(_count_tokens(str(m.get("content", ""))) for m in self.history)
+
+        # ── Tier 2: Structured compaction ─────────────────────────────────
+        if (
+            _COMPACTION_ENABLED
+            and total > self.token_budget * 0.9
+            and len(self.history) >= _COMPACT_MIN_MESSAGES
+        ):
+            try:
+                from src.core.compaction import compact_conversation
+
+                new_history = compact_conversation(self.history, self._call_for_compaction)
+                if len(new_history) < len(self.history):
+                    self.history = new_history
+                    logger.info(
+                        f"[TrimHistory] Structured compaction: "
+                        f"{len(new_history)} messages remain"
+                    )
+                    return
+            except Exception as e:
+                logger.warning(f"[TrimHistory] Compaction unavailable: {e}")
+
+        # ── Tier 3: Drop oldest (original behaviour) ──────────────────────
+        if total <= self.token_budget:
             return
 
         system_msg = self.history[0]
@@ -233,8 +372,6 @@ class ArgosAgent:
             if total + msg_tokens <= self.token_budget:
                 kept.append(msg)
                 total += msg_tokens
-            else:
-                continue
 
         self.history = [system_msg] + list(reversed(kept))
 
