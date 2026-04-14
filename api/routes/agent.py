@@ -119,6 +119,10 @@ class TaskRequest(BaseModel):
     max_steps: int = Field(
         default=5, ge=1, le=20, description="Maximum internal step bound"
     )
+    attachments: list[str] = Field(
+        default_factory=list,
+        description="Optional list of upload_id UUIDs from POST /api/upload",
+    )
 
 
 class TaskAsyncRequest(TaskRequest):
@@ -318,10 +322,14 @@ async def run_task(req: TaskRequest):
     except RateLimitExceeded as e:
         raise HTTPException(status_code=429, detail=str(e))
 
+    task = req.task
+    if req.attachments:
+        from src.upload import build_attachment_context
+
+        task = f"{task}\n\n{build_attachment_context(req.attachments)}"
+
     try:
-        return await _run_task_async_core(
-            req.task, req.require_confirmation, req.max_steps
-        )
+        return await _run_task_async_core(task, req.require_confirmation, req.max_steps)
     except HTTPException:
         raise
     except Exception as e:
@@ -376,11 +384,17 @@ async def run_task_async(
         with _idempotency_lock:
             _idempotency_store[idempotency_key] = job_id
 
+    async_task = req.task
+    if req.attachments:
+        from src.upload import build_attachment_context
+
+        async_task = f"{async_task}\n\n{build_attachment_context(req.attachments)}"
+
     background_tasks.add_task(
         _run_task_async_worker,
         job_id=job_id,
         webhook_url=req.webhook_url,
-        task=req.task,
+        task=async_task,
         req_conf=req.require_confirmation,
         max_steps=req.max_steps,
     )

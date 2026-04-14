@@ -96,7 +96,3 @@ def test_confirmation_prompt():
     intent = parse_intent("elimina il file test.txt")
     prompt = format_confirmation_prompt(intent)
     assert "eliminare" in prompt.lower()
-
-
-
-

@@ -32,7 +32,6 @@ from src.tools.downloader import (
     download_file_tool,
 )
 
-
 # ==========================================================================
 # Helper: _extract_filename_from_cd
 # ==========================================================================
@@ -40,13 +39,20 @@ from src.tools.downloader import (
 
 class TestExtractFilenameFromCD:
     def test_plain_filename(self):
-        assert _extract_filename_from_cd('attachment; filename="report.pdf"') == "report.pdf"
+        assert (
+            _extract_filename_from_cd('attachment; filename="report.pdf"')
+            == "report.pdf"
+        )
 
     def test_filename_without_quotes(self):
-        assert _extract_filename_from_cd("attachment; filename=report.pdf") == "report.pdf"
+        assert (
+            _extract_filename_from_cd("attachment; filename=report.pdf") == "report.pdf"
+        )
 
     def test_utf8_filename(self):
-        result = _extract_filename_from_cd("attachment; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf")
+        result = _extract_filename_from_cd(
+            "attachment; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf"
+        )
         assert result is not None
         assert "sum" in result  # résumé decoded
 
@@ -67,7 +73,10 @@ class TestExtractFilenameFromCD:
 
 class TestExtractFilenameFromURL:
     def test_simple_url(self):
-        assert _extract_filename_from_url("https://example.com/files/data.csv") == "data.csv"
+        assert (
+            _extract_filename_from_url("https://example.com/files/data.csv")
+            == "data.csv"
+        )
 
     def test_url_with_query(self):
         result = _extract_filename_from_url("https://example.com/file.pdf?token=abc")
@@ -92,16 +101,40 @@ class TestExtractFilenameFromURL:
 
 
 class TestIsBlocked:
-    @pytest.mark.parametrize("ext", [
-        ".exe", ".sh", ".bat", ".cmd", ".msi", ".deb", ".rpm",
-        ".appimage", ".jar", ".dll", ".so", ".ps1", ".vbs",
-    ])
+    @pytest.mark.parametrize(
+        "ext",
+        [
+            ".exe",
+            ".sh",
+            ".bat",
+            ".cmd",
+            ".msi",
+            ".deb",
+            ".rpm",
+            ".appimage",
+            ".jar",
+            ".dll",
+            ".so",
+            ".ps1",
+            ".vbs",
+        ],
+    )
     def test_blocked_extensions(self, ext):
         assert _is_blocked(f"malware{ext}") is True
 
-    @pytest.mark.parametrize("ext", [
-        ".pdf", ".txt", ".csv", ".png", ".jpg", ".zip", ".tar.gz", ".docx",
-    ])
+    @pytest.mark.parametrize(
+        "ext",
+        [
+            ".pdf",
+            ".txt",
+            ".csv",
+            ".png",
+            ".jpg",
+            ".zip",
+            ".tar.gz",
+            ".docx",
+        ],
+    )
     def test_allowed_extensions(self, ext):
         assert _is_blocked(f"safe_file{ext}") is False
 
@@ -172,12 +205,17 @@ class TestDownloadSuccess:
         content = b"PDF content here" * 100
         mock_resp = MagicMock()
         mock_resp.status_code = 200
-        mock_resp.headers = {"Content-Length": str(len(content)), "Content-Disposition": ""}
+        mock_resp.headers = {
+            "Content-Length": str(len(content)),
+            "Content-Disposition": "",
+        }
         mock_resp.raise_for_status = MagicMock()
         mock_resp.iter_content = MagicMock(return_value=[content])
         mock_get.return_value = mock_resp
 
-        result = download_file_tool({"url": "https://example.com/test.pdf", "save_path": save_path})
+        result = download_file_tool(
+            {"url": "https://example.com/test.pdf", "save_path": save_path}
+        )
         assert "✅" in result or "Downloaded" in result
 
     @patch("src.tools.downloader._normalize_path")
@@ -198,7 +236,9 @@ class TestDownloadSuccess:
         mock_resp.iter_content = MagicMock(return_value=iter(chunks))
         mock_get.return_value = mock_resp
 
-        result = download_file_tool({"url": "https://example.com/big.bin", "save_path": save_path})
+        result = download_file_tool(
+            {"url": "https://example.com/big.bin", "save_path": save_path}
+        )
         assert "error" in result.lower()
         assert "size" in result.lower() or "limit" in result.lower()
         # File should have been cleaned up
@@ -214,6 +254,7 @@ class TestDownloadErrors:
     @patch("src.tools.downloader.http_client.get")
     def test_timeout_returns_error(self, mock_get):
         import requests
+
         mock_get.side_effect = requests.exceptions.Timeout()
         result = download_file_tool({"url": "https://example.com/slow.pdf"})
         assert "error" in result.lower()
@@ -222,6 +263,7 @@ class TestDownloadErrors:
     @patch("src.tools.downloader.http_client.get")
     def test_connection_error_returns_error(self, mock_get):
         import requests
+
         mock_get.side_effect = requests.exceptions.ConnectionError()
         result = download_file_tool({"url": "https://nonexistent.example.com/file.pdf"})
         assert "error" in result.lower()
@@ -229,6 +271,7 @@ class TestDownloadErrors:
     @patch("src.tools.downloader.http_client.get")
     def test_http_404_returns_error(self, mock_get):
         import requests
+
         mock_resp = MagicMock()
         mock_resp.status_code = 404
         mock_resp.raise_for_status.side_effect = requests.exceptions.HTTPError(
@@ -242,6 +285,7 @@ class TestDownloadErrors:
         """URLs without schema should get https:// prefix (then may fail on connect)."""
         with patch("src.tools.downloader.http_client.get") as mock_get:
             import requests
+
             mock_get.side_effect = requests.exceptions.ConnectionError()
             download_file_tool({"url": "example.com/file.pdf"})
             # Verify https:// was prepended

@@ -21,7 +21,6 @@ import pytest
 
 from src.core.engine import CoreAgent, TaskResult
 
-
 # ==========================================================================
 # CoreAgent Initialization
 # ==========================================================================
@@ -117,7 +116,6 @@ class TestAuthorization:
         """When no confirmation is required and no callback, dangerous tools should pass."""
         agent = CoreAgent()
         assert agent._authorize_tool("create_file", {"filename": "test.txt"}) is True
-
 
 
 # ==========================================================================

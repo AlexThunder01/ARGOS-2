@@ -6,7 +6,7 @@ export function useSSEChat() {
   const [isTyping, setIsTyping] = useState(false);
   const [error, setError] = useState(null);
 
-  const sendMessage = useCallback(async (prompt) => {
+  const sendMessage = useCallback(async (prompt, attachments = []) => {
     if (!prompt.trim()) return;
 
     // Add user message to UI
@@ -27,10 +27,11 @@ export function useSSEChat() {
     await ArgosAPI.startChatStream(
       prompt,
       history,
+      attachments,
       (pkt) => {
         // SSE Packet received
         if (pkt.chunk) {
-          setMessages(prev => prev.map(m => 
+          setMessages(prev => prev.map(m =>
             m.id === agentMsgId ? { ...m, content: m.content + pkt.chunk } : m
           ));
         }

@@ -67,6 +67,3 @@ def test_classify_error_fatal():
 def test_classify_error_retryable():
     assert _classify_error("API Error timeout") is True
     assert _classify_error("Connection Error network") is True
-
-
-

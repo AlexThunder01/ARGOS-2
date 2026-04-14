@@ -36,18 +36,34 @@ GC_EVERY_N = 50  # Run GC every Nth message
 
 
 def get_embedding(text: str) -> np.ndarray:
-    """Calls configured embeddings API and returns a numpy float32 vector."""
+    """Calls configured embeddings API and returns a numpy float32 vector.
+
+    Raises RuntimeError if the service is unreachable, so callers can catch
+    and degrade gracefully instead of propagating a raw connection error.
+    """
     headers = {"Content-Type": "application/json"}
     if EMBEDDING_API_KEY:
         headers["Authorization"] = f"Bearer {EMBEDDING_API_KEY}"
 
     url = f"{EMBEDDING_BASE_URL.rstrip('/')}/embeddings"
-    response = requests.post(
-        url, headers=headers, json={"model": EMBEDDING_MODEL, "input": text}, timeout=10
-    )
-    response.raise_for_status()
-    vec = response.json()["data"][0]["embedding"]
-    return np.array(vec, dtype=np.float32)
+    try:
+        response = requests.post(
+            url,
+            headers=headers,
+            json={"model": EMBEDDING_MODEL, "input": text},
+            timeout=10,
+        )
+        response.raise_for_status()
+        vec = response.json()["data"][0]["embedding"]
+        return np.array(vec, dtype=np.float32)
+    except requests.exceptions.ConnectionError as e:
+        raise RuntimeError(
+            f"Embedding service unreachable at {EMBEDDING_BASE_URL}: {e}"
+        ) from e
+    except requests.exceptions.Timeout:
+        raise RuntimeError(
+            f"Embedding service timed out at {EMBEDDING_BASE_URL}"
+        ) from None
 
 
 def check_embedding_dimensions():

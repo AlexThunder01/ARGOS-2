@@ -111,8 +111,31 @@ _ANTHROPIC_MAX_TOKENS: int = int(os.getenv("ANTHROPIC_MAX_TOKENS", "4096"))
 
 
 def _count_tokens(text: str) -> int:
-    """Estimates token count from raw text (4 chars ≈ 1 token)."""
-    return max(1, len(text) // 4)
+    """Estimates token count. CJK characters count as ~1 token each; other text ~4 chars/token."""
+    cjk = sum(
+        1
+        for ch in text
+        if (
+            "\u1100" <= ch <= "\u11ff"  # Hangul Jamo
+            or "\u3040" <= ch <= "\u30ff"  # Hiragana / Katakana
+            or "\u3400" <= ch <= "\u4dbf"  # CJK Extension A
+            or "\u4e00" <= ch <= "\u9fff"  # CJK Unified Ideographs
+            or "\uac00" <= ch <= "\ud7af"  # Hangul Syllables
+        )
+    )
+    return max(1, cjk + (len(text) - cjk) // 4)
+
+
+def _split_anthropic_messages(messages: list[dict]) -> tuple[str, list[dict]]:
+    """Splits history into Anthropic-format system string + user/assistant messages."""
+    system_parts: list[str] = []
+    user_msgs: list[dict] = []
+    for m in messages:
+        if m["role"] == "system":
+            system_parts.append(m["content"])
+        else:
+            user_msgs.append(m)
+    return "\n".join(system_parts).strip(), user_msgs
 
 
 class ArgosAgent:
@@ -307,13 +330,7 @@ class ArgosAgent:
         """Sync Anthropic API call."""
         from .config import LLM_API_KEY
 
-        system_msg = ""
-        user_msgs = []
-        for m in messages:
-            if m["role"] == "system":
-                system_msg += m["content"] + "\n"
-            else:
-                user_msgs.append(m)
+        system_msg, user_msgs = _split_anthropic_messages(messages)
 
         headers = {
             "x-api-key": LLM_API_KEY,
@@ -322,7 +339,7 @@ class ArgosAgent:
         }
         payload = {
             "model": model_override or self.model,
-            "system": system_msg.strip(),
+            "system": system_msg,
             "messages": user_msgs,
             "max_tokens": _ANTHROPIC_MAX_TOKENS,
             "temperature": temperature,
@@ -463,13 +480,7 @@ class ArgosAgent:
         """Async Anthropic API call."""
         from .config import LLM_API_KEY
 
-        system_msg = ""
-        user_msgs = []
-        for m in messages:
-            if m["role"] == "system":
-                system_msg += m["content"] + "\n"
-            else:
-                user_msgs.append(m)
+        system_msg, user_msgs = _split_anthropic_messages(messages)
 
         headers = {
             "x-api-key": LLM_API_KEY,
@@ -478,7 +489,7 @@ class ArgosAgent:
         }
         payload = {
             "model": model_override or self.model,
-            "system": system_msg.strip(),
+            "system": system_msg,
             "messages": user_msgs,
             "max_tokens": _ANTHROPIC_MAX_TOKENS,
             "temperature": temperature,
@@ -590,13 +601,7 @@ class ArgosAgent:
 
         from .config import LLM_API_KEY
 
-        system_msg = ""
-        user_msgs = []
-        for m in messages:
-            if m["role"] == "system":
-                system_msg += m["content"] + "\n"
-            else:
-                user_msgs.append(m)
+        system_msg, user_msgs = _split_anthropic_messages(messages)
 
         headers = {
             "x-api-key": LLM_API_KEY,
@@ -605,7 +610,7 @@ class ArgosAgent:
         }
         payload = {
             "model": model_override or self.model,
-            "system": system_msg.strip(),
+            "system": system_msg,
             "messages": user_msgs,
             "max_tokens": _ANTHROPIC_MAX_TOKENS,
             "temperature": temperature,

@@ -285,6 +285,7 @@ class ChatRequest(BaseModel):
     task: str
     max_steps: int = 10
     history: list[dict] = []  # List of {role, content} from frontend
+    attachments: list[str] = []  # List of upload_id UUIDs from POST /api/upload
 
 
 async def sse_agent_stream(task: str, history: list[dict], user_id: int):
@@ -405,6 +406,12 @@ async def chat_stream(req: ChatRequest):
         except Exception:
             pass
 
+    task = req.task
+    if req.attachments:
+        from src.upload import build_attachment_context
+
+        task = f"{task}\n\n{build_attachment_context(req.attachments)}"
+
     return StreamingResponse(
-        sse_agent_stream(req.task, req.history, user_id), media_type="text/event-stream"
+        sse_agent_stream(task, req.history, user_id), media_type="text/event-stream"
     )

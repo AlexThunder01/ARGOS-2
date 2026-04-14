@@ -16,10 +16,9 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
-
-from src.tools.spec import ToolInput, ToolRegistry, ToolSpec
 from pydantic import Field
 
+from src.tools.spec import ToolInput, ToolRegistry, ToolSpec
 
 # ==========================================================================
 # Fixtures
@@ -38,7 +37,9 @@ def _dummy_executor(inp: dict) -> str:
     return "ok"
 
 
-def _make_spec(name="test_tool", risk="none", dashboard_allowed=False, category="web", group=None):
+def _make_spec(
+    name="test_tool", risk="none", dashboard_allowed=False, category="web", group=None
+):
     return ToolSpec(
         name=name,
         description="A test tool",
@@ -141,11 +142,22 @@ class TestToolSpecValidateInput:
 
 class TestToolRegistry:
     def _make_registry(self):
-        return ToolRegistry([
-            _make_spec("tool_a", risk="none", dashboard_allowed=True, category="web"),
-            _make_spec("tool_b", risk="high", dashboard_allowed=False, category="filesystem"),
-            _make_spec("tool_c", risk="critical", dashboard_allowed=True, category="code"),
-        ])
+        return ToolRegistry(
+            [
+                _make_spec(
+                    "tool_a", risk="none", dashboard_allowed=True, category="web"
+                ),
+                _make_spec(
+                    "tool_b",
+                    risk="high",
+                    dashboard_allowed=False,
+                    category="filesystem",
+                ),
+                _make_spec(
+                    "tool_c", risk="critical", dashboard_allowed=True, category="code"
+                ),
+            ]
+        )
 
     def test_len(self):
         reg = self._make_registry()
@@ -207,18 +219,22 @@ class TestToolRegistry:
 class TestRealRegistry:
     def test_registry_has_tools(self):
         from src.tools.registry import REGISTRY
+
         assert len(REGISTRY) > 0
 
     def test_all_tools_have_executors(self):
         from src.tools.registry import REGISTRY
+
         for name in REGISTRY.names():
             spec = REGISTRY[name]
             assert callable(spec.executor), f"{name} has no callable executor"
 
     def test_web_search_in_registry(self):
         from src.tools.registry import REGISTRY
+
         assert "web_search" in REGISTRY
 
     def test_download_file_in_registry(self):
         from src.tools.registry import REGISTRY
+
         assert "download_file" in REGISTRY

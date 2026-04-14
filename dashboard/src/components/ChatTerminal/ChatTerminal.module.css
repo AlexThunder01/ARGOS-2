@@ -156,3 +156,103 @@
   text-align: center;
   padding: 10px;
 }
+
+/* ── Attachment UI ─────────────────────────────────────────────────────── */
+
+.attachBtn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text2);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.attachBtn:hover:not(:disabled) {
+  border-color: rgba(0,229,255,0.4);
+  color: var(--cyan);
+}
+
+.attachBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.attachPreview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 16px 0;
+}
+
+.attachChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(167,139,250,0.1);
+  border: 1px solid rgba(167,139,250,0.3);
+  border-radius: 20px;
+  padding: 3px 8px 3px 10px;
+  font-size: 11px;
+  color: var(--text2);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  animation: chipIn 0.15s ease;
+}
+
+.attachChipError {
+  background: rgba(239,68,68,0.1);
+  border-color: rgba(239,68,68,0.3);
+  color: var(--danger);
+}
+
+.attachChipRemove {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.attachChipRemove:hover {
+  opacity: 1;
+}
+
+@keyframes chipIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* Drag & drop overlay */
+.chatArea {
+  position: relative;
+}
+
+.dropZone {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,229,255,0.06);
+  border: 2px dashed rgba(0,229,255,0.4);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--cyan);
+  z-index: 10;
+  pointer-events: none;
+}
+
+.dropZoneActive {
+  outline: 2px dashed rgba(0,229,255,0.4);
+  outline-offset: -4px;
+}

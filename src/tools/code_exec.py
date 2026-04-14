@@ -7,6 +7,7 @@ Nessun accesso alla rete o al filesystem host, ad eccezione della workspace dedi
 """
 
 import os
+import threading
 import uuid
 
 from src.config import (
@@ -26,14 +27,17 @@ EXEC_TIMEOUT = DOCKER_EXEC_TIMEOUT
 MAX_OUTPUT = 5000
 
 _docker_client = None
+_docker_client_lock = threading.Lock()
 
 
 def _get_docker_client():
     global _docker_client
     if _docker_client is None:
-        import docker
+        with _docker_client_lock:
+            if _docker_client is None:
+                import docker
 
-        _docker_client = docker.DockerClient(base_url=DOCKER_HOST)
+                _docker_client = docker.DockerClient(base_url=DOCKER_HOST)
     return _docker_client
 
 
@@ -48,7 +52,7 @@ def _run_in_docker(image: str, command: list, timeout: int = EXEC_TIMEOUT) -> st
 
     volumes = {}
     if HOST_WORKSPACE_DIR:
-        volumes[HOST_WORKSPACE_DIR] = {"bind": "/workspace", "mode": "ro"}
+        volumes[HOST_WORKSPACE_DIR] = {"bind": "/workspace", "mode": "rw"}
 
     try:
         try:

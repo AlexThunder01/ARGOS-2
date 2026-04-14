@@ -42,7 +42,7 @@ import platform
 
 if platform.system() == "Linux":
     try:
-        from ctypes import *
+        from ctypes import CFUNCTYPE, c_char_p, c_int, cdll
 
         ERROR_HANDLER_FUNC = CFUNCTYPE(None, c_char_p, c_int, c_char_p, c_int, c_char_p)
 

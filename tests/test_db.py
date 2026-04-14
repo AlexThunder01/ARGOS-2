@@ -15,7 +15,6 @@ os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = ""
 
 import pytest
 
-
 # NOTE: DB fixtures are provided by the root conftest.py (autouse patch_db).
 # No need to duplicate _create_test_db() here.
 

@@ -21,7 +21,27 @@ export const ArgosAPI = {
    * quindi passiamo la key in query params o cambiamo approccio (es. fetch streaming).
    * Useremo fetch nativa asincrona così possiamo passare l'API Key negl header.
    */
-  async startChatStream(task, history, onPkt, onError, onComplete) {
+  /**
+   * Upload a single file and return { upload_id, filename }.
+   * Throws on HTTP error or if the server rejects the file (422).
+   */
+  async uploadFile(file) {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch("/api/upload", {
+      method: "POST",
+      // Do NOT set Content-Type — browser sets multipart boundary automatically
+      headers: { "X-ARGOS-API-KEY": API_KEY },
+      body: formData,
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(detail.detail || `Upload failed: ${res.status}`);
+    }
+    return res.json(); // { upload_id, filename }
+  },
+
+  async startChatStream(task, history, attachments, onPkt, onError, onComplete) {
     try {
         const response = await fetch("/api/chat/stream", {
             method: "POST",
@@ -29,6 +49,7 @@ export const ArgosAPI = {
             body: JSON.stringify({
                 task: task,
                 history: history,
+                attachments: attachments || [],
                 require_confirmation: false,
                 max_steps: 10
             })

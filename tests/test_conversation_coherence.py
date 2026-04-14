@@ -505,6 +505,3 @@ class TestRunTaskStream:
         assert any("nuovo task" in m["content"] for m in user_msgs)
         # Il vecchio messaggio non deve essere nel contesto
         assert not any("vecchio messaggio" in m["content"] for m in agent._llm.history)
-
-
-

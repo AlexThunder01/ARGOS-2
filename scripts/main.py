@@ -83,6 +83,14 @@ Memory Modes:
         help="Maximum tool execution steps per task (default: 10)",
     )
     parser.add_argument(
+        "--attach",
+        "-a",
+        nargs="*",
+        default=[],
+        metavar="FILE",
+        help="File paths to attach (e.g. --attach report.pdf image.png)",
+    )
+    parser.add_argument(
         "prompt",
         nargs="*",
         default=None,
@@ -94,6 +102,54 @@ Memory Modes:
 # ==========================================================================
 # Main Loop
 # ==========================================================================
+
+
+_INLINE_ATTACH_RE = re.compile(r"@file:(\S+)")
+
+
+def _resolve_attachments(paths: list[str], user_id: int) -> tuple[list[str], str]:
+    """
+    Validate, copy (if needed) and register file paths as upload_ids.
+
+    Returns (upload_ids, context_block).  Prints an error and skips
+    files that fail validation so the rest of the task still runs.
+    """
+    from src.upload import build_attachment_context, save_upload, validate_upload
+
+    upload_ids: list[str] = []
+    for raw_path in paths:
+        path = os.path.abspath(raw_path)
+        if not os.path.isfile(path):
+            print(f"⚠️  Attachment not found, skipped: {raw_path}")
+            continue
+        filename = os.path.basename(path)
+        size = os.path.getsize(path)
+        try:
+            validate_upload(filename, size)
+        except ValueError as exc:
+            print(f"⚠️  Attachment rejected ({exc}), skipped: {raw_path}")
+            continue
+        with open(path, "rb") as fh:
+            content = fh.read()
+        uid = save_upload(user_id=user_id, filename=filename, content=content)
+        upload_ids.append(uid)
+
+    if not upload_ids:
+        return [], ""
+    return upload_ids, build_attachment_context(upload_ids)
+
+
+def _extract_inline_attachments(text: str, user_id: int) -> tuple[str, str]:
+    """
+    Extracts @file:/path/to/file tokens from the input text.
+    Returns (cleaned_text, attachment_context).
+    """
+    found_paths = _INLINE_ATTACH_RE.findall(text)
+    if not found_paths:
+        return text, ""
+    cleaned = _INLINE_ATTACH_RE.sub("", text).strip()
+    _, ctx = _resolve_attachments(found_paths, user_id)
+    return cleaned, ctx
 
 
 def _format_step_preview(result: str, max_len: int = 120) -> str:
@@ -177,6 +233,10 @@ def main():
     # One-shot mode: execute prompt and exit
     if args.prompt:
         one_shot = " ".join(args.prompt)
+        if args.attach:
+            _, attach_ctx = _resolve_attachments(args.attach, agent.user_id)
+            if attach_ctx:
+                one_shot = f"{one_shot}\n\n{attach_ctx}"
         print("⏳ ...", end="\r")
         result = agent.run_task(one_shot)
         print(" " * 10, end="\r")
@@ -259,9 +319,18 @@ def main():
             # Inject prior conversation so the LLM retains context between tasks
             agent._injected_history = conversation_history[-10:]
 
+            # Handle @file: inline attachments
+            task_text, inline_ctx = _extract_inline_attachments(
+                user_input, agent.user_id
+            )
+            if inline_ctx:
+                task_text = f"{task_text}\n\n{inline_ctx}"
+            else:
+                task_text = user_input
+
             # Execute through CoreAgent
             print("⏳ ...", end="\r")
-            result = agent.run_task(user_input)
+            result = agent.run_task(task_text)
             print(" " * 10, end="\r")
 
             # Accumulate history for next turn (kept to last 10 messages)

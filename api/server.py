@@ -65,6 +65,18 @@ async def lifespan(app: FastAPI):
 
     logger.info("🚀 ARGOS API Server Initialized")
     init_db()
+
+    # Clean up upload files older than TTL on startup
+    try:
+        from src.config import UPLOAD_TTL_HOURS
+        from src.upload import cleanup_expired
+
+        removed = cleanup_expired(UPLOAD_TTL_HOURS)
+        if removed:
+            logger.info(f"Upload cleanup: removed {removed} expired file(s)")
+    except Exception as e:
+        logger.warning(f"Upload cleanup failed (non-fatal): {e}")
+
     yield
 
     # Shutdown
@@ -83,21 +95,20 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-from api.routes import admin, agent, dashboard, email, telegram
+from api.routes import admin, agent, dashboard, email, telegram, upload
 
 app.include_router(agent.router)
 app.include_router(email.router)
 app.include_router(telegram.router)
 app.include_router(admin.router)
 app.include_router(dashboard.router)
+app.include_router(upload.router)
 
 
 @app.get("/health", tags=["System"])
 async def health():
     return {"status": "ok", "timestamp": time.time()}
 
-
-import os
 
 from fastapi.staticfiles import StaticFiles
 

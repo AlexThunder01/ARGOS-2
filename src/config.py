@@ -56,3 +56,8 @@ DOCKER_EXEC_MEM_LIMIT = os.getenv("DOCKER_EXEC_MEM_LIMIT", "128m")
 DOCKER_EXEC_TIMEOUT = int(os.getenv("DOCKER_EXEC_TIMEOUT", "30"))
 SCRAPER_TIMEOUT = int(os.getenv("SCRAPER_TIMEOUT", "15"))
 os.makedirs(WORKSPACE_DIR, exist_ok=True)
+
+# Upload settings
+UPLOAD_MAX_BYTES: int = int(os.getenv("UPLOAD_MAX_BYTES", str(20 * 1024 * 1024)))  # 20 MB default
+UPLOAD_MAX_FILES: int = int(os.getenv("UPLOAD_MAX_FILES", "5"))
+UPLOAD_TTL_HOURS: int = int(os.getenv("UPLOAD_TTL_HOURS", "24"))

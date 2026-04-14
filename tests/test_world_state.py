@@ -63,6 +63,3 @@ def test_reset():
     assert s.step_count == 0
     assert s.action_history == []
     assert s.last_error is None
-
-
-

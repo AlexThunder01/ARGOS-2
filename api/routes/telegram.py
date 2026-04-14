@@ -3,9 +3,10 @@ import logging
 import os
 import re
 
+import httpx
 import pybreaker
 import requests
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from api.security import verify_api_key
@@ -28,10 +29,20 @@ def _get_telegram_agent():
     return _telegram_agent
 
 
+class TelegramAttachRequest(BaseModel):
+    file_id: str = Field(..., description="Telegram file_id to download")
+    filename: str = Field(..., description="Original filename (e.g. document.pdf, voice.ogg)")
+    user_id: int = Field(..., description="Telegram user_id (used for upload directory)")
+
+
 class TelegramChatRequest(BaseModel):
     user_id: int = Field(..., description="Telegram user_id")
     chat_id: int = Field(..., description="Telegram chat_id")
     text: str = Field(..., description="User message text")
+    attachments: list[str] = Field(
+        default_factory=list,
+        description="Optional upload_id UUIDs from /telegram/attach",
+    )
     first_name: str = Field(default="", description="Telegram first name")
     username: str = Field(default="", description="Telegram @username")
 
@@ -168,6 +179,59 @@ def _handle_telegram_command(text: str, user_id: int, config) -> str | None:
     return None
 
 
+_TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+
+
+@router.post("/attach", dependencies=[Depends(verify_api_key)])
+async def telegram_attach(req: TelegramAttachRequest):
+    """
+    Download a file from Telegram (by file_id) and register it as an upload.
+    Returns an opaque upload_id to be passed in TelegramChatRequest.attachments.
+
+    The n8n workflow calls this endpoint before /telegram/chat so that all
+    file-handling logic stays in Python (testable) rather than in n8n JS nodes.
+    """
+    if not _TELEGRAM_BOT_TOKEN:
+        raise HTTPException(status_code=500, detail="TELEGRAM_BOT_TOKEN not configured")
+
+    from src.upload import save_upload, validate_upload
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.get(
+                f"https://api.telegram.org/bot{_TELEGRAM_BOT_TOKEN}/getFile",
+                params={"file_id": req.file_id},
+            )
+            if not r.is_success:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Telegram getFile failed: {r.status_code}",
+                )
+            tg_path = r.json()["result"]["file_path"]
+            dl = await client.get(
+                f"https://api.telegram.org/file/bot{_TELEGRAM_BOT_TOKEN}/{tg_path}"
+            )
+            dl.raise_for_status()
+
+        try:
+            validate_upload(req.filename, len(dl.content))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+        upload_id = save_upload(
+            user_id=req.user_id,
+            filename=req.filename,
+            content=dl.content,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(f"[Telegram] attach failed for file_id={req.file_id}: {exc}")
+        raise HTTPException(status_code=502, detail=f"File download error: {exc}")
+
+    return {"upload_id": upload_id, "filename": req.filename}
+
+
 @router.post(
     "/chat", response_model=TelegramChatResponse, dependencies=[Depends(verify_api_key)]
 )
@@ -281,6 +345,12 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
     messages = [{"role": "system", "content": system_prompt}]
     messages.extend(recent_history)
     messages.append({"role": "user", "content": req.text})
+
+    if req.attachments:
+        from src.upload import build_attachment_context
+
+        attachment_ctx = build_attachment_context(req.attachments)
+        messages.append({"role": "system", "content": attachment_ctx})
 
     agent = _get_telegram_agent()
 

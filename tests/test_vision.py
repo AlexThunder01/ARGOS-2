@@ -66,9 +66,7 @@ def test_vlm_payload_has_image_content(mock_post):
     """The payload must include the base64 image data in the messages."""
     mock_response = mock_post.return_value
     mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "choices": [{"message": {"content": "A cat"}}]
-    }
+    mock_response.json.return_value = {"choices": [{"message": {"content": "A cat"}}]}
 
     _call_vlm("Describe", "abc123base64data")
 
@@ -95,4 +93,9 @@ def test_vlm_payload_has_image_content(mock_post):
 def test_vlm_no_api_key_returns_error():
     """Without API key, _call_vlm should fail gracefully."""
     result = _call_vlm("What is this?", "base64_img_data")
-    assert result is None or "error" in str(result).lower() or "invalid" in str(result).lower() or result == ""
+    assert (
+        result is None
+        or "error" in str(result).lower()
+        or "invalid" in str(result).lower()
+        or result == ""
+    )
