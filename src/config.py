@@ -46,6 +46,14 @@ HISTORY_LIMIT = 10
 RATE_LIMIT_PER_HOUR = int(os.getenv("RATE_LIMIT_PER_HOUR", "50"))
 RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "5"))
 
+# --- Circuit Breaker (Resilience) ---
+CIRCUIT_BREAKER_FAILURE_THRESHOLD = int(
+    os.getenv("CIRCUIT_BREAKER_FAILURE_THRESHOLD", "5")
+)
+CIRCUIT_BREAKER_TIMEOUT_SECONDS = int(
+    os.getenv("CIRCUIT_BREAKER_TIMEOUT_SECONDS", "60")
+)
+
 # Isolation Workspace (Fase 8)
 DOCKER_HOST = os.getenv("DOCKER_HOST", "tcp://localhost:2375")
 WORKSPACE_DIR = os.path.abspath(os.getenv("WORKSPACE_DIR", "./workspace"))

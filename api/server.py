@@ -23,15 +23,20 @@ logger = logging.getLogger("argos")
 
 
 def init_db():
-    try:
-        conn = get_connection()
-        if DB_BACKEND == "sqlite":
-            from src.db.migrations import run_sqlite_migrations
+    """Initialize database by running pending migrations.
 
-            run_sqlite_migrations(conn)
-        # PostgreSQL schema is auto-initialized via docker-entrypoint-initdb.d
+    Behavior: Fail-fast — if migrations fail, raises exception and server does not start.
+    This ensures deterministic database state at startup.
+    """
+    try:
+        from src.db.migrations import run_migrations
+
+        conn = get_connection()
+        run_migrations(conn)
+        logger.info("✅ All migrations applied successfully")
     except Exception as e:
-        print(f"❌ Failed to initialize database: {e}")
+        logger.error(f"❌ Database migration failed at startup: {e}")
+        raise  # FAIL-FAST: server does not start if migrations fail
 
 
 @asynccontextmanager
