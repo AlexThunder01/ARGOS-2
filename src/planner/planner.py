@@ -117,6 +117,8 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
                 # If done=True but no response text and an action is present,
                 # the model is confused — treat it as an action, not a final answer.
                 if done and "response" not in data and "action" in data:
+                    # INTENTIONAL: Model sent done=True with only action; fallback to action handling
+                    # This handles confused LLM output gracefully without losing the user's intent
                     pass  # fall through to action handling below
                 else:
                     # Risposta finale
