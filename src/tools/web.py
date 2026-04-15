@@ -1,8 +1,12 @@
 """Web search and system monitoring tools."""
 
+import logging
+
 import psutil
 
 from .helpers import _get_arg
+
+logger = logging.getLogger("argos")
 
 
 def _ddgs_search(q: str, max_results: int = 5) -> list[dict]:
@@ -69,8 +73,9 @@ def web_search_tool(query):
     if not results:
         try:
             results = _tavily_search(q)
-        except Exception:
-            pass  # Tavily also failed or not configured
+        except Exception as e:
+            logger.error(f"[web_search] Tavily fallback failed: {e}")
+            last_error = e
 
     if not results:
         return (
