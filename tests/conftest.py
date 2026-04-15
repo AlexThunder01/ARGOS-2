@@ -3,6 +3,9 @@ Shared pytest fixtures for the ARGOS-2 test suite.
 
 patch_db is autouse so every test automatically runs against an isolated
 in-memory SQLite database — no real DB required, no test pollution.
+
+Dual-backend support: Tests can be parametrized to run against both SQLite
+and PostgreSQL backends by using the db_backend fixture.
 """
 
 import os
@@ -56,6 +59,117 @@ def _create_test_db() -> sqlite3.Connection:
     """)
     conn.commit()
     return conn
+
+
+def pytest_generate_tests(metafunc):
+    """
+    Parametrize tests that use db_backend fixture to run against both
+    SQLite and PostgreSQL backends (if available).
+
+    For tests that explicitly request the db_backend fixture, this hook
+    generates test variants for each backend.
+    """
+    if "db_backend" in metafunc.fixturenames:
+        # Auto-parametrize: SQLite is always available, PostgreSQL is optional
+        backends = ["sqlite"]
+
+        # Try to detect if PostgreSQL is available
+        postgres_available = _check_postgres_available()
+        if postgres_available:
+            backends.append("postgres")
+
+        metafunc.parametrize("db_backend", backends)
+
+
+def _check_postgres_available() -> bool:
+    """Check if PostgreSQL test database is reachable.
+
+    Returns True if POSTGRES_HOST and connection succeeds, False otherwise.
+    Graceful degradation: if unavailable, only SQLite tests run.
+    """
+    postgres_host = os.environ.get("POSTGRES_HOST", "localhost")
+    postgres_user = os.environ.get("POSTGRES_USER", "postgres")
+    postgres_password = os.environ.get("POSTGRES_PASSWORD", "")
+    postgres_db = os.environ.get("POSTGRES_DB", "agente_test")
+
+    # If no password in env, assume PostgreSQL is not configured
+    if not postgres_password:
+        return False
+
+    try:
+        import psycopg
+
+        conn_string = f"postgresql://{postgres_user}:{postgres_password}@{postgres_host}/{postgres_db}"
+        conn = psycopg.connect(conn_string, timeout=2)
+        conn.close()
+        return True
+    except Exception:
+        return False
+
+
+@pytest.fixture
+def db_backend() -> str:
+    """
+    Backend identifier for tests that support dual-backend testing.
+
+    Fixture is used with pytest_generate_tests to parametrize tests
+    for both SQLite and PostgreSQL backends.
+
+    Returns: "sqlite" or "postgres"
+    """
+    # This fixture is parametrized by pytest_generate_tests
+    # The actual value is injected by pytest
+    pass  # Parametrized by pytest_generate_tests hook
+
+
+def _create_postgres_test_db(db_name: str):
+    """Create a PostgreSQL test connection with schema initialized.
+
+    Creates the connection and applies migrations for the test database.
+    """
+    try:
+        import psycopg
+
+        from src.db.migrations import run_postgres_migrations
+
+        postgres_host = os.environ.get("POSTGRES_HOST", "localhost")
+        postgres_user = os.environ.get("POSTGRES_USER", "postgres")
+        postgres_password = os.environ.get("POSTGRES_PASSWORD")
+
+        conn_string = f"postgresql://{postgres_user}:{postgres_password}@{postgres_host}/{db_name}"
+        conn = psycopg.connect(conn_string)
+
+        # Apply migrations
+        run_postgres_migrations(conn)
+
+        return conn
+    except Exception as e:
+        pytest.skip(f"PostgreSQL not available: {e}")
+
+
+@pytest.fixture
+def test_db(db_backend) -> object:
+    """
+    Test database connection fixture supporting both SQLite and PostgreSQL.
+
+    For tests using db_backend fixture, this provides an isolated database
+    connection appropriate to the backend being tested.
+
+    Returns:
+        sqlite3.Connection or psycopg.Connection depending on db_backend parameter
+    """
+    if db_backend == "postgres":
+        conn = _create_postgres_test_db("agente_test")
+    else:
+        # SQLite (default)
+        conn = _create_test_db()
+
+    yield conn
+
+    try:
+        conn.close()
+    except Exception:
+        pass
 
 
 @pytest.fixture(autouse=True)
