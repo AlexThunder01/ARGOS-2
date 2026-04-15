@@ -58,11 +58,11 @@ export default function ChatTerminal({ messages, isTyping, onSendMessage, error 
     e.preventDefault();
     if (!input.trim() || isTyping) return;
 
-    const uploadIds = pendingFiles
-      .filter(f => f.upload_id)
-      .map(f => f.upload_id);
+    const ready = pendingFiles.filter(f => f.upload_id);
+    const uploadIds = ready.map(f => f.upload_id);
+    const fileNames = ready.map(f => f.file.name);
 
-    onSendMessage(input, uploadIds);
+    onSendMessage(input, uploadIds, fileNames);
     setInput('');
     setPendingFiles([]);
   };
@@ -107,6 +107,14 @@ export default function ChatTerminal({ messages, isTyping, onSendMessage, error 
                   ▶ tool: {tc.function?.name || 'unknown'}(...)
                 </div>
               ))}
+
+              {msg.fileNames && msg.fileNames.length > 0 && (
+                <div className={styles.attachPreview}>
+                  {msg.fileNames.map((name, i) => (
+                    <span key={i} className={styles.attachChip}>📎 {name}</span>
+                  ))}
+                </div>
+              )}
 
               {msg.content && (
                 <div className={styles.bubble}>

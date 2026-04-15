@@ -25,13 +25,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+import src.agent as _agent_module
 from src.agent import (
+    MICRO_COMPACT_KEEP_RECENT,
     ArgosAgent,
     _count_tokens,
     _is_compactable_message,
-    MICRO_COMPACT_KEEP_RECENT,
 )
-import src.agent as _agent_module
 
 # ==========================================================================
 # _count_tokens
@@ -767,11 +767,17 @@ class TestIsCompactableMessage:
         assert _is_compactable_message(msg) is True
 
     def test_workspace_state_updated_system_message(self):
-        msg = {"role": "system", "content": "WORKSPACE STATE UPDATED:\nGit branch: main"}
+        msg = {
+            "role": "system",
+            "content": "WORKSPACE STATE UPDATED:\nGit branch: main",
+        }
         assert _is_compactable_message(msg) is True
 
     def test_current_workspace_state_system_message(self):
-        msg = {"role": "system", "content": "CURRENT WORKSPACE STATE:\nGit branch: main"}
+        msg = {
+            "role": "system",
+            "content": "CURRENT WORKSPACE STATE:\nGit branch: main",
+        }
         assert _is_compactable_message(msg) is True
 
     def test_regular_system_message_not_compactable(self):
@@ -779,11 +785,17 @@ class TestIsCompactableMessage:
         assert _is_compactable_message(msg) is False
 
     def test_json_tool_call_assistant_message(self):
-        msg = {"role": "assistant", "content": '{"action": {"tool": "list_files", "input": {}}}'}
+        msg = {
+            "role": "assistant",
+            "content": '{"action": {"tool": "list_files", "input": {}}}',
+        }
         assert _is_compactable_message(msg) is True
 
     def test_json_tool_call_with_leading_whitespace(self):
-        msg = {"role": "assistant", "content": '  {"action": {"tool": "read_file", "input": {"path": "/tmp/x"}}}'}
+        msg = {
+            "role": "assistant",
+            "content": '  {"action": {"tool": "read_file", "input": {"path": "/tmp/x"}}}',
+        }
         assert _is_compactable_message(msg) is True
 
     def test_final_response_assistant_message_not_compactable(self):
@@ -810,7 +822,10 @@ class TestMicroCompact:
         agent = ArgosAgent()
         for i in range(n_results):
             agent.history.append(
-                {"role": "assistant", "content": f'{{"action": {{"tool": "list_files", "input": {{}}}}}}'}
+                {
+                    "role": "assistant",
+                    "content": '{"action": {"tool": "list_files", "input": {}}}',
+                }
             )
             agent.history.append(
                 {"role": "user", "content": f"TOOL RESULT: result {i}"}
@@ -848,7 +863,8 @@ class TestMicroCompact:
         agent.micro_compact()
         # Last KEEP tool-result messages must NOT be "[cleared]"
         tool_results = [
-            m for m in agent.history
+            m
+            for m in agent.history
             if m.get("role") == "user" and "TOOL RESULT:" in m.get("content", "")
         ]
         # All surviving tool results still have original content
@@ -905,9 +921,9 @@ class TestTrimHistoryTiered:
         system_tokens = _count_tokens(agent.history[0]["content"])
         # Budget: system + exactly 10 extra tokens
         agent.token_budget = system_tokens + 10
-        agent.add_message("user", "A" * 40)    # ~10 tokens
+        agent.add_message("user", "A" * 40)  # ~10 tokens
         agent.add_message("assistant", "B" * 40)  # ~10 tokens
-        agent.add_message("user", "C" * 40)    # ~10 tokens
+        agent.add_message("user", "C" * 40)  # ~10 tokens
         agent.trim_history()
         # System must be preserved
         assert agent.history[0]["role"] == "system"

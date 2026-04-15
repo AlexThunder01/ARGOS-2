@@ -39,11 +39,14 @@ def client(monkeypatch, tmp_path):
     with _mock.patch("src.logging.otel.init_otel", return_value=None):
         with _mock.patch("src.logging.tracer.setup_tracer", return_value=None):
             from fastapi.testclient import TestClient
+
             from api.server import app
+
             yield TestClient(app, raise_server_exceptions=True)
 
 
 # ── POST /telegram/attach ──────────────────────────────────────────────────
+
 
 class TestTelegramAttach:
     def _make_request(self, client, file_id="abc123", filename="doc.pdf", user_id=42):
@@ -55,6 +58,7 @@ class TestTelegramAttach:
 
     def test_attach_without_api_key_returns_403(self, client, monkeypatch):
         import api.security as sec_module
+
         monkeypatch.setattr(sec_module, "_PERMISSIVE_MODE", False)
         monkeypatch.setattr(sec_module, "ARGOS_API_KEY", "test_key")
         res = client.post(
@@ -65,17 +69,15 @@ class TestTelegramAttach:
 
     def test_attach_with_missing_bot_token_returns_500(self, client, monkeypatch):
         monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "")
-        # Patch the module-level constant
-        import api.routes.telegram as tg_module
-        monkeypatch.setattr(tg_module, "_TELEGRAM_BOT_TOKEN", "")
         res = self._make_request(client)
         assert res.status_code == 500
         assert "not configured" in res.json()["detail"].lower()
 
     def test_attach_telegram_getfile_failure_returns_502(self, client, monkeypatch):
         """Simulate Telegram returning a non-success for getFile."""
-        import httpx
         from unittest.mock import AsyncMock, MagicMock, patch
+
+        import httpx
 
         async def _mock_get(*args, **kwargs):
             resp = MagicMock()
@@ -94,8 +96,9 @@ class TestTelegramAttach:
 
     def test_attach_invalid_filename_extension_returns_422(self, client, monkeypatch):
         """Simulate Telegram returning a valid file but filename is .exe."""
-        import httpx
         from unittest.mock import AsyncMock, MagicMock, patch
+
+        import httpx
 
         fake_content = b"MZ payload"
         call_count = {"n": 0}
@@ -150,6 +153,7 @@ class TestTelegramAttach:
 
 # ── POST /telegram/chat with attachments ──────────────────────────────────
 
+
 class TestTelegramChatWithAttachments:
     def test_chat_with_attachments_injects_context(self, client, monkeypatch):
         """Verify that attachments list is injected as system message."""
@@ -161,16 +165,24 @@ class TestTelegramChatWithAttachments:
         )
 
         # Patch the Telegram agent and DB calls (local imports inside the route)
-        with patch("src.telegram.db.db_get_user", return_value={"status": "approved", "msg_count_total": 1}), \
-             patch("src.telegram.db.db_get_profile", return_value={"display_name": "Test"}), \
-             patch("src.telegram.db.db_get_conversation_window", return_value=[]), \
-             patch("src.telegram.memory.retrieve_relevant_memories", return_value=[]), \
-             patch("src.telegram.db.db_get_open_tasks", return_value=[]), \
-             patch("src.telegram.db.db_increment_msg_count"), \
-             patch("src.telegram.db.db_save_conversation_turn"), \
-             patch("src.telegram.prompt.build_telegram_system_prompt", return_value="sys"), \
-             patch("src.workflows_config.get_workflows_config") as mock_cfg:
-
+        with (
+            patch(
+                "src.telegram.db.db_get_user",
+                return_value={"status": "approved", "msg_count_total": 1},
+            ),
+            patch(
+                "src.telegram.db.db_get_profile", return_value={"display_name": "Test"}
+            ),
+            patch("src.telegram.db.db_get_conversation_window", return_value=[]),
+            patch("src.telegram.memory.retrieve_relevant_memories", return_value=[]),
+            patch("src.telegram.db.db_get_open_tasks", return_value=[]),
+            patch("src.telegram.db.db_increment_msg_count"),
+            patch("src.telegram.db.db_save_conversation_turn"),
+            patch(
+                "src.telegram.prompt.build_telegram_system_prompt", return_value="sys"
+            ),
+            patch("src.workflows_config.get_workflows_config") as mock_cfg,
+        ):
             cfg = MagicMock()
             cfg.is_telegram_enabled = True
             cfg.telegram_max_input_length = 4000
@@ -197,7 +209,10 @@ class TestTelegramChatWithAttachments:
                     agent_mock = MagicMock()
                     agent_mock.think_with_context.side_effect = _fake_think
 
-                    with patch("api.routes.telegram._get_telegram_agent", return_value=agent_mock):
+                    with patch(
+                        "api.routes.telegram._get_telegram_agent",
+                        return_value=agent_mock,
+                    ):
                         res = client.post(
                             "/telegram/chat",
                             json={

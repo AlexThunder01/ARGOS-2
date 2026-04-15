@@ -67,13 +67,14 @@ class SessionMemory:
     def should_update(self) -> bool:
         """Returns True when the update threshold has been crossed."""
         return (
-            self._tool_call_count > 0
-            and self._tool_call_count % _UPDATE_EVERY_N == 0
+            self._tool_call_count > 0 and self._tool_call_count % _UPDATE_EVERY_N == 0
         )
 
     # ── Read / Write ──────────────────────────────────────────────────────
 
-    def update(self, history: list[dict], llm_call_fn: Callable[[list[dict]], str]) -> None:
+    def update(
+        self, history: list[dict], llm_call_fn: Callable[[list[dict]], str]
+    ) -> None:
         """
         Extracts current working state from `history` via `llm_call_fn` and
         writes it to the session memory file.
@@ -91,7 +92,9 @@ class SessionMemory:
             if not content or content.startswith(
                 ("API Error", "Connection Error", "LLM Error", "Error:")
             ):
-                logger.debug(f"[SessionMemory] LLM call returned error — skipping update")
+                logger.debug(
+                    "[SessionMemory] LLM call returned error — skipping update"
+                )
                 return
 
             self._last_content = content.strip()

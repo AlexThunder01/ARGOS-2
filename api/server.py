@@ -26,11 +26,9 @@ def init_db():
     try:
         conn = get_connection()
         if DB_BACKEND == "sqlite":
-            conn.execute("""CREATE TABLE IF NOT EXISTS pending_emails (
-                msg_id TEXT PRIMARY KEY,
-                payload TEXT
-            )""")
-            conn.commit()
+            from src.db.migrations import run_sqlite_migrations
+
+            run_sqlite_migrations(conn)
         # PostgreSQL schema is auto-initialized via docker-entrypoint-initdb.d
     except Exception as e:
         print(f"❌ Failed to initialize database: {e}")

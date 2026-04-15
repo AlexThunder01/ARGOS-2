@@ -30,15 +30,14 @@ def isolated_upload(tmp_path, monkeypatch):
     monkeypatch.setattr(upload_module, "_registry", {})
 
     # Patch _get_upload_dir to use tmp_path
-    monkeypatch.setattr(
-        upload_module, "_get_upload_dir", lambda: tmp_path / "uploads"
-    )
+    monkeypatch.setattr(upload_module, "_get_upload_dir", lambda: tmp_path / "uploads")
     # Patch _get_max_bytes to a small value (20 MB) for most tests
     monkeypatch.setattr(upload_module, "_get_max_bytes", lambda: 20 * 1024 * 1024)
     yield
 
 
 # ── validate_upload ────────────────────────────────────────────────────────
+
 
 def test_validate_accepts_pdf():
     validate_upload("report.pdf", 100)  # no error
@@ -70,6 +69,7 @@ def test_validate_exact_limit_is_ok(monkeypatch):
 
 
 # ── save_upload ────────────────────────────────────────────────────────────
+
 
 def test_save_upload_returns_uuid(tmp_path):
     uid = save_upload(user_id=1, filename="test.pdf", content=b"%PDF-1.4 fake")
@@ -107,6 +107,7 @@ def test_save_upload_rejects_invalid_extension():
 
 # ── resolve_upload_id ──────────────────────────────────────────────────────
 
+
 def test_resolve_returns_existing_path():
     uid = save_upload(user_id=0, filename="note.txt", content=b"hello")
     path = resolve_upload_id(uid)
@@ -127,6 +128,7 @@ def test_resolve_raises_if_file_deleted(tmp_path):
 
 
 # ── build_attachment_context ───────────────────────────────────────────────
+
 
 def test_build_context_contains_path_and_tool():
     uid = save_upload(user_id=0, filename="report.pdf", content=b"%PDF")
@@ -150,6 +152,7 @@ def test_build_context_unknown_id():
 
 
 # ── cleanup_expired ────────────────────────────────────────────────────────
+
 
 def test_cleanup_removes_expired(monkeypatch):
     uid = save_upload(user_id=0, filename="old.txt", content=b"old data")

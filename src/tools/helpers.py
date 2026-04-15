@@ -3,8 +3,22 @@
 import os
 
 # Paths outside this set are rejected by _normalize_path.
-# We allow the user's home directory tree only.
+# We allow the user's home directory tree and the upload workspace.
 _HOME = os.path.expanduser("~")
+
+
+def _get_allowed_roots() -> list[str]:
+    """Returns the list of sandbox roots allowed by _normalize_path."""
+    roots = [_HOME]
+    try:
+        from src.config import WORKSPACE_DIR
+
+        workspace = os.path.realpath(WORKSPACE_DIR)
+        if workspace not in roots:
+            roots.append(workspace)
+    except Exception:
+        pass
+    return roots
 
 
 def _get_desktop_path():
@@ -58,11 +72,14 @@ def _normalize_path(path_str):
     # Resolve symlinks and ".." components before the sandbox check
     real = os.path.realpath(candidate)
 
-    # Enforce that the resolved path stays inside $HOME
-    if not (real == _HOME or real.startswith(_HOME + os.sep)):
+    # Enforce that the resolved path stays inside an allowed root
+    allowed_roots = _get_allowed_roots()
+    if not any(
+        real == root or real.startswith(root + os.sep) for root in allowed_roots
+    ):
         raise ValueError(
             f"Path traversal attempt blocked: '{path_str}' resolves to '{real}' "
-            f"which is outside the allowed directory '{_HOME}'."
+            f"which is outside the allowed directories."
         )
 
     return real

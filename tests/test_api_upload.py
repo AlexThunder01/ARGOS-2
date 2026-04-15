@@ -41,11 +41,14 @@ def client(monkeypatch, tmp_path):
     with _mock.patch("src.logging.otel.init_otel", return_value=None):
         with _mock.patch("src.logging.tracer.setup_tracer", return_value=None):
             from fastapi.testclient import TestClient
+
             from api.server import app
+
             yield TestClient(app, raise_server_exceptions=True)
 
 
 # ── POST /api/upload ───────────────────────────────────────────────────────
+
 
 class TestUploadEndpoint:
     def test_upload_valid_pdf_returns_upload_id(self, client):
@@ -63,6 +66,7 @@ class TestUploadEndpoint:
 
     def test_upload_without_api_key_returns_403(self, client, monkeypatch):
         import api.security as sec_module
+
         monkeypatch.setattr(sec_module, "_PERMISSIVE_MODE", False)
         monkeypatch.setattr(sec_module, "ARGOS_API_KEY", "test_key")
         res = client.post(
@@ -102,6 +106,7 @@ class TestUploadEndpoint:
 
 # ── POST /run with attachments ─────────────────────────────────────────────
 
+
 class TestRunWithAttachments:
     def _upload_file(self, client):
         res = client.post(
@@ -114,6 +119,7 @@ class TestRunWithAttachments:
 
     def _make_fake_result(self):
         from unittest.mock import AsyncMock, MagicMock
+
         from src.core.engine import TaskResult
 
         result = MagicMock(spec=TaskResult)

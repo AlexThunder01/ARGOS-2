@@ -92,9 +92,7 @@ def compact_conversation(
     system_msg = history[0]
 
     try:
-        messages_to_summarize = history + [
-            {"role": "user", "content": COMPACT_PROMPT}
-        ]
+        messages_to_summarize = history + [{"role": "user", "content": COMPACT_PROMPT}]
         raw = llm_call_fn(messages_to_summarize)
 
         if not raw or raw.startswith(
@@ -114,7 +112,9 @@ def compact_conversation(
         summary = summary.strip()
 
         if not summary:
-            logger.warning("[Compact] Empty summary after stripping tags — keeping original")
+            logger.warning(
+                "[Compact] Empty summary after stripping tags — keeping original"
+            )
             return history
 
         logger.info(

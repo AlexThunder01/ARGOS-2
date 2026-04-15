@@ -92,16 +92,21 @@ CREATE INDEX IF NOT EXISTS idx_tg_tasks_user_status
 """
 
 
-def run():
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, timeout=10)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    conn.executescript(MIGRATION_SQL)
-    conn.commit()
-    conn.close()
-    print("✅ Migration 001_telegram_module completed successfully.")
-    print(f"   Database: {DB_PATH}")
+def run(conn=None):
+    """Apply migration. Accepts an existing sqlite3.Connection (runner mode)
+    or opens DB_PATH directly when called as a standalone script."""
+    if conn is None:
+        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+        conn = sqlite3.connect(DB_PATH, timeout=10)
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.executescript(MIGRATION_SQL)
+        conn.commit()
+        conn.close()
+        print("✅ Migration 001_telegram_module completed successfully.")
+        print(f"   Database: {DB_PATH}")
+    else:
+        conn.executescript(MIGRATION_SQL)
 
 
 if __name__ == "__main__":

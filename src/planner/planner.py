@@ -90,7 +90,9 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
         text = _ANALYSIS_RE.sub("", text).strip()
         if not text:
             # Model returned only an <analysis> block — treat as no structured output
-            logger.debug("[Planner] Response was only <analysis> — treating as final text")
+            logger.debug(
+                "[Planner] Response was only <analysis> — treating as final text"
+            )
             return PlannerDecision(
                 thought="(analysis block only, no JSON)",
                 tool=None,

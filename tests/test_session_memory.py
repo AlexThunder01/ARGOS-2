@@ -24,12 +24,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.core.session_memory import SessionMemory, _UPDATE_EVERY_N
-
+from src.core.session_memory import _UPDATE_EVERY_N, SessionMemory
 
 # ==========================================================================
 # Fixtures
 # ==========================================================================
+
 
 @pytest.fixture
 def tmp_memory(tmp_path) -> SessionMemory:
@@ -127,7 +127,10 @@ class TestUpdate:
         assert not tmp_memory._path.exists()
 
     def test_skips_when_history_too_short(self, tmp_memory):
-        short_history = [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}]
+        short_history = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hi"},
+        ]
         llm_fn = MagicMock(return_value="memory")
         tmp_memory.update(short_history, llm_fn)
         llm_fn.assert_not_called()
@@ -135,6 +138,7 @@ class TestUpdate:
     def test_does_not_crash_on_llm_exception(self, tmp_memory):
         def raising_fn(msgs):
             raise RuntimeError("network failure")
+
         tmp_memory.update(_make_history(), raising_fn)  # must not raise
 
 
@@ -154,12 +158,16 @@ class TestLoad:
         assert result == "cached content"
 
     def test_reads_from_disk_when_cache_empty(self, tmp_memory):
-        tmp_memory._path.write_text("<!-- Session memory — 2026-04-14 10:00 -->\ndisk content\n")
+        tmp_memory._path.write_text(
+            "<!-- Session memory — 2026-04-14 10:00 -->\ndisk content\n"
+        )
         result = tmp_memory.load()
         assert "disk content" in result
 
     def test_strips_html_comment_header(self, tmp_memory):
-        tmp_memory._path.write_text("<!-- Session memory — 2026-04-14 10:00 -->\nactual memory\n")
+        tmp_memory._path.write_text(
+            "<!-- Session memory — 2026-04-14 10:00 -->\nactual memory\n"
+        )
         result = tmp_memory.load()
         assert "<!--" not in result
         assert "actual memory" in result

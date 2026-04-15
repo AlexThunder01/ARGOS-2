@@ -380,7 +380,9 @@ class ArgosAgent:
             try:
                 from src.core.compaction import compact_conversation
 
-                new_history = compact_conversation(self.history, self._call_for_compaction)
+                new_history = compact_conversation(
+                    self.history, self._call_for_compaction
+                )
                 if len(new_history) < len(self.history):
                     self.history = new_history
                     self._compact_count += 1

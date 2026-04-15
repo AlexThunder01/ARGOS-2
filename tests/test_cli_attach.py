@@ -26,12 +26,15 @@ def _reset_upload(monkeypatch, tmp_path):
 def _import_helpers():
     """Import CLI helpers after sys.path is set up."""
     import importlib
+
     import scripts.main as cli
+
     importlib.reload(cli)
     return cli._resolve_attachments, cli._extract_inline_attachments
 
 
 # ── _resolve_attachments ───────────────────────────────────────────────────
+
 
 class TestResolveAttachments:
     def test_valid_file_returns_upload_id(self, tmp_path):
@@ -79,6 +82,7 @@ class TestResolveAttachments:
 
 
 # ── _extract_inline_attachments ────────────────────────────────────────────
+
 
 class TestExtractInlineAttachments:
     def test_extracts_at_file_token(self, tmp_path):

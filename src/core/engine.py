@@ -424,15 +424,10 @@ class CoreAgent:
         async def _emit_activity(stop: asyncio.Event) -> None:
             while True:
                 try:
-                    await asyncio.wait_for(
-                        asyncio.shield(stop.wait()), timeout=30.0
-                    )
+                    await asyncio.wait_for(asyncio.shield(stop.wait()), timeout=30.0)
                     return  # stop event fired
                 except asyncio.TimeoutError:
-                    msg = (
-                        f"[step {state.step_count}/{self.max_steps}] "
-                        f"{task[:60]}"
-                    )
+                    msg = f"[step {state.step_count}/{self.max_steps}] {task[:60]}"
                     logger.info(f"[ActivitySummary] {msg}")
                     if self.status_callback:
                         try:

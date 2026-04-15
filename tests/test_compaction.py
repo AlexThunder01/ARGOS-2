@@ -18,12 +18,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
-from src.core.compaction import compact_conversation, COMPACT_MIN_MESSAGES
-
+from src.core.compaction import COMPACT_MIN_MESSAGES, compact_conversation
 
 # ==========================================================================
 # Fixtures
 # ==========================================================================
+
 
 def _make_history(n_extra: int) -> list[dict]:
     """Returns a history with a system message and n_extra user/assistant pairs."""
@@ -55,7 +55,9 @@ This is the private reasoning block. It should be stripped.
 
 SUMMARY_WITH_TAGS = f"<summary>\n{GOOD_SUMMARY}\n</summary>"
 
-SUMMARY_WITH_BOTH = f"<analysis>\nreasoning\n</analysis>\n<summary>\n{GOOD_SUMMARY}\n</summary>"
+SUMMARY_WITH_BOTH = (
+    f"<analysis>\nreasoning\n</analysis>\n<summary>\n{GOOD_SUMMARY}\n</summary>"
+)
 
 
 # ==========================================================================

@@ -31,8 +31,12 @@ def _get_telegram_agent():
 
 class TelegramAttachRequest(BaseModel):
     file_id: str = Field(..., description="Telegram file_id to download")
-    filename: str = Field(..., description="Original filename (e.g. document.pdf, voice.ogg)")
-    user_id: int = Field(..., description="Telegram user_id (used for upload directory)")
+    filename: str = Field(
+        ..., description="Original filename (e.g. document.pdf, voice.ogg)"
+    )
+    user_id: int = Field(
+        ..., description="Telegram user_id (used for upload directory)"
+    )
 
 
 class TelegramChatRequest(BaseModel):
@@ -179,9 +183,6 @@ def _handle_telegram_command(text: str, user_id: int, config) -> str | None:
     return None
 
 
-_TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-
-
 @router.post("/attach", dependencies=[Depends(verify_api_key)])
 async def telegram_attach(req: TelegramAttachRequest):
     """
@@ -191,7 +192,8 @@ async def telegram_attach(req: TelegramAttachRequest):
     The n8n workflow calls this endpoint before /telegram/chat so that all
     file-handling logic stays in Python (testable) rather than in n8n JS nodes.
     """
-    if not _TELEGRAM_BOT_TOKEN:
+    bot_token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    if not bot_token:
         raise HTTPException(status_code=500, detail="TELEGRAM_BOT_TOKEN not configured")
 
     from src.upload import save_upload, validate_upload
@@ -199,7 +201,7 @@ async def telegram_attach(req: TelegramAttachRequest):
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.get(
-                f"https://api.telegram.org/bot{_TELEGRAM_BOT_TOKEN}/getFile",
+                f"https://api.telegram.org/bot{bot_token}/getFile",
                 params={"file_id": req.file_id},
             )
             if not r.is_success:
@@ -209,7 +211,7 @@ async def telegram_attach(req: TelegramAttachRequest):
                 )
             tg_path = r.json()["result"]["file_path"]
             dl = await client.get(
-                f"https://api.telegram.org/file/bot{_TELEGRAM_BOT_TOKEN}/{tg_path}"
+                f"https://api.telegram.org/file/bot{bot_token}/{tg_path}"
             )
             dl.raise_for_status()
 

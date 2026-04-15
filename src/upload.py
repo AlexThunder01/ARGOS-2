@@ -117,7 +117,9 @@ def validate_upload(filename: str, size: int) -> None:
     max_bytes = _get_max_bytes()
     if size > max_bytes:
         mb = max_bytes // (1024 * 1024)
-        raise ValueError(f"File too large (max {mb} MB, got {size // (1024 * 1024)} MB)")
+        raise ValueError(
+            f"File too large (max {mb} MB, got {size // (1024 * 1024)} MB)"
+        )
 
 
 def save_upload(user_id: int, filename: str, content: bytes) -> str:
