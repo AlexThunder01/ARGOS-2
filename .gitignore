@@ -125,3 +125,4 @@ Qwen3-TTS-local/
 !package-lock.json
 !tsconfig*.json
 !eslint.config.js
+.planning/
