@@ -8,7 +8,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.actions.base import ActionStatus
-from src.executor.executor import _classify_error, execute_with_retry
+from src.executor.executor import classify_error_from_http_or_message as _classify_error
+from src.executor.executor import execute_with_retry
 
 
 def test_execute_success():

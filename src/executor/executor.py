@@ -41,16 +41,38 @@ FATAL_KEYWORDS = [
 ]
 
 
-def _classify_error(message: str) -> bool:
+def classify_error_from_http_or_message(response_or_message) -> bool:
     """
-    Returns True if the error is transient and a retry is warranted.
-    Returns False if the error is permanent.
+    Returns True if error is transient (retry warranted).
+    Prefers HTTP status code if available; falls back to keyword check.
+
+    HTTP semantics:
+    - 4xx (Client Error): Permanent; don't retry
+    - 5xx (Server Error): Transient; retry
+    - No HTTP code: Keyword fallback
     """
+    # If it's an HTTP response with status code attribute
+    if hasattr(response_or_message, "status_code"):
+        status = response_or_message.status_code
+        if 400 <= status < 500:
+            return False  # 4xx → permanent (bad request, not found, forbidden)
+        elif 500 <= status < 600:
+            return True  # 5xx → transient (service error, gateway timeout)
+
+    # Fallback to message keyword check (for non-HTTP errors)
+    message = str(response_or_message)
     msg_lower = message.lower()
+
+    # Same keyword logic as before, but now explicit about fallback
     if any(kw in msg_lower for kw in FATAL_KEYWORDS):
         return False
     if any(kw in msg_lower for kw in RETRYABLE_KEYWORDS):
         return True
+
+    # Log unknown error classification for debugging
+    logger.warning(
+        f"[executor] Unknown error classification; treating as permanent: {message[:100]}"
+    )
     return False  # Unknown errors are not retried (fail-fast)
 
 
@@ -92,7 +114,7 @@ def execute_with_retry(
             result_str = str(result)
 
             if result_str.startswith(("Error", "Errore")):
-                is_retryable = _classify_error(result_str)
+                is_retryable = classify_error_from_http_or_message(result_str)
                 if is_retryable and attempt < max_retries:
                     wait = RETRY_DELAY_BASE * attempt
                     logger.warning(

@@ -22,9 +22,9 @@ def _ensure_tracking_table(conn) -> None:
     Supports both SQLite and PostgreSQL connections.
     Works with both sqlite3.Connection and psycopg Connection objects.
     """
-    conn_type_name = type(conn).__name__
+    conn_type_module = type(conn).__module__
 
-    if conn_type_name == "Connection" and hasattr(conn, "execute"):
+    if "psycopg" in conn_type_module:
         # PostgreSQL (psycopg) connection
         sql = """CREATE TABLE IF NOT EXISTS schema_migrations (
             version   INTEGER PRIMARY KEY,
@@ -51,9 +51,9 @@ def _applied_versions(conn) -> set[int]:
 
     Supports both SQLite and PostgreSQL connections.
     """
-    conn_type_name = type(conn).__name__
+    conn_type_module = type(conn).__module__
 
-    if conn_type_name == "Connection" and hasattr(conn, "cursor"):
+    if "psycopg" in conn_type_module:
         # PostgreSQL (psycopg) connection
         cursor = conn.cursor()
         cursor.execute("SELECT version FROM schema_migrations")
@@ -134,9 +134,9 @@ def run_migrations(conn) -> None:
     Raises:
         Exception: If any migration fails (fail-fast behavior)
     """
-    conn_type_name = type(conn).__name__
+    conn_type_module = type(conn).__module__
 
-    if conn_type_name == "Connection" and hasattr(conn, "cursor"):
+    if "psycopg" in conn_type_module:
         # PostgreSQL (psycopg) connection
         run_postgres_migrations(conn)
     else:

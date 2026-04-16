@@ -93,7 +93,14 @@ def _stream_filter_think(
         yield buffer
 
 
-from .config import LLM_BACKEND, LLM_MODEL
+from src.resilience.circuit_breaker import CircuitBreaker, CircuitBreakerOpen
+
+from .config import (
+    CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+    CIRCUIT_BREAKER_TIMEOUT_SECONDS,
+    LLM_BACKEND,
+    LLM_MODEL,
+)
 
 if TYPE_CHECKING:
     from src.tools.spec import ToolRegistry
@@ -183,6 +190,13 @@ def _split_anthropic_messages(messages: list[dict]) -> tuple[str, list[dict]]:
         else:
             user_msgs.append(m)
     return "\n".join(system_parts).strip(), user_msgs
+
+
+# --- Circuit Breaker (Resilience) ---
+_llm_circuit_breaker = CircuitBreaker(
+    failure_threshold=CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+    timeout_seconds=CIRCUIT_BREAKER_TIMEOUT_SECONDS,
+)
 
 
 class ArgosAgent:
