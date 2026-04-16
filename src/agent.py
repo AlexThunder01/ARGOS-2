@@ -437,11 +437,18 @@ class ArgosAgent:
         self.trim_history()
         try:
             if self.backend == "anthropic":
-                result = self._call_anthropic(self.history, temperature=0.0)
+                result = _llm_circuit_breaker.call(
+                    self._call_anthropic, self.history, temperature=0.0
+                )
             else:
-                result = self._call_openai_compatible(self.history, temperature=0.0)
+                result = _llm_circuit_breaker.call(
+                    self._call_openai_compatible, self.history, temperature=0.0
+                )
             self._last_llm_call_time = time.monotonic()
             return result
+        except CircuitBreakerOpen as e:
+            logger.error(f"[LLM] Circuit breaker open; LLM unavailable: {e}")
+            raise
         except Exception as e:
             return f"LLM Error: {e}"
 
@@ -569,13 +576,18 @@ class ArgosAgent:
         self.trim_history()
         try:
             if self.backend == "anthropic":
-                result = await self._call_anthropic_async(self.history, temperature=0.0)
+                result = await _llm_circuit_breaker.async_call(
+                    self._call_anthropic_async, self.history, temperature=0.0
+                )
             else:
-                result = await self._call_openai_compatible_async(
-                    self.history, temperature=0.0
+                result = await _llm_circuit_breaker.async_call(
+                    self._call_openai_compatible_async, self.history, temperature=0.0
                 )
             self._last_llm_call_time = time.monotonic()
             return result
+        except CircuitBreakerOpen as e:
+            logger.error(f"[LLM] Circuit breaker open; LLM unavailable: {e}")
+            raise
         except Exception as e:
             return f"LLM Error: {e}"
 

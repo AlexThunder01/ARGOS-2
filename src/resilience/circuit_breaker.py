@@ -133,6 +133,62 @@ class CircuitBreaker:
             self.failure_count = 0
             self.last_failure_time = None
 
+    async def async_call(self, fn, *args, **kwargs):
+        """Execute an async coroutine function with circuit breaker protection.
+
+        Same semantics as call(), but awaits fn(*args, **kwargs).
+        """
+        import asyncio
+
+        self._is_failure_window_expired()
+
+        if self.state == "open":
+            if self.half_open_time is None:
+                self.half_open_time = time.time()
+            elapsed = time.time() - self.half_open_time
+            if elapsed > self.timeout_seconds:
+                old_state = self.state
+                self.state = "half-open"
+                logger.warning(
+                    f"[CircuitBreaker] State transition: {old_state} → {self.state}"
+                )
+            else:
+                raise CircuitBreakerOpen(
+                    f"Circuit breaker is open (cooldown: {self.timeout_seconds - elapsed:.1f}s remaining)"
+                )
+
+        try:
+            result = await fn(*args, **kwargs)
+
+            if self.state == "half-open":
+                old_state = self.state
+                self.state = "closed"
+                self.failure_count = 0
+                self.last_failure_time = None
+                self.half_open_time = None
+                logger.info(
+                    f"[CircuitBreaker] State transition: {old_state} → {self.state}"
+                )
+
+            return result
+
+        except Exception:
+            self.failure_count += 1
+            self.last_failure_time = time.time()
+
+            if self.failure_count >= self.failure_threshold:
+                old_state = self.state
+                self.state = "open"
+                self.half_open_time = time.time()
+                logger.error(
+                    f"[CircuitBreaker] Circuit open after {self.failure_count} failures"
+                )
+                logger.warning(
+                    f"[CircuitBreaker] State transition: {old_state} → {self.state}"
+                )
+
+            raise
+
     def reset(self) -> None:
         """Manually reset circuit breaker to closed state.
 
