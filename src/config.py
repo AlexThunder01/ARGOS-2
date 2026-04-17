@@ -46,6 +46,9 @@ HISTORY_LIMIT = 10
 RATE_LIMIT_PER_HOUR = int(os.getenv("RATE_LIMIT_PER_HOUR", "50"))
 RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "5"))
 
+# --- n8n Integration ---
+N8N_BASE_URL = os.getenv("N8N_BASE_URL", "")  # e.g., "http://localhost:5678"
+
 # --- Circuit Breaker (Resilience) ---
 CIRCUIT_BREAKER_FAILURE_THRESHOLD = int(
     os.getenv("CIRCUIT_BREAKER_FAILURE_THRESHOLD", "5")

@@ -98,7 +98,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-from api.routes import admin, agent, dashboard, email, telegram, upload
+from api.routes import admin, agent, dashboard, email, health, telegram, upload
 
 app.include_router(agent.router)
 app.include_router(email.router)
@@ -106,11 +106,7 @@ app.include_router(telegram.router)
 app.include_router(admin.router)
 app.include_router(dashboard.router)
 app.include_router(upload.router)
-
-
-@app.get("/health", tags=["System"])
-async def health():
-    return {"status": "ok", "timestamp": time.time()}
+app.include_router(health.router)
 
 
 from fastapi.staticfiles import StaticFiles
