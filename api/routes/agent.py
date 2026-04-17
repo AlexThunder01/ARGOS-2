@@ -262,6 +262,13 @@ def _run_task_async_worker(
         f"⏳ Async Job [{job_id}] initialized for target webhook: {webhook_url}"
     )
 
+    # NEW: Re-validate webhook URL before use (defense in depth)
+    try:
+        _validate_webhook_url(webhook_url)
+    except ValueError as e:
+        logger.error(f"[SSRF] Webhook validation failed in worker: {e}")
+        return  # Fail silently, don't attempt to POST
+
     try:
         result: TaskResponse = _run_task_sync(task, req_conf, max_steps)
         payload = result.model_dump()
