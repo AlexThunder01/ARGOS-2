@@ -95,7 +95,7 @@ class HookRegistry:
             if h.event == event and (h.tools is None or tool_name in h.tools)
         ]
 
-    # ─── Fire methods ─────────────────────────────────────────────────────
+    # === Fire methods ===
 
     def fire_pre_tool(self, tool_name: str, tool_input: dict) -> HookResult:
         """
