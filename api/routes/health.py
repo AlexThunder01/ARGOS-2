@@ -11,7 +11,6 @@ Provides comprehensive status of all critical subsystems:
 
 import asyncio
 import logging
-import os
 from pathlib import Path
 
 import requests
