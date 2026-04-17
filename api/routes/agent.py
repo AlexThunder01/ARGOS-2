@@ -267,6 +267,34 @@ def _run_task_async_worker(
         payload = result.model_dump()
         payload["job_id"] = job_id
 
+        # NEW: n8n credential validation (D-02)
+        # If credential_id is present in payload and becomes None, fail immediately
+        cred_id = payload.get("n8n_credential_id")
+        if "n8n_credential_id" in payload and cred_id is None:
+            error_msg = "n8n credential creation returned None cred_id — aborting workflow activation"
+            logger.error(f"[n8n] {error_msg}")
+            raise ValueError(error_msg)
+
+        # NEW: n8n OAuth2 authorization check (D-03)
+        import os
+
+        try:
+            from src.config import N8N_BASE_URL
+
+            n8n_base = N8N_BASE_URL
+            if n8n_base:  # Only check if n8n is configured
+                oauth_status_url = f"{n8n_base.rstrip('/')}/api/v1/oauth2/authorize"
+                oauth_resp = requests.get(oauth_status_url, timeout=3)
+                if oauth_resp.status_code not in (200, 204):
+                    error_msg = f"n8n OAuth2 authorization failed: HTTP {oauth_resp.status_code}"
+                    logger.error(f"[n8n] {error_msg}")
+                    raise ValueError(error_msg)
+                logger.info("[n8n] OAuth2 authorization verified")
+        except requests.RequestException as e:
+            error_msg = f"n8n OAuth2 check failed: {e}"
+            logger.error(f"[n8n] {error_msg}")
+            raise ValueError(error_msg)
+
         logger.info(f"📤 Dispatching Job result [{job_id}] to {webhook_url}")
         resp = requests.post(webhook_url, json=payload, timeout=10)
         if resp.status_code >= 400:
