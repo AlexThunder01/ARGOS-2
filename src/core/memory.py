@@ -159,12 +159,33 @@ def retrieve_relevant_memories(
 # ==========================================================================
 
 
-def should_extract_memory(user_msg: str, msg_count: int) -> bool:
-    """Determines whether memory extraction should run based on debounce rules."""
-    if len(user_msg) > EXTRACT_MIN_LENGTH:
+def should_extract_memory(
+    user_msg: str,
+    msg_count: int,
+    step_count: int = 0,  # NEW: optional, number of steps in current task
+    task_success: bool = False,  # NEW: optional, whether task completed successfully
+) -> bool:
+    """Determines whether memory extraction should run.
+
+    Signal-based: if multi-step task completed successfully.
+    Time-based: if N messages elapsed.
+    Length-based: if message is long enough.
+    """
+    # Signal-based: successful multi-step task (high-value learning) (D-17)
+    if step_count > 5 and task_success:
+        logger.info(
+            f"[Memory] Signal-based trigger: step_count={step_count}, success={task_success}"
+        )
         return True
+
+    # Time-based: every EXTRACT_EVERY_N messages
     if msg_count > 0 and msg_count % EXTRACT_EVERY_N == 0:
         return True
+
+    # Length-based: long message is information-dense
+    if len(user_msg) > EXTRACT_MIN_LENGTH:
+        return True
+
     return False
 
 

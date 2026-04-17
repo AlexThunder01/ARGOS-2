@@ -376,6 +376,8 @@ class CoreAgent:
                         task,
                         relevant_memories,
                         self._task_count,
+                        step_count=state.step_count,  # NEW: pass current step count
+                        task_success=loop_success,  # NEW: pass task success flag
                     )
 
             self._git_context_cache = None
@@ -865,7 +867,12 @@ class CoreAgent:
             ][:top_k]
 
     def _maybe_extract_memories(
-        self, user_message: str, existing_memories: list[dict], task_count: int = 1
+        self,
+        user_message: str,
+        existing_memories: list[dict],
+        task_count: int = 1,
+        step_count: int = 0,  # NEW
+        task_success: bool = False,  # NEW
     ):
         if self.memory_mode == "session":
             if len(user_message) > EXTRACT_MIN_LENGTH:
@@ -881,7 +888,9 @@ class CoreAgent:
                     should_extract_memory,
                 )
 
-                if should_extract_memory(user_message, task_count):
+                if should_extract_memory(
+                    user_message, task_count, step_count, task_success
+                ):
                     facts = extract_memories_from_text(
                         user_message, existing_memories, self._llm.call_lightweight
                     )
