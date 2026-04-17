@@ -44,13 +44,13 @@ client = TestClient(app, raise_server_exceptions=False)
 # ==========================================================================
 
 
-def _mock_task_result(response="Fatto!", success=True, steps=0):
+def _mock_task_result(task="test task", response="Fatto!", success=True, steps=0):
     """Crea un TaskResult mock con i campi minimi."""
     from src.core.engine import TaskResult
 
     return TaskResult(
         success=success,
-        task="test task",
+        task=task,
         response=response,
         steps_executed=steps,
         history=[],
