@@ -638,9 +638,7 @@ class CoreAgent:
 
             # ── Tool RAG hit rate logging (OBS-02) ──────────────────────────
             if self._current_task_filtered_registry:
-                recommended_tools = [
-                    spec.name for spec in self._current_task_filtered_registry
-                ]
+                recommended_tools = self._current_task_filtered_registry.names()
                 hit = tool_name in recommended_tools if recommended_tools else False
                 miss_tools = [t for t in recommended_tools if t != tool_name]
 
