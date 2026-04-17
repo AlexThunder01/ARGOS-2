@@ -160,5 +160,5 @@ async def health_check():
             "checks": checks,
             "timestamp": asyncio.get_event_loop().time(),
         },
-        status_code=200,
+        status_code=503 if has_error else 200,
     )
