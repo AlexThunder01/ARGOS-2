@@ -72,6 +72,11 @@ def check_embedding_dimensions():
 
     blob = db_get_one_memory_blob()
     if blob is not None:
+        if not isinstance(blob, bytes) or len(blob) < 4:
+            raise RuntimeError(
+                f"Invalid embedding blob in database: expected bytes, got {type(blob).__name__}. "
+                f"Database may be corrupted."
+            )
         stored_dim = len(blob) // 4  # float32 is 4 bytes
         if stored_dim != EMBEDDING_DIM:
             raise RuntimeError(
