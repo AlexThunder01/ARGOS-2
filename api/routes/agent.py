@@ -203,18 +203,6 @@ async def _run_task_async_core(
     """
     agent = _get_agent(require_confirmation, max_steps)
 
-    # Honour open circuit without blocking
-    if llm_breaker.current_state == pybreaker.STATE_OPEN:
-        return TaskResponse(
-            success=False,
-            task=task,
-            steps_executed=0,
-            result="LLM Service unavailable (Circuit Breaker OPEN)",
-            history=[],
-            backend=agent.backend,
-            model=agent.model,
-        )
-
     try:
         result = await agent.run_task_async(task)
         # Record success so the breaker can close from HALF_OPEN
@@ -229,7 +217,13 @@ async def _run_task_async_core(
             backend=agent.backend,
             model=agent.model,
         )
-    except Exception:
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        # Timeout or cancellation — don't treat as LLM failure
+        logger.warning("[CoreAgent] Task execution cancelled or timed out")
+        raise
+    except Exception as e:
+        # Any other exception should propagate to FastAPI's error handler
+        logger.exception(f"[CoreAgent] Unexpected error in run_task_async: {e}")
         raise
 
     return _task_result_to_response(result, agent, task)
