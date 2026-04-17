@@ -59,6 +59,8 @@ CIRCUIT_BREAKER_TIMEOUT_SECONDS = int(
 
 # --- Observability & Tool Control ---
 TOOL_RAG_TOP_K = int(os.getenv("ARGOS_TOOL_RAG_TOP_K", "12"))
+COST_PER_TOKEN = float(os.getenv("ARGOS_COST_PER_TOKEN", "0.0"))
+TOOL_TIMEOUT_SECONDS = int(os.getenv("ARGOS_TOOL_TIMEOUT_SECONDS", "30"))
 
 # Isolation Workspace (Fase 8)
 DOCKER_HOST = os.getenv("DOCKER_HOST", "tcp://localhost:2375")

@@ -35,6 +35,9 @@ class WorldState:
     last_error: Optional[str] = None
     confidence: float = 1.0
     task_done: bool = False
+    # NEW: Cost tracking and observability
+    tokens_used: int = 0  # Total tokens consumed in this task/session
+    estimated_cost_usd: float = 0.0  # Cost = tokens_used * COST_PER_TOKEN
 
     def record_action(self, tool: str, input: Any, result: str, success: bool):
         """Registra un'azione nel history e incrementa lo step counter."""
@@ -77,6 +80,11 @@ class WorldState:
 
         if self.last_error:
             lines.append(f"  ⚠️  Last error: {self.last_error[:100]}")
+
+        # NEW: Include tokens/cost only if present (optional observability)
+        if self.tokens_used > 0:
+            lines.append(f"  Tokens used: {self.tokens_used}")
+            lines.append(f"  Estimated cost: ${self.estimated_cost_usd:.4f}")
 
         return "\n".join(lines)
 
