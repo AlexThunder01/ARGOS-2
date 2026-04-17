@@ -101,6 +101,15 @@ def execute_with_retry(
     if hasattr(spec_or_fn, "executor"):
         spec = spec_or_fn
         validated = spec.validate_input(tool_input)
+
+        # NEW: Check validation didn't produce None
+        if validated is None:
+            return ActionResult(
+                status=ActionStatus.FAILED,
+                message=f"Tool '{spec.name}' validation returned None",
+                should_retry=False,
+            )
+
         executor_fn = spec.executor
         name = spec.name
     else:
