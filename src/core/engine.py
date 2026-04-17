@@ -272,6 +272,9 @@ class CoreAgent:
         # Tool RAG top-k configuration (read from env var or config default)
         self._tool_rag_top_k = TOOL_RAG_TOP_K
 
+        # Store filtered registry for hit rate logging in _reasoning_loop
+        self._current_task_filtered_registry = None
+
         logger.debug(
             f"[CoreAgent] Initialized | memory={memory_mode} | "
             f"user_id={self.user_id} | backend={self._llm.backend} | "
@@ -633,6 +636,22 @@ class CoreAgent:
                 action_result.success,
             )
 
+            # ── Tool RAG hit rate logging (OBS-02) ──────────────────────────
+            if self._current_task_filtered_registry:
+                recommended_tools = [
+                    spec.name for spec in self._current_task_filtered_registry
+                ]
+                hit = tool_name in recommended_tools if recommended_tools else False
+                miss_tools = [t for t in recommended_tools if t != tool_name]
+
+                logger.info(
+                    f"[ToolRAG] task={self.user_id} "
+                    f"recommended={len(recommended_tools)} "
+                    f"used={tool_name} "
+                    f"hit={hit} "
+                    f"miss_tools={miss_tools}"
+                )
+
             # ── Git context refresh after filesystem mutations ──────────────
             if (
                 action_result.success
@@ -758,6 +777,8 @@ class CoreAgent:
         filtered_registry = self._llm._registry.select_for_query(
             task, top_k=self._tool_rag_top_k
         )
+        # Store for hit rate logging in _reasoning_loop
+        self._current_task_filtered_registry = filtered_registry
         self._llm._init_history_with_tools(filtered_registry.build_prompt_block())
 
         # Load user profile and inject display name
