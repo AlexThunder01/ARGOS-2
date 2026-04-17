@@ -25,6 +25,11 @@ class WorldState:
     """
     Stato esplicito del mondo percepito da ARGOS.
     Centralizza tutto il contesto necessario al planner.
+
+    Cost tracking (NEW):
+    - tokens_used: Cumulative token count for current task (rough estimate: len(response)/4)
+    - estimated_cost_usd: Computed as tokens_used * COST_PER_TOKEN from config
+    - Updated only during reasoning loop, reset per task
     """
 
     current_task: str = ""
@@ -36,8 +41,12 @@ class WorldState:
     confidence: float = 1.0
     task_done: bool = False
     # NEW: Cost tracking and observability
-    tokens_used: int = 0  # Total tokens consumed in this task/session
-    estimated_cost_usd: float = 0.0  # Cost = tokens_used * COST_PER_TOKEN
+    tokens_used: int = (
+        0  # Total tokens consumed in this task (rough estimate: len(response)/4)
+    )
+    estimated_cost_usd: float = (
+        0.0  # Cost = tokens_used * COST_PER_TOKEN (read from config)
+    )
 
     def record_action(self, tool: str, input: Any, result: str, success: bool):
         """Registra un'azione nel history e incrementa lo step counter."""
