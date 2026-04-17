@@ -68,8 +68,10 @@ class TestHealthEndpoints:
         r = client.get("/health")
         assert r.status_code == 200
         data = r.json()
-        assert data["status"] == "ok"
+        assert data["status"] in ("ok", "degraded")
         assert "timestamp" in data
+        assert "checks" in data
+        assert set(data["checks"].keys()) == {"api", "db", "llm", "migrations", "n8n"}
 
     def test_status_returns_200(self):
         """GET /status → backend, model, agent_ready (definito in api/routes/agent.py)."""

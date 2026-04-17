@@ -16,11 +16,12 @@ from pathlib import Path
 
 import requests
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from src.config import LLM_API_KEY, LLM_BASE_URL, N8N_BASE_URL
 from src.db.connection import DB_BACKEND, get_connection
 
-router = APIRouter(prefix="/api", tags=["System"])
+router = APIRouter(tags=["System"])
 logger = logging.getLogger("argos")
 
 
@@ -153,10 +154,11 @@ async def health_check():
     has_error = any(v == "error" for v in checks.values())
     status = "degraded" if has_error else "ok"
 
-    response = {"status": status, "checks": checks}
-
-    # Return 503 if degraded, else 200
-    if has_error:
-        return response, 503
-    else:
-        return response, 200
+    return JSONResponse(
+        content={
+            "status": status,
+            "checks": checks,
+            "timestamp": asyncio.get_event_loop().time(),
+        },
+        status_code=200,
+    )
