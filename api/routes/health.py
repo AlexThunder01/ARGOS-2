@@ -110,16 +110,27 @@ def _check_migrations() -> str:
 
 def _check_n8n() -> str:
     """
-    Check n8n configuration status.
-    If N8N_BASE_URL is set, returns 'configured'.
-    If empty, returns 'unconfigured'.
+    Check n8n configuration and connectivity.
+    Returns 'configured', 'unconfigured', or 'error'.
     """
-    if N8N_BASE_URL:
-        logger.info(f"[n8n] Configured at {N8N_BASE_URL}")
-        return "configured"
-    else:
+    if not N8N_BASE_URL:
         logger.info("[n8n] Not configured (N8N_BASE_URL is empty)")
         return "unconfigured"
+
+    try:
+        resp = requests.get(
+            f"{N8N_BASE_URL.rstrip('/')}/api/v1/health",
+            timeout=3,
+        )
+        if resp.status_code < 400:
+            logger.info(f"[n8n] Health check passed at {N8N_BASE_URL}")
+            return "configured"
+        else:
+            logger.error(f"[n8n] Health check failed: HTTP {resp.status_code}")
+            return "error"
+    except requests.RequestException as e:
+        logger.error(f"[n8n] Health check failed: {e}")
+        return "error"
 
 
 @router.get("/health")
