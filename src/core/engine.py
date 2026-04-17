@@ -32,7 +32,7 @@ from threading import Lock
 from typing import Callable, Generator, Optional, Set
 
 from src.agent import ArgosAgent
-from src.config import TOOL_RAG_TOP_K
+from src.config import COST_PER_TOKEN, TOOL_RAG_TOP_K
 from src.core.memory import EXTRACT_MIN_LENGTH
 from src.core.session_memory import SessionMemory
 from src.executor.executor import execute_with_retry
@@ -457,6 +457,22 @@ class CoreAgent:
 
         for step_num in range(self.max_steps):
             raw = await self._llm.think_async()
+
+            # NEW: Extract token usage for cost tracking (ARCH-01, D-14, D-15)
+            tokens_this_call = 0
+            # Estimate tokens from response length (rough heuristic: ~4 chars per token)
+            if raw and not raw.startswith(("Error", "API Error", "Connection Error")):
+                tokens_this_call = len(raw) // 4
+
+            state.tokens_used += tokens_this_call
+            state.estimated_cost_usd = state.tokens_used * COST_PER_TOKEN
+
+            logger.info(
+                f"[Cost] task={self.user_id} "
+                f"tokens_this_call={tokens_this_call} "
+                f"tokens_total={state.tokens_used} "
+                f"estimated_cost=${state.estimated_cost_usd:.6f}"
+            )
 
             # ── Post-compact cleanup ───────────────────────────────────────
             # If Tier-2 structured compaction ran inside think_async, the history
