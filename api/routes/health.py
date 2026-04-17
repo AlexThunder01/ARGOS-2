@@ -17,7 +17,13 @@ import requests
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from src.config import LLM_API_KEY, LLM_BASE_URL, N8N_BASE_URL
+from src.config import (
+    LLM_API_KEY,
+    LLM_BASE_URL,
+    LLM_HEALTH_CHECK_TIMEOUT,
+    N8N_BASE_URL,
+    N8N_CHECK_TIMEOUT,
+)
 from src.db.connection import DB_BACKEND, get_connection
 
 router = APIRouter(tags=["System"])
@@ -55,7 +61,7 @@ def _check_llm() -> str:
         resp = requests.get(
             f"{base_url}/v1/models",
             headers=headers,
-            timeout=3,
+            timeout=LLM_HEALTH_CHECK_TIMEOUT,
         )
         if resp.status_code < 400:
             logger.info("[LLM] Health check passed")
@@ -119,7 +125,7 @@ def _check_n8n() -> str:
     try:
         resp = requests.get(
             f"{N8N_BASE_URL.rstrip('/')}/api/v1/health",
-            timeout=3,
+            timeout=N8N_CHECK_TIMEOUT,
         )
         if resp.status_code < 400:
             logger.info(f"[n8n] Health check passed at {N8N_BASE_URL}")

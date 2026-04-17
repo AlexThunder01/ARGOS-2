@@ -23,7 +23,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from api.security import verify_api_key
-from src.config import LLM_BACKEND, LLM_MODEL
+from src.config import LLM_BACKEND, LLM_MODEL, WEBHOOK_TIMEOUT_SECONDS
 from src.core import CoreAgent
 
 router = APIRouter(tags=["Agent"])
@@ -298,7 +298,7 @@ def _run_task_async_worker(
             raise ValueError(error_msg)
 
         logger.info(f"📤 Dispatching Job result [{job_id}] to {webhook_url}")
-        resp = requests.post(webhook_url, json=payload, timeout=10)
+        resp = requests.post(webhook_url, json=payload, timeout=WEBHOOK_TIMEOUT_SECONDS)
         if resp.status_code >= 400:
             logger.error(
                 f"❌ Webhook dispatch failed for Job [{job_id}]: HTTP {resp.status_code} - {resp.text}"

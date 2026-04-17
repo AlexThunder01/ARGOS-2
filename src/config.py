@@ -49,6 +49,11 @@ RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "5"))
 # --- n8n Integration ---
 N8N_BASE_URL = os.getenv("N8N_BASE_URL", "")  # e.g., "http://localhost:5678"
 
+# --- Timeouts (seconds) ---
+WEBHOOK_TIMEOUT_SECONDS = int(os.getenv("WEBHOOK_TIMEOUT_SECONDS", "10"))
+LLM_HEALTH_CHECK_TIMEOUT = int(os.getenv("LLM_HEALTH_CHECK_TIMEOUT", "3"))
+N8N_CHECK_TIMEOUT = int(os.getenv("N8N_CHECK_TIMEOUT", "3"))
+
 # --- Circuit Breaker (Resilience) ---
 CIRCUIT_BREAKER_FAILURE_THRESHOLD = int(
     os.getenv("CIRCUIT_BREAKER_FAILURE_THRESHOLD", "5")
