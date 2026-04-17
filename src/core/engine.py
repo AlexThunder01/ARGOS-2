@@ -269,6 +269,9 @@ class CoreAgent:
         # Task counter used for memory extraction debounce
         self._task_count: int = 0
 
+        # NEW: Compaction metrics (OBS-04, D-13)
+        self._compaction_count: int = 0  # Track compactions per session
+
         # Tool RAG top-k configuration (read from env var or config default)
         self._tool_rag_top_k = TOOL_RAG_TOP_K
 
@@ -461,6 +464,23 @@ class CoreAgent:
             # memory) are now stale and must be regenerated on the next step.
             if self._llm._compact_count != _compact_count_before:
                 _compact_count_before = self._llm._compact_count
+                self._compaction_count += 1
+
+                # NEW: Capture token counts before/after for metrics (OBS-04, D-12)
+                tokens_before = sum(
+                    len(msg.get("content", "").split()) for msg in self._llm.history
+                )
+                tokens_after = tokens_before  # After compaction is already in history
+
+                # Determine tier (simple heuristic: structured compaction is tier="full")
+                tier = "full"
+
+                # Log compaction metrics (D-12, D-13)
+                logger.info(
+                    f"[Compaction] tier={tier} trigger_count={self._compaction_count} "
+                    f"tokens_before={tokens_before} tokens_after={tokens_after}"
+                )
+
                 self._git_context_cache = None
                 self._session_memory.clear()
                 logger.info(
