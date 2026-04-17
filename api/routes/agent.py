@@ -51,15 +51,16 @@ def _get_agent(require_confirmation: bool, max_steps: int) -> "CoreAgent":
     key = (require_confirmation, max_steps)
     with _agent_cache_lock:
         if key not in _agent_cache:
-            if len(_agent_cache) >= _AGENT_CACHE_MAX:
-                # Evict the oldest entry (insertion-order dict, Python 3.7+)
-                oldest_key = next(iter(_agent_cache))
-                del _agent_cache[oldest_key]
             _agent_cache[key] = CoreAgent(
                 memory_mode="off",
                 require_confirmation=require_confirmation,
                 max_steps=max_steps,
             )
+            # NEW: Evict oldest if cache exceeded (not before)
+            while len(_agent_cache) > _AGENT_CACHE_MAX:
+                oldest_key = next(iter(_agent_cache))
+                del _agent_cache[oldest_key]
+                logger.debug(f"[AgentCache] Evicted {oldest_key}")
     return _agent_cache[key]
 
 
