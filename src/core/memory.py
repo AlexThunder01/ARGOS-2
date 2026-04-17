@@ -153,6 +153,12 @@ def retrieve_relevant_memories(
     results.sort(key=lambda x: x["similarity"], reverse=True)
     top_results = results[:top_k]
 
+    if len(top_results) < top_k:
+        logger.debug(
+            f"[Memory] Requested {top_k} results but found only {len(top_results)} "
+            f"above similarity threshold {min_similarity}"
+        )
+
     if top_results:
         db_update_memory_access([r["id"] for r in top_results])
 
