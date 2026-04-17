@@ -35,6 +35,9 @@ class HookResult:
     allowed: bool = True  # False se almeno un PreToolUse hook ha bloccato
     block_reason: str = ""  # Messaggio del hook che ha bloccato
     errors: list[str] = field(default_factory=list)  # Eccezioni non fatali
+    transformed_result: Optional[str] = (
+        None  # NEW: Hook can return transformed result (D-20)
+    )
 
 
 @dataclass
@@ -129,17 +132,27 @@ class HookRegistry:
         """
         Esegue tutti i POST_TOOL_USE o POST_TOOL_FAILURE hook.
         Le eccezioni non sono fatali.
+        Se un hook ritorna una stringa non-None, viene usata come transformed_result.
         """
         event = HookEvent.POST_TOOL_USE if success else HookEvent.POST_TOOL_FAILURE
         hook_result = HookResult()
         for hook in self._matching(event, tool_name):
             try:
-                hook.fn(
+                # NEW: Capture return value from hook (D-20, D-21)
+                returned = hook.fn(
                     tool_name=tool_name,
                     tool_input=tool_input,
                     result=result,
                     success=success,
                 )
+
+                # NEW: If hook returns a non-None string, use it as transformed result (D-21, D-22)
+                if returned is not None and isinstance(returned, str):
+                    hook_result.transformed_result = returned
+                    # First transformation wins; other hooks see original result
+                    logger.info(
+                        f"[Hooks] POST_TOOL_USE transformation applied by hook for {tool_name}"
+                    )
             except Exception as e:
                 msg = f"Hook '{hook.name}' raised {type(e).__name__}: {e}"
                 hook_result.errors.append(msg)

@@ -650,13 +650,20 @@ class CoreAgent:
                 )
 
             # ── PostToolUse hooks (offloaded — may do I/O) ────────────────
-            await asyncio.to_thread(
+            hook_result = await asyncio.to_thread(
                 HOOK_REGISTRY.fire_post_tool,
                 tool_name,
                 tool_input or {},
                 action_result.message,
                 action_result.success,
             )
+
+            # NEW: Apply hook transformation if returned (D-20, D-22)
+            if hook_result.transformed_result is not None:
+                logger.info(
+                    f"[Engine] Applying transformed result from hooks: {tool_name}"
+                )
+                action_result.message = hook_result.transformed_result
 
             # ── Tool RAG hit rate logging (OBS-02) ──────────────────────────
             if self._current_task_filtered_registry:
