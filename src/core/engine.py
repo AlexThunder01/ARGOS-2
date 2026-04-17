@@ -32,6 +32,7 @@ from threading import Lock
 from typing import Callable, Generator, Optional, Set
 
 from src.agent import ArgosAgent
+from src.config import TOOL_RAG_TOP_K
 from src.core.memory import EXTRACT_MIN_LENGTH
 from src.core.session_memory import SessionMemory
 from src.executor.executor import execute_with_retry
@@ -267,6 +268,9 @@ class CoreAgent:
 
         # Task counter used for memory extraction debounce
         self._task_count: int = 0
+
+        # Tool RAG top-k configuration (read from env var or config default)
+        self._tool_rag_top_k = TOOL_RAG_TOP_K
 
         logger.debug(
             f"[CoreAgent] Initialized | memory={memory_mode} | "
@@ -742,8 +746,6 @@ class CoreAgent:
     # LLM Context Builder (shared by run_task and run_task_async)
     # ==========================================================================
 
-    _TOOL_RAG_TOP_K = 12
-
     def _build_llm_context(self, task: str, relevant_memories: list[dict]) -> None:
         """
         Initialises the LLM history for a new task.
@@ -754,7 +756,7 @@ class CoreAgent:
         so both paths always receive the same context.
         """
         filtered_registry = self._llm._registry.select_for_query(
-            task, top_k=self._TOOL_RAG_TOP_K
+            task, top_k=self._tool_rag_top_k
         )
         self._llm._init_history_with_tools(filtered_registry.build_prompt_block())
 
