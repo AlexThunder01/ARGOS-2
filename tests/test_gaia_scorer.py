@@ -48,3 +48,11 @@ def test_normalize_str_removes_punct():
 
 def test_normalize_number_removes_dollar():
     assert normalize_number_str("$1,234") == 1234.0
+
+
+def test_list_match_semicolon():
+    assert question_scorer("cat; dog", "cat; dog") is True
+
+
+def test_list_mismatch_semicolon():
+    assert question_scorer("cat; fish", "cat; dog") is False
