@@ -11,6 +11,8 @@ from contextlib import asynccontextmanager
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import src.config  # noqa: F401 — loads .env before any other local module reads os.environ
+
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
@@ -28,15 +30,19 @@ def init_db():
     Behavior: Fail-fast — if migrations fail, raises exception and server does not start.
     This ensures deterministic database state at startup.
     """
-    try:
-        from src.db.migrations import run_migrations
+    from src.db.migrations import run_migrations
 
-        conn = get_connection()
+    conn = get_connection()
+    try:
         run_migrations(conn)
         logger.info("✅ All migrations applied successfully")
     except Exception as e:
         logger.error(f"❌ Database migration failed at startup: {e}")
         raise  # FAIL-FAST: server does not start if migrations fail
+    finally:
+        if DB_BACKEND == "postgres":
+            from src.db.connection import return_pg_connection
+            return_pg_connection(conn)
 
 
 @asynccontextmanager
@@ -66,8 +72,8 @@ async def lifespan(app: FastAPI):
             logger.warning(f"🐘 Async pool init failed (sync fallback active): {e}")
             app.state.db_pool = None
 
-    logger.info("🚀 ARGOS API Server Initialized")
     init_db()
+    logger.info("🚀 ARGOS API Server Initialized")
 
     # Clean up upload files older than TTL on startup
     try:

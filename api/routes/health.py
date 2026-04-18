@@ -49,7 +49,9 @@ def _check_db() -> str:
 def _check_llm() -> str:
     """
     Check LLM connectivity with lightweight ping.
-    Queries {LLM_BASE_URL}/v1/models with 3s timeout.
+    Queries {LLM_BASE_URL}/models with 3s timeout.
+    LLM_BASE_URL already contains the version prefix (e.g. /v1), so we
+    append only /models — not /v1/models — to avoid double-versioning.
     Returns 'ok' or 'error'.
     """
     try:
@@ -59,7 +61,7 @@ def _check_llm() -> str:
             headers["Authorization"] = f"Bearer {LLM_API_KEY}"
 
         resp = requests.get(
-            f"{base_url}/v1/models",
+            f"{base_url}/models",
             headers=headers,
             timeout=LLM_HEALTH_CHECK_TIMEOUT,
         )
