@@ -4,7 +4,8 @@ import string
 
 def is_float(element) -> bool:
     try:
-        float(element)
+        normalized = str(element).replace("$", "").replace("%", "").replace(",", "")
+        float(normalized)
         return True
     except (ValueError, TypeError):
         return False
@@ -31,10 +32,11 @@ def normalize_str(input_str: str, remove_punct: bool = True) -> str:
 def question_scorer(model_answer: str, ground_truth: str) -> bool:
     if is_float(ground_truth):
         try:
-            normalized = normalize_number_str(model_answer)
+            normalized_model = normalize_number_str(model_answer)
+            normalized_gt = normalize_number_str(ground_truth)
         except ValueError:
             return False
-        return normalized == float(ground_truth)
+        return normalized_model == normalized_gt
 
     if any(char in ground_truth for char in [",", ";"]):
         delimiters = [","] if "," in ground_truth else [";"]

@@ -56,3 +56,14 @@ def test_list_match_semicolon():
 
 def test_list_mismatch_semicolon():
     assert question_scorer("cat; fish", "cat; dog") is False
+
+
+def test_is_float_with_commas():
+    from eval.scorer import is_float
+
+    assert is_float("1,234.56") is True
+    assert is_float("1,000") is True
+
+
+def test_numeric_ground_truth_with_comma():
+    assert question_scorer("1234.56", "1,234.56") is True

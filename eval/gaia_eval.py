@@ -20,7 +20,8 @@ def build_prompt(task: dict, attachment_path: str | None = None) -> str:
 
 
 def extract_answer(response: str) -> str:
-    return response.strip()
+    lines = response.strip().split("\n")
+    return next((line.strip() for line in lines if line.strip()), "")
 
 
 def score_task(model_answer: str, ground_truth: str) -> bool:

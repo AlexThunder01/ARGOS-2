@@ -41,3 +41,11 @@ def test_score_task_correct():
 def test_score_task_wrong():
     result = score_task(model_answer="London", ground_truth="Paris")
     assert result is False
+
+
+def test_extract_answer_first_line_only():
+    assert extract_answer("Paris\n\nBased on research...") == "Paris"
+
+
+def test_extract_answer_empty_lines():
+    assert extract_answer("\n\nParis") == "Paris"
