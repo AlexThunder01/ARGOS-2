@@ -20,3 +20,24 @@ def test_build_prompt_with_attachment():
     assert "Summarize the document." in result
     assert "/tmp/report.pdf" in result
     assert ANSWER_SUFFIX in result
+
+
+from eval.gaia_eval import extract_answer, score_task
+
+
+def test_extract_answer_plain():
+    assert extract_answer("The answer is Paris.") == "The answer is Paris."
+
+
+def test_extract_answer_strips_whitespace():
+    assert extract_answer("  42  ") == "42"
+
+
+def test_score_task_correct():
+    result = score_task(model_answer="Paris", ground_truth="Paris")
+    assert result is True
+
+
+def test_score_task_wrong():
+    result = score_task(model_answer="London", ground_truth="Paris")
+    assert result is False
