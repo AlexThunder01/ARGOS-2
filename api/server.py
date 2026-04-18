@@ -11,11 +11,10 @@ from contextlib import asynccontextmanager
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import src.config  # noqa: F401 — loads .env before any other local module reads os.environ
-
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
+import src.config  # noqa: F401 — loads .env before any other local module reads os.environ
 from api.security import verify_api_key
 from src.db.connection import DB_BACKEND, get_connection
 from src.logging.otel import init_otel
@@ -42,6 +41,7 @@ def init_db():
     finally:
         if DB_BACKEND == "postgres":
             from src.db.connection import return_pg_connection
+
             return_pg_connection(conn)
 
 

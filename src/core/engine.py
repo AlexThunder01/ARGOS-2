@@ -873,7 +873,11 @@ class CoreAgent:
 
         if self._injected_history:
             for msg in self._injected_history:
-                role = "assistant" if msg.get("role") == "agent" else msg.get("role", "user")
+                role = (
+                    "assistant"
+                    if msg.get("role") == "agent"
+                    else msg.get("role", "user")
+                )
                 self._llm.add_message(role, msg["content"])
 
         self._llm.add_message("user", task)
