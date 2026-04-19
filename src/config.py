@@ -1,80 +1,81 @@
 """
-Infrastructure & secrets configuration — loaded from .env / environment variables.
+Backward-compatibility shim.
 
-BOUNDARY: this module owns anything that cannot change at runtime without a restart:
-API keys, DB connection strings, model names, resource limits, feature flags.
-Behavioral settings that operators adjust without restarting the server (tone of voice,
-conversation window, auto-approve, etc.) live in workflows_config.py (YAML, hot-reload).
+All config values are now defined in src/settings.py (ArgosSettings).
+This module re-exports them so existing imports don't break.
 """
 
 import os
 
-from dotenv import load_dotenv
+from src.settings import get_settings as _gs
 
-# Carica il file .env dalla root del progetto
-load_dotenv()
+_s = _gs()
 
 # --- Base LLM (Text & Reasoning) ---
-LLM_BACKEND = os.getenv("LLM_BACKEND", "openai-compatible").lower()
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1")
-LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-LLM_API_KEY_2 = os.getenv("LLM_API_KEY_2", "")
-LLM_MODEL = os.getenv("LLM_MODEL", "llama-3.3-70b-versatile")
-LLM_LIGHTWEIGHT_MODEL = os.getenv("LLM_LIGHTWEIGHT_MODEL", "llama-3.1-8b-instant")
+LLM_BACKEND = _s.llm_backend
+LLM_BASE_URL = _s.llm_base_url
+LLM_API_KEY = _s.llm_api_key
+LLM_API_KEY_2 = _s.llm_api_key_2
+LLM_MODEL = _s.llm_model
+LLM_LIGHTWEIGHT_MODEL = _s.llm_lightweight_model
 
 # --- Vision LLM ---
-VISION_BASE_URL = os.getenv("VISION_BASE_URL", LLM_BASE_URL)
-VISION_API_KEY = os.getenv("VISION_API_KEY", LLM_API_KEY)
-VISION_MODEL = os.getenv("VISION_MODEL", "meta-llama/llama-4-scout-17b-16e-instruct")
+VISION_BASE_URL = _s.vision_base_url or _s.llm_base_url
+VISION_API_KEY = _s.vision_api_key or _s.llm_api_key
+VISION_MODEL = _s.vision_model
 
 # --- Embeddings (RAG) ---
-EMBEDDING_BASE_URL = os.getenv("EMBEDDING_BASE_URL", "https://api.groq.com/openai/v1")
-EMBEDDING_API_KEY = os.getenv("EMBEDDING_API_KEY", "")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nomic-embed-text-v1.5")
-EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "768"))
+EMBEDDING_BASE_URL = _s.embedding_base_url
+EMBEDDING_API_KEY = _s.embedding_api_key
+EMBEDDING_MODEL = _s.embedding_model
+EMBEDDING_DIM = _s.embedding_dim
 
 # --- STT (Speech-to-Text) ---
-STT_BACKEND = os.getenv("STT_BACKEND", "groq").lower()
-STT_CUSTOM_URL = os.getenv("STT_CUSTOM_URL", "")
-STT_CUSTOM_API_KEY = os.getenv("STT_CUSTOM_API_KEY", "")
+STT_BACKEND = _s.stt_backend
+STT_CUSTOM_URL = _s.stt_custom_url
+STT_CUSTOM_API_KEY = _s.stt_custom_api_key
 
-# Settings Sistema
-ENABLE_VOICE = os.getenv("ENABLE_VOICE", "False").lower() == "true"
-HISTORY_LIMIT = 10
+# --- Features ---
+ENABLE_VOICE = _s.enable_voice
+HISTORY_LIMIT = _s.history_limit
 
-# Rate Limiting
-RATE_LIMIT_PER_HOUR = int(os.getenv("RATE_LIMIT_PER_HOUR", "50"))
-RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE", "5"))
+# --- Rate Limiting ---
+RATE_LIMIT_PER_HOUR = _s.rate_limit_per_hour
+RATE_LIMIT_PER_MINUTE = _s.rate_limit_per_minute
 
 # --- n8n Integration ---
-N8N_BASE_URL = os.getenv("N8N_BASE_URL", "")  # e.g., "http://localhost:5678"
+N8N_BASE_URL = _s.n8n_base_url
 
 # --- Timeouts (seconds) ---
-WEBHOOK_TIMEOUT_SECONDS = int(os.getenv("WEBHOOK_TIMEOUT_SECONDS", "10"))
-LLM_HEALTH_CHECK_TIMEOUT = int(os.getenv("LLM_HEALTH_CHECK_TIMEOUT", "3"))
-N8N_CHECK_TIMEOUT = int(os.getenv("N8N_CHECK_TIMEOUT", "3"))
+WEBHOOK_TIMEOUT_SECONDS = _s.webhook_timeout_seconds
+LLM_HEALTH_CHECK_TIMEOUT = _s.llm_health_check_timeout
+N8N_CHECK_TIMEOUT = _s.n8n_check_timeout
 
 # --- Circuit Breaker (Resilience) ---
-CIRCUIT_BREAKER_FAILURE_THRESHOLD = int(os.getenv("CIRCUIT_BREAKER_FAILURE_THRESHOLD", "5"))
-CIRCUIT_BREAKER_TIMEOUT_SECONDS = int(os.getenv("CIRCUIT_BREAKER_TIMEOUT_SECONDS", "60"))
+CIRCUIT_BREAKER_FAILURE_THRESHOLD = _s.circuit_breaker_failure_threshold
+CIRCUIT_BREAKER_TIMEOUT_SECONDS = _s.circuit_breaker_timeout_seconds
 
 # --- Observability & Tool Control ---
-TOOL_RAG_TOP_K = int(os.getenv("ARGOS_TOOL_RAG_TOP_K", "12"))
-COST_PER_TOKEN = float(os.getenv("ARGOS_COST_PER_TOKEN", "0.0"))
-TOOL_TIMEOUT_SECONDS = int(os.getenv("ARGOS_TOOL_TIMEOUT_SECONDS", "30"))
+TOOL_RAG_TOP_K = _s.tool_rag_top_k
+COST_PER_TOKEN = _s.cost_per_token
+TOOL_TIMEOUT_SECONDS = _s.tool_timeout_seconds
 
-# Isolation Workspace (Fase 8)
-DOCKER_HOST = os.getenv("DOCKER_HOST", "tcp://localhost:2375")
-WORKSPACE_DIR = os.path.abspath(os.getenv("WORKSPACE_DIR", "./workspace"))
-# HOST_WORKSPACE_DIR: path on the Docker host machine that maps to /workspace inside the container.
-# Falls back to WORKSPACE_DIR (absolute) so local runs without explicit config work out of the box.
-HOST_WORKSPACE_DIR = os.path.abspath(os.getenv("HOST_WORKSPACE_DIR") or WORKSPACE_DIR)
-DOCKER_EXEC_MEM_LIMIT = os.getenv("DOCKER_EXEC_MEM_LIMIT", "128m")
-DOCKER_EXEC_TIMEOUT = int(os.getenv("DOCKER_EXEC_TIMEOUT", "30"))
-SCRAPER_TIMEOUT = int(os.getenv("SCRAPER_TIMEOUT", "15"))
+# --- Isolation Workspace (Fase 8) ---
+DOCKER_HOST = _s.docker_host
+WORKSPACE_DIR = os.path.abspath(_s.workspace_dir)
+HOST_WORKSPACE_DIR = os.path.abspath(_s.host_workspace_dir or _s.workspace_dir)
+DOCKER_EXEC_MEM_LIMIT = _s.docker_exec_mem_limit
+DOCKER_EXEC_TIMEOUT = _s.docker_exec_timeout
+SCRAPER_TIMEOUT = _s.scraper_timeout
+
+# --- Upload settings ---
+UPLOAD_MAX_BYTES = _s.upload_max_bytes
+UPLOAD_MAX_FILES = _s.upload_max_files
+UPLOAD_TTL_HOURS = _s.upload_ttl_hours
+
+# --- Security & Observability (Phase 4) ---
+ARGOS_PARANOID_MODE = _s.argos_paranoid_mode
+ARGOS_PERMISSION_AUDIT = _s.argos_permission_audit
+
+# Create workspace directory if it doesn't exist
 os.makedirs(WORKSPACE_DIR, exist_ok=True)
-
-# Upload settings
-UPLOAD_MAX_BYTES: int = int(os.getenv("UPLOAD_MAX_BYTES", str(20 * 1024 * 1024)))  # 20 MB default
-UPLOAD_MAX_FILES: int = int(os.getenv("UPLOAD_MAX_FILES", "5"))
-UPLOAD_TTL_HOURS: int = int(os.getenv("UPLOAD_TTL_HOURS", "24"))
