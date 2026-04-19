@@ -13,6 +13,7 @@ Usage:
 """
 
 import argparse
+import logging
 import os
 import re
 import subprocess
@@ -29,8 +30,6 @@ from src.logging.tracer import setup_tracer
 from src.logging_config import configure_json_logging
 from src.utils import print_banner
 
-# Configure JSON structured logging
-configure_json_logging()
 
 # ==========================================================================
 # CLI Security Gate — Interactive (y/N) Prompt
@@ -102,6 +101,11 @@ Memory Modes:
         nargs="*",
         default=None,
         help="Optional one-shot prompt (skips interactive loop)",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable verbose debug logging to console",
     )
     return parser.parse_args()
 
@@ -232,6 +236,7 @@ def _format_step_preview(result: str, max_len: int = 120) -> str:
 
 def main():
     args = parse_args()
+    configure_json_logging(level=logging.DEBUG if args.debug else logging.WARNING)
 
     # Determine memory mode
     if args.memory:

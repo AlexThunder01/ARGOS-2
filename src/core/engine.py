@@ -518,7 +518,7 @@ class CoreAgent:
             state.tokens_used += tokens_this_call
             state.estimated_cost_usd = state.tokens_used * COST_PER_TOKEN
 
-            logger.info(
+            logger.debug(
                 "cost_tracking",
                 extra={
                     "task_user_id": self.user_id,

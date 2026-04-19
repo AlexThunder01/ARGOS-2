@@ -25,6 +25,7 @@ def setup_tracer(log_dir: str = "logs") -> logging.Logger:
 
     logger = logging.getLogger("argos")
     logger.setLevel(logging.DEBUG)
+    logger.propagate = False
 
     # Prevent duplicate handlers if called multiple times
     if logger.handlers:
