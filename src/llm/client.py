@@ -4,6 +4,7 @@ LiteLLM-based async LLM client for Argos.
 Single responsibility: wrap LiteLLM acompletion/stream calls into clean
 dataclasses. All retry, key rotation, and provider routing logic lives here.
 """
+
 from __future__ import annotations
 
 import json
@@ -12,7 +13,12 @@ from dataclasses import dataclass, field
 from typing import AsyncGenerator, Optional
 
 from litellm import acompletion
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 logger = logging.getLogger("argos")
 

@@ -15,7 +15,10 @@ If the model produces free-form text (final response), it is treated as "done: t
 import logging
 import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    from src.llm.client import LLMResponse
 
 logger = logging.getLogger("argos")
 
@@ -249,6 +252,36 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
         response=text,
         raw=raw_response,
     )
+
+
+def parse_litellm_response(response: "LLMResponse") -> list[PlannerDecision]:
+    """
+    Converts a LLMResponse (from src/llm/client.py) into a list of PlannerDecisions.
+
+    Primary path: if response.tool_calls is non-empty, each call becomes a
+    PlannerDecision with done=False. Parallel calls produce multiple decisions.
+
+    Fallback path: if response.content is set (no tool calls), delegates to the
+    legacy parse_planner_response() so JSON-format responses still work.
+    """
+    if response.tool_calls:
+        return [
+            PlannerDecision(
+                thought="",
+                tool=tc.name,
+                tool_input=tc.arguments,
+                confidence=1.0,
+                done=False,
+                response=None,
+                raw=f"tool_call:{tc.id}",
+            )
+            for tc in response.tool_calls
+        ]
+
+    # No native tool calls — fall back to text/JSON planner
+    content = response.content or ""
+    decision = parse_planner_response(content)
+    return [decision]
 
 
 def build_system_prompt_suffix() -> str:

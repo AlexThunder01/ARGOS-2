@@ -18,6 +18,7 @@ dependencies = [
 ]
 
 [tool.pytest.ini_options]
+asyncio_mode = "auto"
 addopts = "-m 'not integration'"
 markers = [
     "integration: Integration tests that require running external services (n8n, Docker)",

@@ -1,4 +1,5 @@
 """Tests for src/llm/client.py — LiteLLM wrapper."""
+
 import json
 import os
 import sys
@@ -55,7 +56,12 @@ async def test_complete_single_tool_call():
     with patch("src.llm.client.acompletion", new=AsyncMock(return_value=mock_response)):
         result = await complete(
             [{"role": "user", "content": "list /tmp"}],
-            tools=[{"type": "function", "function": {"name": "list_files", "parameters": {}}}],
+            tools=[
+                {
+                    "type": "function",
+                    "function": {"name": "list_files", "parameters": {}},
+                }
+            ],
         )
 
     assert len(result.tool_calls) == 1
@@ -69,6 +75,7 @@ async def test_complete_single_tool_call():
 @pytest.mark.asyncio
 async def test_complete_parallel_tool_calls():
     """complete() parses multiple parallel tool calls."""
+
     def _make_tc(call_id, name, args):
         tc = MagicMock()
         tc.id = call_id
