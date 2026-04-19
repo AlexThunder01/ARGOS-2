@@ -23,7 +23,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.config import ENABLE_VOICE
 from src.core import CoreAgent
 from src.logging.tracer import setup_tracer
+from src.logging_config import configure_json_logging
 from src.utils import print_banner
+
+# Configure JSON structured logging
+configure_json_logging()
 
 # ==========================================================================
 # CLI Security Gate — Interactive (y/N) Prompt

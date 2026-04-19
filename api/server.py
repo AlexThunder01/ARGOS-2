@@ -46,6 +46,10 @@ def init_db():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from src.logging_config import configure_json_logging
+
+    configure_json_logging()
+
     setup_tracer()
 
     # Initialize OpenTelemetry tracing
