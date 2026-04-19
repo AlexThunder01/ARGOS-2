@@ -15,7 +15,10 @@ Usage:
 import argparse
 import os
 import re
+import subprocess
 import sys
+import time
+import urllib.request
 
 # Project root on sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -156,6 +159,63 @@ def _extract_inline_attachments(text: str, user_id: int) -> tuple[str, str]:
     return cleaned, ctx
 
 
+def _ensure_ollama_ready() -> None:
+    """Start Ollama and pull the embedding model if not already available.
+
+    Only runs when EMBEDDING_BASE_URL points to a local Ollama instance.
+    Failures are non-fatal — memory will just warn and skip embedding ops.
+    """
+    from src.config import EMBEDDING_BASE_URL, EMBEDDING_MODEL
+
+    if not EMBEDDING_BASE_URL or (
+        "localhost" not in EMBEDDING_BASE_URL and "127.0.0.1" not in EMBEDDING_BASE_URL
+    ):
+        return  # remote or unconfigured — nothing to manage
+
+    # Derive the Ollama root URL (strip /v1 suffix if present)
+    base = EMBEDDING_BASE_URL.rstrip("/")
+    if base.endswith("/v1"):
+        base = base[:-3]
+    health_url = f"{base}/api/tags"
+
+    def _is_running() -> bool:
+        try:
+            urllib.request.urlopen(health_url, timeout=2)
+            return True
+        except Exception:
+            return False
+
+    if not _is_running():
+        print("⚙️  Starting Ollama...", flush=True)
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        for _ in range(15):
+            time.sleep(1)
+            if _is_running():
+                break
+        else:
+            print("⚠️  Ollama did not start in time — memory embeddings unavailable.")
+            return
+
+    # Check if the model is already pulled
+    try:
+        with urllib.request.urlopen(health_url, timeout=5) as resp:
+            import json as _json
+
+            data = _json.loads(resp.read())
+        pulled = [m.get("name", "").split(":")[0] for m in data.get("models", [])]
+        model_base = EMBEDDING_MODEL.split(":")[0]
+        if model_base not in pulled:
+            print(f"⚙️  Pulling embedding model {EMBEDDING_MODEL} (first run)...", flush=True)
+            subprocess.run(["ollama", "pull", EMBEDDING_MODEL], check=False)
+    except Exception:
+        pass
+
+
 def _format_step_preview(result: str, max_len: int = 120) -> str:
     """Formats a tool result for single-line terminal display.
 
@@ -183,6 +243,9 @@ def main():
 
     print_banner()
     logger = setup_tracer()
+
+    if memory_mode == "persistent":
+        _ensure_ollama_ready()
 
     # Initialize CoreAgent
     try:
