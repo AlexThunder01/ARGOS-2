@@ -339,14 +339,14 @@ class ArgosAgent:
         self._last_llm_call_time = time.monotonic()
 
         from src.config import LLM_API_KEY, LLM_BASE_URL
-        from src.tools.registry import REGISTRY
-
-        tools = REGISTRY.as_openai_tools()
 
         try:
             return await llm_complete(
                 messages=self.history,
-                tools=tools if tools else None,
+                # Tools are described in the system prompt (text format).
+                # Native tool schema passing is skipped to avoid conflicts with
+                # models that inject their own internal tools (e.g. "json").
+                tools=None,
                 model=self.model,
                 temperature=0.0,
                 api_key=LLM_API_KEY or None,

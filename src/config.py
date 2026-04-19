@@ -7,6 +7,12 @@ This module re-exports them so existing imports don't break.
 
 import os
 
+from dotenv import load_dotenv
+
+# Load .env into os.environ so modules using os.environ.get() directly
+# (e.g. src/db/connection.py) still see the correct values.
+load_dotenv()
+
 from src.settings import get_settings as _gs
 
 _s = _gs()

@@ -52,6 +52,14 @@ def _build_kwargs(
     api_base: str | None,
     stream: bool = False,
 ) -> dict[str, object]:
+    # LiteLLM always strips the leading "openai/" provider prefix before sending
+    # the model name to a custom api_base. To preserve names that already contain
+    # a slash (e.g. "openai/gpt-oss-120b" or "meta-llama/llama-4-scout"), we
+    # prepend "openai/" unconditionally — LiteLLM strips it, the endpoint receives
+    # the correct full name. This also adds the required prefix for bare names.
+    if api_base:
+        model = f"openai/{model}"
+
     kwargs: dict[str, object] = {
         "model": model,
         "messages": messages,
