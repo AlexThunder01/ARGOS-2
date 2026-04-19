@@ -20,7 +20,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.actions.base import ActionResult, ActionStatus
 from src.core.engine import (
     DIMINISHING_STEPS,
     DIMINISHING_THRESHOLD,
@@ -138,16 +137,16 @@ class TestReasoningLoop:
     def test_loop_single_tool_then_done(self):
         """Un tool step seguito da done=true → 1 step_record, success=True."""
         agent = _make_agent()
-        success_result = ActionResult(status=ActionStatus.SUCCESS, message="echo ok")
 
         with (
             patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think,
-            patch("src.core.engine.execute_with_retry", return_value=success_result),
+            patch("src.core.engine.execute_with_retry_async", new_callable=AsyncMock) as mock_exec,
         ):
             mock_think.side_effect = [
                 _tool_response("test_echo"),
                 _done_response("Tutto fatto."),
             ]
+            mock_exec.return_value = "echo ok"
             response, records, success = _run_loop(agent)
 
         assert success is True
@@ -172,7 +171,6 @@ class TestReasoningLoop:
     def test_loop_max_steps_without_done(self):
         """Se l'LLM non dice mai done, il loop si ferma al max_steps."""
         agent = _make_agent(max_steps=3)
-        success_result = ActionResult(status=ActionStatus.SUCCESS, message="ok")
 
         # La risposta deve essere >= DIMINISHING_THRESHOLD (120 chars) per evitare
         # che il check "diminishing returns" si attivi prima del max_steps.
@@ -195,9 +193,10 @@ class TestReasoningLoop:
 
         with (
             patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think,
-            patch("src.core.engine.execute_with_retry", return_value=success_result),
+            patch("src.core.engine.execute_with_retry_async", new_callable=AsyncMock) as mock_exec,
         ):
             mock_think.return_value = long_response
+            mock_exec.return_value = "ok"
             response, records, success = _run_loop(agent)
 
         assert mock_think.call_count == 3
@@ -209,7 +208,6 @@ class TestReasoningLoop:
         caratteri e done=False, il loop si interrompe.
         """
         agent = _make_agent(max_steps=10)
-        success_result = ActionResult(status=ActionStatus.SUCCESS, message="ok")
 
         short_tool_json = json.dumps(
             {
@@ -229,9 +227,10 @@ class TestReasoningLoop:
 
         with (
             patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think,
-            patch("src.core.engine.execute_with_retry", return_value=success_result),
+            patch("src.core.engine.execute_with_retry_async", new_callable=AsyncMock) as mock_exec,
         ):
             mock_think.return_value = short_response
+            mock_exec.return_value = "ok"
             _run_loop(agent)
 
         assert mock_think.call_count <= DIMINISHING_STEPS + 1
@@ -294,13 +293,15 @@ class TestReasoningLoop:
         assert "not authorized" in history_contents or "unauthorized" in history_contents
 
     def test_loop_tool_failure_sets_loop_success_false(self):
-        """Se execute_with_retry ritorna FAILED, loop_success diventa False."""
+        """Se execute_with_retry_async solleva un'eccezione, loop_success diventa False."""
         agent = _make_agent()
-        fail_result = ActionResult(status=ActionStatus.FAILED, message="Error: file not found")
+
+        async def failing_executor(*args, **kwargs):
+            raise RuntimeError("Error: file not found")
 
         with (
             patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think,
-            patch("src.core.engine.execute_with_retry", return_value=fail_result),
+            patch("src.core.engine.execute_with_retry_async", side_effect=failing_executor),
         ):
             mock_think.side_effect = [
                 _tool_response("test_echo"),
@@ -314,18 +315,16 @@ class TestReasoningLoop:
     def test_loop_tool_result_injected_in_history(self):
         """Il risultato del tool deve essere aggiunto alla history come TOOL RESULT."""
         agent = _make_agent()
-        success_result = ActionResult(
-            status=ActionStatus.SUCCESS, message="risultato tool specifico"
-        )
 
         with (
             patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think,
-            patch("src.core.engine.execute_with_retry", return_value=success_result),
+            patch("src.core.engine.execute_with_retry_async", new_callable=AsyncMock) as mock_exec,
         ):
             mock_think.side_effect = [
                 _tool_response("test_echo"),
                 _done_response("Ok."),
             ]
+            mock_exec.return_value = "risultato tool specifico"
             _run_loop(agent)
 
         history_contents = " ".join(m["content"] for m in agent._llm.history if m.get("content"))
@@ -354,15 +353,17 @@ class TestRunTaskAsync:
     def test_task_result_has_steps_executed(self):
         async def run():
             agent = _make_agent()
-            success_result = ActionResult(status=ActionStatus.SUCCESS, message="ok")
             with (
                 patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think,
-                patch("src.core.engine.execute_with_retry", return_value=success_result),
+                patch(
+                    "src.core.engine.execute_with_retry_async", new_callable=AsyncMock
+                ) as mock_exec,
             ):
                 mock_think.side_effect = [
                     _tool_response("test_echo"),
                     _done_response("Fatto."),
                 ]
+                mock_exec.return_value = "ok"
                 return await agent.run_task_async("task con un tool")
 
         result = asyncio.run(run())

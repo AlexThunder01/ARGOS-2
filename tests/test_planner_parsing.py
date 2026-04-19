@@ -465,7 +465,6 @@ class TestToolResultRoleRegression:
         import asyncio
         from unittest.mock import AsyncMock, patch
 
-        from src.actions.base import ActionResult, ActionStatus
         from src.core.engine import CoreAgent
         from src.tools.spec import ToolInput, ToolSpec
         from src.world_model.state import WorldState
@@ -503,8 +502,6 @@ class TestToolResultRoleRegression:
             }
         )
 
-        success_result = ActionResult(status=ActionStatus.SUCCESS, message="risultato_echo")
-
         async def run():
             from unittest.mock import MagicMock
 
@@ -521,12 +518,15 @@ class TestToolResultRoleRegression:
 
             with (
                 patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think,
-                patch("src.core.engine.execute_with_retry", return_value=success_result),
+                patch(
+                    "src.core.engine.execute_with_retry_async", new_callable=AsyncMock
+                ) as mock_exec,
             ):
                 mock_think.side_effect = [
                     LLMResponse(content=tool_response),
                     LLMResponse(content=done_response),
                 ]
+                mock_exec.return_value = "risultato_echo"
                 await agent._reasoning_loop("test", state, tracer, MagicMock())
 
         asyncio.run(run())

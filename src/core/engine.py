@@ -31,12 +31,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 
-from src.actions.base import ActionStatus
 from src.agent import ArgosAgent
 from src.config import COST_PER_TOKEN, TOOL_RAG_TOP_K
 from src.core.mem0_adapter import ArgosMemory
 from src.core.session_memory import SessionMemory
-from src.executor.executor import execute_with_retry
+from src.executor.executor import execute_with_retry_async
 from src.hooks.registry import HOOK_REGISTRY, HookEvent
 from src.llm.client import LLMResponse
 from src.logging.otel import get_tracer
@@ -418,9 +417,9 @@ class CoreAgent:
             HOOK_REGISTRY.fire_pre_tool(tool_name, tool_input)
 
             try:
-                action_result = await asyncio.to_thread(execute_with_retry, spec, tool_input)
-                result_str = action_result.message
-                success = action_result.status == ActionStatus.SUCCESS
+                action_result = await execute_with_retry_async(spec.executor, tool_input)
+                result_str = action_result if isinstance(action_result, str) else str(action_result)
+                success = True
                 HOOK_REGISTRY.fire_post_tool(
                     tool_name,
                     tool_input,
