@@ -93,7 +93,7 @@ class ArgosMemory:
         if not query or not query.strip():
             return []
         try:
-            result = self._mem0.search(query, user_id=self._user_id, limit=top_k)
+            result = self._mem0.search(query, filters={"user_id": self._user_id}, limit=top_k)
             return [r["memory"] for r in result.get("results", [])]
         except Exception as e:
             logger.warning(f"[Memory] mem0 search failed: {e}")
@@ -102,7 +102,7 @@ class ArgosMemory:
     def get_all(self) -> list[str]:
         """Return all stored memory strings for this user."""
         try:
-            result = self._mem0.get_all(user_id=self._user_id)
+            result = self._mem0.get_all(filters={"user_id": self._user_id})
             return [r["memory"] for r in result.get("results", [])]
         except Exception as e:
             logger.warning(f"[Memory] mem0 get_all failed: {e}")
