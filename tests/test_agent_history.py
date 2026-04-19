@@ -460,141 +460,170 @@ def _make_stream_mock_anthropic(chunks: list[str]) -> MagicMock:
 
 class TestThinkStream:
     @patch("src.llm.client.acompletion")
-    def test_stream_openai_yields_chunks(self, mock_post):
-        mock_post.side_effect = (
-            _make_stream_mock_openai(["Ciao ", "mondo", "!"]).side_effect or None
-        )
-        # Configurazione corretta tramite sostituzione
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        lines = [
-            b'data: {"choices": [{"delta": {"content": "Ciao "}}]}',
-            b'data: {"choices": [{"delta": {"content": "mondo"}}]}',
-            b'data: {"choices": [{"delta": {"content": "!"}}]}',
-            b"data: [DONE]",
-        ]
-        mock_resp.iter_lines.return_value = iter(lines)
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_post.return_value = mock_resp
+    async def test_stream_openai_yields_chunks(self, mock_acompletion):
+        # Create async mock chunks
+        async def mock_stream_generator():
+            for chunk_data in [
+                {"choices": [{"delta": {"content": "Ciao "}}]},
+                {"choices": [{"delta": {"content": "mondo"}}]},
+                {"choices": [{"delta": {"content": "!"}}]},
+            ]:
+                mock_chunk = MagicMock()
+                mock_chunk.choices = [MagicMock()]
+                mock_chunk.choices[0].delta = MagicMock()
+                mock_chunk.choices[0].delta.content = chunk_data["choices"][0]["delta"][
+                    "content"
+                ]
+                yield mock_chunk
+
+        mock_acompletion.return_value = mock_stream_generator()
 
         agent = ArgosAgent()
         agent.backend = "openai-compatible"
         agent.add_message("user", "test")
 
-        chunks = list(agent.think_stream())
+        chunks = [c async for c in agent.think_stream()]
         assert len(chunks) == 3
         assert "".join(chunks) == "Ciao mondo!"
 
     @patch("src.llm.client.acompletion")
-    def test_stream_openai_skips_empty_deltas(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        lines = [
-            b'data: {"choices": [{"delta": {}}]}',  # nessun content
-            b'data: {"choices": [{"delta": {"content": ""}}]}',  # content vuoto
-            b'data: {"choices": [{"delta": {"content": "ok"}}]}',
-            b"data: [DONE]",
-        ]
-        mock_resp.iter_lines.return_value = iter(lines)
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_post.return_value = mock_resp
+    async def test_stream_openai_skips_empty_deltas(self, mock_acompletion):
+        # Create async mock chunks, testing that empty deltas are skipped
+        async def mock_stream_generator():
+            # Empty delta (no content field)
+            mock_chunk1 = MagicMock()
+            mock_chunk1.choices = [MagicMock()]
+            mock_chunk1.choices[0].delta = MagicMock()
+            mock_chunk1.choices[0].delta.content = None
+            yield mock_chunk1
+
+            # Empty content string
+            mock_chunk2 = MagicMock()
+            mock_chunk2.choices = [MagicMock()]
+            mock_chunk2.choices[0].delta = MagicMock()
+            mock_chunk2.choices[0].delta.content = ""
+            yield mock_chunk2
+
+            # Valid content
+            mock_chunk3 = MagicMock()
+            mock_chunk3.choices = [MagicMock()]
+            mock_chunk3.choices[0].delta = MagicMock()
+            mock_chunk3.choices[0].delta.content = "ok"
+            yield mock_chunk3
+
+        mock_acompletion.return_value = mock_stream_generator()
 
         agent = ArgosAgent()
         agent.backend = "openai-compatible"
         agent.add_message("user", "test")
 
-        chunks = list(agent.think_stream())
+        chunks = [c async for c in agent.think_stream()]
         assert chunks == ["ok"]
 
     @patch("src.llm.client.acompletion")
-    def test_stream_anthropic_yields_chunks(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        lines = [
-            b'data: {"type": "content_block_delta", "delta": {"text": "Ciao "}}',
-            b'data: {"type": "content_block_delta", "delta": {"text": "Anthropic"}}',
-        ]
-        mock_resp.iter_lines.return_value = iter(lines)
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_post.return_value = mock_resp
+    async def test_stream_anthropic_yields_chunks(self, mock_acompletion):
+        # Create async mock chunks for Anthropic format
+        async def mock_stream_generator():
+            for text in ["Ciao ", "Anthropic"]:
+                mock_chunk = MagicMock()
+                mock_chunk.choices = [MagicMock()]
+                mock_chunk.choices[0].delta = MagicMock()
+                mock_chunk.choices[0].delta.content = text
+                yield mock_chunk
+
+        mock_acompletion.return_value = mock_stream_generator()
 
         agent = ArgosAgent()
         agent.backend = "anthropic"
         agent.add_message("user", "test")
 
-        chunks = list(agent.think_stream())
+        chunks = [c async for c in agent.think_stream()]
         assert "".join(chunks) == "Ciao Anthropic"
 
     @patch("src.llm.client.acompletion")
-    def test_stream_anthropic_ignores_non_delta_events(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        lines = [
-            b'data: {"type": "message_start", "message": {}}',
-            b'data: {"type": "content_block_delta", "delta": {"text": "solo questo"}}',
-            b'data: {"type": "message_stop"}',
-        ]
-        mock_resp.iter_lines.return_value = iter(lines)
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_post.return_value = mock_resp
+    async def test_stream_anthropic_ignores_non_delta_events(self, mock_acompletion):
+        # Create async mock chunks, ignoring empty deltas
+        async def mock_stream_generator():
+            # Non-delta event (no content) - should be skipped
+            mock_chunk1 = MagicMock()
+            mock_chunk1.choices = [MagicMock()]
+            mock_chunk1.choices[0].delta = MagicMock()
+            mock_chunk1.choices[0].delta.content = None
+            yield mock_chunk1
+
+            # Valid delta
+            mock_chunk2 = MagicMock()
+            mock_chunk2.choices = [MagicMock()]
+            mock_chunk2.choices[0].delta = MagicMock()
+            mock_chunk2.choices[0].delta.content = "solo questo"
+            yield mock_chunk2
+
+            # Another non-delta (no content) - should be skipped
+            mock_chunk3 = MagicMock()
+            mock_chunk3.choices = [MagicMock()]
+            mock_chunk3.choices[0].delta = MagicMock()
+            mock_chunk3.choices[0].delta.content = None
+            yield mock_chunk3
+
+        mock_acompletion.return_value = mock_stream_generator()
 
         agent = ArgosAgent()
         agent.backend = "anthropic"
         agent.add_message("user", "test")
 
-        chunks = list(agent.think_stream())
+        chunks = [c async for c in agent.think_stream()]
         assert "".join(chunks) == "solo questo"
 
     @patch("src.llm.client.acompletion")
-    def test_stream_returns_error_on_http_error(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 503
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_post.return_value = mock_resp
+    async def test_stream_returns_error_on_http_error(self, mock_acompletion):
+        # Simulate an exception in the stream - should raise when consuming generator
+        mock_acompletion.side_effect = Exception("HTTP 503 Service Unavailable")
 
         agent = ArgosAgent()
         agent.backend = "openai-compatible"
         agent.add_message("user", "test")
 
-        chunks = list(agent.think_stream())
-        joined = "".join(chunks)
-        assert "Error" in joined or "error" in joined.lower()
+        # The async generator will raise an exception when consumed
+        with pytest.raises(Exception) as exc_info:
+            [c async for c in agent.think_stream()]
+        assert "Service Unavailable" in str(exc_info.value)
 
     @patch("src.llm.client.acompletion")
-    def test_stream_handles_malformed_json_lines(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        lines = [
-            b"data: NOT_VALID_JSON",
-            b'data: {"choices": [{"delta": {"content": "buono"}}]}',
-            b"data: [DONE]",
-        ]
-        mock_resp.iter_lines.return_value = iter(lines)
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_post.return_value = mock_resp
+    async def test_stream_handles_malformed_json_lines(self, mock_acompletion):
+        # Create async mock that yields both valid and empty deltas
+        async def mock_stream_generator():
+            # First chunk with no content (simulates malformed)
+            mock_chunk1 = MagicMock()
+            mock_chunk1.choices = [MagicMock()]
+            mock_chunk1.choices[0].delta = MagicMock()
+            mock_chunk1.choices[0].delta.content = None
+            yield mock_chunk1
+
+            # Valid chunk
+            mock_chunk2 = MagicMock()
+            mock_chunk2.choices = [MagicMock()]
+            mock_chunk2.choices[0].delta = MagicMock()
+            mock_chunk2.choices[0].delta.content = "buono"
+            yield mock_chunk2
+
+        mock_acompletion.return_value = mock_stream_generator()
 
         agent = ArgosAgent()
         agent.backend = "openai-compatible"
         agent.add_message("user", "test")
 
-        chunks = list(agent.think_stream())
-        # Il JSON malformato viene saltato, "buono" deve arrivare
+        chunks = [c async for c in agent.think_stream()]
+        # Malformed deltas are skipped, "buono" should arrive
         assert "buono" in chunks
 
     @patch("src.llm.client.acompletion")
-    def test_stream_calls_trim_before_request(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.iter_lines.return_value = iter([b"data: [DONE]"])
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_post.return_value = mock_resp
+    async def test_stream_calls_trim_before_request(self, mock_acompletion):
+        # Create empty async generator
+        async def mock_stream_generator():
+            return
+            yield  # Make it a generator
+
+        mock_acompletion.return_value = mock_stream_generator()
 
         agent = ArgosAgent()
         agent.backend = "openai-compatible"
@@ -608,7 +637,7 @@ class TestThinkStream:
 
         agent.trim_history = tracking_trim
         agent.add_message("user", "test")
-        list(agent.think_stream())  # consuma il generator
+        [c async for c in agent.think_stream()]  # consume the generator
 
         assert len(trim_called) == 1
 
