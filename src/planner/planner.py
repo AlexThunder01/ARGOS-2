@@ -69,7 +69,7 @@ class PlannerDecision:
 
     thought: str
     tool: str | None
-    tool_input: dict | None
+    tool_input: dict[str, object] | None
     confidence: float
     done: bool
     response: str | None  # Final textual reply (when done=True)
@@ -107,7 +107,7 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
     # Tenta il parse diretto usando il nuovo estrattore basato sul conteggio parentesi
     from src.utils import extract_json
 
-    data = extract_json(text)
+    data = extract_json(text)  # type: ignore[no-untyped-call]
 
     if data:
         try:

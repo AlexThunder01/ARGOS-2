@@ -11,6 +11,7 @@ import json
 import logging
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from typing import Any
 
 from litellm import acompletion
 from tenacity import (
@@ -29,7 +30,7 @@ class ToolCall:
 
     id: str
     name: str
-    arguments: dict
+    arguments: dict[str, object]
 
 
 @dataclass
@@ -44,14 +45,14 @@ class LLMResponse:
 
 def _build_kwargs(
     model: str,
-    messages: list[dict],
-    tools: list[dict] | None,
+    messages: list[dict[str, object]],
+    tools: list[dict[str, object]] | None,
     temperature: float,
     api_key: str | None,
     api_base: str | None,
     stream: bool = False,
-) -> dict:
-    kwargs: dict = {
+) -> dict[str, object]:
+    kwargs: dict[str, object] = {
         "model": model,
         "messages": messages,
         "temperature": temperature,
@@ -67,10 +68,10 @@ def _build_kwargs(
     return kwargs
 
 
-def _parse_tool_calls(raw_tool_calls) -> list[ToolCall]:
+def _parse_tool_calls(raw_tool_calls: Any) -> list[ToolCall]:
     if not raw_tool_calls:
         return []
-    result = []
+    result: list[ToolCall] = []
     for tc in raw_tool_calls:
         try:
             args = json.loads(tc.function.arguments or "{}")
@@ -87,8 +88,8 @@ def _parse_tool_calls(raw_tool_calls) -> list[ToolCall]:
     reraise=True,
 )
 async def complete(
-    messages: list[dict],
-    tools: list[dict] | None = None,
+    messages: list[dict[str, object]],
+    tools: list[dict[str, object]] | None = None,
     model: str | None = None,
     temperature: float = 0.0,
     api_key: str | None = None,
@@ -119,7 +120,7 @@ async def complete(
 
 
 async def stream(
-    messages: list[dict],
+    messages: list[dict[str, object]],
     model: str | None = None,
     temperature: float = 0.0,
     api_key: str | None = None,
