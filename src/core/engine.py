@@ -34,6 +34,7 @@ from typing import Callable, Generator, Optional, Set
 from src.actions.base import ActionStatus
 from src.agent import ArgosAgent
 from src.config import COST_PER_TOKEN, TOOL_RAG_TOP_K
+from src.core.mem0_adapter import ArgosMemory
 from src.core.memory import EXTRACT_MIN_LENGTH
 from src.core.session_memory import SessionMemory
 from src.executor.executor import execute_with_retry
@@ -216,6 +217,15 @@ class CoreAgent:
             )
 
         self.memory_mode = memory_mode
+        try:
+            self._argos_memory: ArgosMemory | None = (
+                ArgosMemory(user_id=user_id if user_id is not None else 0)
+                if memory_mode == "persistent"
+                else None
+            )
+        except Exception as e:
+            logger.warning(f"[CoreAgent] Failed to initialize ArgosMemory: {e}")
+            self._argos_memory = None
         self.max_steps = (
             max_steps
             if max_steps is not None
@@ -796,7 +806,9 @@ class CoreAgent:
     # LLM Context Builder (shared by run_task and run_task_async)
     # ==========================================================================
 
-    def _build_llm_context(self, task: str, relevant_memories: list[dict]) -> None:
+    def _build_llm_context(
+        self, task: str, relevant_memories: list[str | dict]
+    ) -> None:
         """
         Initialises the LLM history for a new task.
 
@@ -843,9 +855,16 @@ class CoreAgent:
         )
 
         if relevant_memories:
-            memory_context = "\n".join(
-                f"- [{m['category']}] {m['content']}" for m in relevant_memories
-            )
+            # Handle both old dict format and new string format from mem0
+            memory_lines = []
+            for m in relevant_memories:
+                if isinstance(m, dict):
+                    memory_lines.append(
+                        f"- [{m.get('category', 'fact')}] {m.get('content', '')}"
+                    )
+                else:
+                    memory_lines.append(f"- [memory] {m}")
+            memory_context = "\n".join(memory_lines)
             self._llm.add_message(
                 "system",
                 f"THINGS YOU KNOW ABOUT THE USER (use when relevant):\n{memory_context}",
@@ -870,19 +889,15 @@ class CoreAgent:
 
         self._llm.add_message("user", task)
 
-    def _retrieve_memories(self, query: str) -> list[dict]:
+    def _retrieve_memories(self, task: str) -> list[str | dict]:
         if self.memory_mode == "off":
             return []
         if self.memory_mode == "session":
-            return self._retrieve_session_memories(query)
+            return self._retrieve_session_memories(task)
         if self.memory_mode == "persistent":
-            try:
-                from src.core.memory import retrieve_relevant_memories
-
-                return retrieve_relevant_memories(self.user_id, query, top_k=10)
-            except Exception as e:
-                logger.exception(f"[CoreAgent] Memory retrieval failed: {e}")
+            if self._argos_memory is None:
                 return []
+            return self._argos_memory.search(task, top_k=5)
         return []
 
     def _retrieve_session_memories(self, query: str, top_k: int = 3) -> list[dict]:
@@ -896,38 +911,21 @@ class CoreAgent:
 
     def _maybe_extract_memories(
         self,
-        user_message: str,
-        existing_memories: list[dict],
-        task_count: int = 1,
-        step_count: int = 0,  # NEW
-        task_success: bool = False,  # NEW
-    ):
-        if self.memory_mode == "session":
-            if len(user_message) > EXTRACT_MIN_LENGTH:
-                self._session_memories.append(
-                    {"content": user_message[:200], "category": "fact"}
-                )
+        task: str,
+        relevant_memories: list[str],
+        task_count: int,
+        step_count: int = 0,
+        task_success: bool = True,
+    ) -> None:
+        if self.memory_mode != "persistent" or self._argos_memory is None:
             return
-        if self.memory_mode == "persistent":
-            try:
-                from src.core.memory import (
-                    extract_memories_from_text,
-                    save_extracted_memories,
-                    should_extract_memory,
-                )
-
-                if should_extract_memory(
-                    user_message, task_count, step_count, task_success
-                ):
-                    facts = extract_memories_from_text(
-                        user_message, existing_memories, self._llm.call_lightweight
-                    )
-                    if facts:
-                        save_extracted_memories(
-                            self.user_id, facts, llm_call_fn=self._llm.call_lightweight
-                        )
-            except Exception as e:
-                logger.exception(f"[CoreAgent] Memory extraction failed: {e}")
+        if not task_success:
+            return
+        summary_parts = [f"Task: {task}"]
+        if relevant_memories:
+            summary_parts.append(f"Prior context: {'; '.join(relevant_memories[:3])}")
+        summary = " | ".join(summary_parts)
+        self._argos_memory.add(summary)
 
     # ==========================================================================
     # Security Gate (Private)
