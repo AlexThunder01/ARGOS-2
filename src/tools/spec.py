@@ -9,7 +9,6 @@ testo AVAILABLE TOOLS nel system prompt.
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
 
 from pydantic import BaseModel
 
@@ -74,7 +73,7 @@ class ToolSpec:
                 example[field_name] = "..."
         return json.dumps(example, ensure_ascii=False)
 
-    def to_metadata(self) -> dict:
+    def to_metadata(self) -> dict[str, str]:
         """Formato TOOL_METADATA compatibile con il dashboard."""
         return {
             "category": self.category,
@@ -88,7 +87,7 @@ class ToolSpec:
         """True se il tool richiede conferma utente in modalità CLI."""
         return self.risk in ("medium", "high", "critical")
 
-    def to_openai_schema(self) -> dict:
+    def to_openai_schema(self) -> dict[str, object]:
         """Converts this ToolSpec to an OpenAI-format function calling schema."""
         schema = self.input_schema.model_json_schema()
         schema.pop("title", None)
@@ -103,7 +102,7 @@ class ToolSpec:
             },
         }
 
-    def validate_input(self, raw: Any) -> dict:
+    def validate_input(self, raw: object) -> dict[str, object]:
         """
         Valida l'input grezzo del LLM tramite lo schema Pydantic.
         Fallback al dict raw in caso di errore, per retrocompatibilità.
@@ -143,7 +142,7 @@ class ToolRegistry:
         ("documents", "DOCUMENT PARSING"),
     ]
 
-    def __init__(self, specs: list[ToolSpec]):
+    def __init__(self, specs: list[ToolSpec]) -> None:
         self._specs: dict[str, ToolSpec] = {s.name: s for s in specs}
 
     def __getitem__(self, name: str) -> ToolSpec:
@@ -187,11 +186,11 @@ class ToolRegistry:
         ]
         return ToolRegistry(filtered)
 
-    def as_tools_dict(self) -> dict[str, Callable]:
+    def as_tools_dict(self) -> dict[str, Callable[[dict], str]]:
         """Backward compat: {name: executor_fn}."""
         return {name: spec.executor for name, spec in self._specs.items()}
 
-    def as_metadata_dict(self) -> dict[str, dict]:
+    def as_metadata_dict(self) -> dict[str, dict[str, str]]:
         """Backward compat: formato TOOL_METADATA."""
         return {name: spec.to_metadata() for name, spec in self._specs.items()}
 
@@ -199,7 +198,7 @@ class ToolRegistry:
         """Nomi dei tool con dashboard_allowed=True."""
         return {name for name, spec in self._specs.items() if spec.dashboard_allowed}
 
-    def as_openai_tools(self) -> list[dict]:
+    def as_openai_tools(self) -> list[dict[str, object]]:
         """Returns all specs as OpenAI-format tool definitions for LiteLLM."""
         return [spec.to_openai_schema() for spec in self._specs.values()]
 

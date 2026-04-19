@@ -9,6 +9,7 @@ Memory extraction and garbage collection are now delegated to the mem0 adapter.
 """
 
 import logging
+from collections.abc import Callable
 
 import numpy as np
 import requests
@@ -56,7 +57,7 @@ def get_embedding(text: str) -> np.ndarray:
         raise RuntimeError(f"Embedding service timed out at {EMBEDDING_BASE_URL}") from None
 
 
-def check_embedding_dimensions():
+def check_embedding_dimensions() -> None:
     """Boot-time dimension check to prevent DB incompatibility when switching models."""
     from src.db.repository import db_get_one_memory_blob
 
@@ -83,7 +84,7 @@ def serialize_embedding(vec: np.ndarray) -> bytes:
 
 def deserialize_embedding(blob: bytes) -> np.ndarray:
     """Deserializes a SQLite BLOB back into a numpy vector."""
-    return np.frombuffer(blob, dtype=np.float32)
+    return np.frombuffer(blob, dtype=np.float32)  # type: ignore[return-value]
 
 
 # ==========================================================================
@@ -93,7 +94,7 @@ def deserialize_embedding(blob: bytes) -> np.ndarray:
 
 def retrieve_relevant_memories(
     user_id: int, query_text: str, top_k: int = 3, min_similarity: float = 0.25
-) -> list[dict]:
+) -> list[dict[str, object]]:
     """
     Retrieves the top_k most relevant memories for query_text.
 
@@ -163,11 +164,11 @@ def retrieve_relevant_memories(
 def save_extracted_memories(
     user_id: int,
     facts: list[dict],
-    llm_call_fn=None,
+    llm_call_fn: Callable[[str], str] | None = None,
     poisoning_enabled: bool = True,
     risk_threshold: float = 0.5,
     suspicious_retention: int = 500,
-):
+) -> None:
     """
     Validates and saves extracted facts to the memory vector store.
     Runs the 4-layer anti-poisoning pipeline when enabled.
