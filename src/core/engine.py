@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
+from typing import Any
 
 from src.agent import ArgosAgent
 from src.config import COST_PER_TOKEN, TOOL_RAG_TOP_K
@@ -74,7 +75,7 @@ _AUDIT_LOCK = Lock()  # Protegge da race condition su scritture concorrenti
 
 def _log_permission_decision(
     tool_name: str,
-    tool_input: dict,
+    tool_input: dict[str, Any],
     decision: str,  # "allowed" | "denied_auto" | "denied_user" | "denied_hook"
     risk: str,
     source: str,  # "safe" | "api_auto" | "callback" | "hook" | "default"
@@ -140,7 +141,7 @@ class StepRecord:
 
     step: int
     tool: str
-    tool_input: dict
+    tool_input: dict[str, Any]
     result: str
     success: bool
     timestamp: str = ""
@@ -166,7 +167,7 @@ MEMORY_MODES = ("off", "session", "persistent")
 
 
 # ── Keyword similarity for session memory ──────────────────────────────────
-def _keyword_similarity(query: str, documents: list[str]) -> list[float]:
+def _keyword_similarity(query: str, documents: list[str]) -> list[float]:  # type: ignore[type-var]
     """Simple keyword overlap scoring — fallback when embeddings unavailable."""
     query_words = set(query.lower().split())
     scores = []
@@ -203,11 +204,11 @@ class CoreAgent:
         user_id: int | None = None,
         max_steps: int | None = None,
         require_confirmation: bool = False,
-        confirmation_callback: Callable | None = None,
+        confirmation_callback: Callable[[str, dict[str, Any]], bool] | None = None,
         allowed_tools: set[str] | None = None,
         inject_git_context: bool = True,
         status_callback: Callable[[str], None] | None = None,
-    ):
+    ) -> None:
         if memory_mode not in MEMORY_MODES:
             raise ValueError(f"Invalid memory_mode '{memory_mode}'. Must be one of {MEMORY_MODES}")
 
@@ -393,7 +394,11 @@ class CoreAgent:
     # ==========================================================================
 
     async def _execute_tool_calls_parallel(
-        self, decisions: list, state, tracer, root_span
+        self,
+        decisions: list[Any],
+        state: WorldState,
+        tracer: Any,  # type: ignore[type-arg]
+        root_span: Any,  # type: ignore[type-arg]
     ) -> list[tuple[str, str, bool]]:
         """
         Execute a list of PlannerDecisions concurrently via asyncio.gather.
@@ -402,7 +407,7 @@ class CoreAgent:
         order as decisions.
         """
 
-        async def _run_one(decision) -> tuple[str, str, bool]:
+        async def _run_one(decision: Any) -> tuple[str, str, bool]:  # type: ignore[type-arg]
             tool_name = decision.tool
             tool_input = decision.tool_input or {}
 
@@ -448,8 +453,8 @@ class CoreAgent:
         self,
         task: str,
         state: WorldState,
-        tracer,
-        root_span,
+        tracer: Any,  # type: ignore[type-arg]
+        root_span: Any,  # type: ignore[type-arg]
     ) -> tuple[str, list[StepRecord], bool]:
         """
         The step-by-step LLM ↔ tool execution loop.
@@ -744,7 +749,7 @@ class CoreAgent:
     # Streaming Entry Point
     # ==========================================================================
 
-    def run_task_stream(self, task: str) -> Generator[str, None, None]:
+    def run_task_stream(self, task: str) -> Generator[str, None, None]:  # type: ignore[type-arg]
         """
         Streaming variant for single-turn, no-tool queries.
         Yields LLM text chunks as they arrive (SSE / CLI live output).
@@ -761,7 +766,7 @@ class CoreAgent:
     # Telegram-Specific Entry Point
     # ==========================================================================
 
-    def think_with_context(self, messages: list[dict]) -> str:
+    def think_with_context(self, messages: list[dict[str, Any]]) -> str:
         return self._llm.think_with_messages(messages)
 
     def call_lightweight(self, prompt: str) -> str:
@@ -775,7 +780,7 @@ class CoreAgent:
     # LLM Context Builder (shared by run_task and run_task_async)
     # ==========================================================================
 
-    def _build_llm_context(self, task: str, relevant_memories: list[str | dict]) -> None:
+    def _build_llm_context(self, task: str, relevant_memories: list[str | dict[str, Any]]) -> None:
         """
         Initialises the LLM history for a new task.
 
@@ -844,7 +849,7 @@ class CoreAgent:
 
         self._llm.add_message("user", task)
 
-    def _retrieve_memories(self, task: str) -> list[str | dict]:
+    def _retrieve_memories(self, task: str) -> list[str | dict[str, Any]]:
         if self.memory_mode == "off":
             return []
         if self.memory_mode == "session":
@@ -855,7 +860,7 @@ class CoreAgent:
             return self._argos_memory.search(task, top_k=5)
         return []
 
-    def _retrieve_session_memories(self, query: str, top_k: int = 3) -> list[dict]:
+    def _retrieve_session_memories(self, query: str, top_k: int = 3) -> list[dict[str, Any]]:
         if not self._session_memories:
             return []
         memories = list(self._session_memories)
@@ -867,7 +872,7 @@ class CoreAgent:
     def _maybe_extract_memories(
         self,
         task: str,
-        relevant_memories: list[str],
+        relevant_memories: list[str | dict[str, Any]],
         task_count: int,
         step_count: int = 0,
         task_success: bool = True,
@@ -886,7 +891,7 @@ class CoreAgent:
     # Security Gate (Private)
     # ==========================================================================
 
-    def _authorize_tool(self, spec_or_name, tool_input: dict) -> bool:
+    def _authorize_tool(self, spec_or_name: str | ToolSpec, tool_input: dict[str, Any]) -> bool:
         """
         Checks if a tool execution should proceed.
         Logs every decision to the permission audit trail.
