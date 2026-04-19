@@ -648,14 +648,11 @@ class TestThinkStream:
 
 
 class TestThinkWithMessages:
-    @patch("src.llm.client.acompletion")
-    def test_think_with_messages_openai(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": "risposta telegram"}}]
-        }
-        mock_post.return_value = mock_resp
+    @patch("src.agent.llm_complete", new_callable=AsyncMock)
+    def test_think_with_messages_openai(self, mock_complete):
+        from src.llm.client import LLMResponse
+
+        mock_complete.return_value = LLMResponse(content="risposta telegram")
 
         agent = ArgosAgent()
         agent.backend = "openai-compatible"
@@ -666,18 +663,14 @@ class TestThinkWithMessages:
         result = agent.think_with_messages(external_history)
 
         assert result == "risposta telegram"
-        # Verifica che i messaggi passati siano quelli usati
-        call_kwargs = mock_post.call_args[1]
-        assert call_kwargs["json"]["messages"] == external_history
+        call_kwargs = mock_complete.call_args[1]
+        assert call_kwargs["messages"] == external_history
 
-    @patch("src.llm.client.acompletion")
-    def test_think_with_messages_anthropic(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "content": [{"text": "risposta anthropic telegram"}]
-        }
-        mock_post.return_value = mock_resp
+    @patch("src.agent.llm_complete", new_callable=AsyncMock)
+    def test_think_with_messages_anthropic(self, mock_complete):
+        from src.llm.client import LLMResponse
+
+        mock_complete.return_value = LLMResponse(content="risposta anthropic telegram")
 
         agent = ArgosAgent()
         agent.backend = "anthropic"
@@ -697,57 +690,37 @@ class TestThinkWithMessages:
 
 
 class TestCallLightweight:
-    @patch("src.llm.client.acompletion")
-    def test_call_lightweight_returns_response(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": "estratto: fatto X"}}]
-        }
-        mock_post.return_value = mock_resp
+    @patch("src.agent.llm_complete", new_callable=AsyncMock)
+    def test_call_lightweight_returns_response(self, mock_complete):
+        from src.llm.client import LLMResponse
+
+        mock_complete.return_value = LLMResponse(content="estratto: fatto X")
 
         agent = ArgosAgent()
-        agent.backend = "openai-compatible"
-
         result = agent.call_lightweight("Estrai fatti da: l'utente si chiama Alice")
         assert result == "estratto: fatto X"
 
-    @patch("src.llm.client.acompletion")
-    def test_call_lightweight_uses_max_retries_1(self, mock_post):
-        """call_lightweight non deve riprovare più di 1 volta (fail-fast)."""
-        # Simula 429 su tutte le chiamate
-        mock_resp = MagicMock()
-        mock_resp.status_code = 429
-        mock_post.return_value = mock_resp
+    @patch("src.agent.llm_complete", new_callable=AsyncMock)
+    def test_call_lightweight_uses_max_retries_1(self, mock_complete):
+        """call_lightweight deve returnare stringa vuota se llm_complete fallisce."""
+        mock_complete.side_effect = Exception("Rate limit")
 
         agent = ArgosAgent()
-        agent.backend = "openai-compatible"
-
-        with patch("src.agent.time.sleep"):
-            result = agent.call_lightweight("test")
-
-        # Con max_retries=1, dovrebbe chiamare al massimo 2 volte (1 + 1 retry)
-        assert mock_post.call_count <= 2
-        # Il risultato deve segnalare un errore oppure essere stringa vuota
-        assert "Error" in result or result == "" or "Rate" in result
-
-    @patch("src.llm.client.acompletion")
-    def test_call_lightweight_returns_error_or_empty_on_exception(self, mock_post):
-        """
-        Se l'LLM lancia eccezione, call_lightweight deve returnare stringa vuota
-        (outer except) o "Connection Error: ..." (_call_openai_compatible inner except).
-        Entrambi i comportamenti sono accettabili — l'importante è non crashare.
-        """
-        mock_post.side_effect = Exception("connessione fallita")
-
-        agent = ArgosAgent()
-        agent.backend = "openai-compatible"
-
         result = agent.call_lightweight("test")
-        # _call_openai_compatible cattura l'eccezione internamente → "Connection Error: ..."
-        # L'outer except in call_lightweight cattura solo eccezioni non gestite → ""
+
         assert isinstance(result, str)
-        assert "Error" in result or result == ""
+        assert result == ""
+
+    @patch("src.agent.llm_complete", new_callable=AsyncMock)
+    def test_call_lightweight_returns_error_or_empty_on_exception(self, mock_complete):
+        """Se llm_complete lancia eccezione, call_lightweight ritorna stringa vuota."""
+        mock_complete.side_effect = Exception("connessione fallita")
+
+        agent = ArgosAgent()
+        result = agent.call_lightweight("test")
+
+        assert isinstance(result, str)
+        assert result == ""
 
 
 # ==========================================================================

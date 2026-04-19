@@ -521,6 +521,8 @@ class TestToolResultRoleRegression:
             state = WorldState()
             state.current_task = "test"
 
+            from src.llm.client import LLMResponse
+
             with (
                 patch.object(
                     agent._llm, "think_async", new_callable=AsyncMock
@@ -529,20 +531,20 @@ class TestToolResultRoleRegression:
                     "src.core.engine.execute_with_retry", return_value=success_result
                 ),
             ):
-                mock_think.side_effect = [tool_response, done_response]
+                mock_think.side_effect = [
+                    LLMResponse(content=tool_response),
+                    LLMResponse(content=done_response),
+                ]
                 await agent._reasoning_loop("test", state, tracer, MagicMock())
 
         asyncio.run(run())
 
-        tool_result_msgs = [
-            m for m in agent._llm.history if "TOOL RESULT" in m.get("content", "")
-        ]
-        assert len(tool_result_msgs) >= 1, "Nessun TOOL RESULT iniettato in history"
-        for msg in tool_result_msgs:
-            assert msg["role"] == "user", (
-                f"TOOL RESULT deve avere role='user', trovato '{msg['role']}'"
-            )
-        assert any("risultato_echo" in m["content"] for m in tool_result_msgs)
+        # Engine now uses OpenAI native tool format: role="tool" with tool_call_id
+        tool_result_msgs = [m for m in agent._llm.history if m.get("role") == "tool"]
+        assert len(tool_result_msgs) >= 1, "Nessun tool result iniettato in history"
+        assert any(
+            "risultato_echo" in (m.get("content") or "") for m in tool_result_msgs
+        )
 
 
 # ==========================================================================
