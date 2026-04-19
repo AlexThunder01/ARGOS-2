@@ -22,14 +22,16 @@ def _build_mem0():
         EMBEDDING_MODEL,
         LLM_API_KEY,
         LLM_BASE_URL,
-        LLM_MODEL,
+        LLM_LIGHTWEIGHT_MODEL,
     )
 
     config = {
         "llm": {
             "provider": "openai",
             "config": {
-                "model": LLM_MODEL,
+                # Use the lightweight model for extraction — the main model
+                # has lower TPM limits and extraction prompts are large.
+                "model": LLM_LIGHTWEIGHT_MODEL,
                 "api_key": LLM_API_KEY or "dummy",
                 "openai_base_url": LLM_BASE_URL,
             },
