@@ -20,9 +20,7 @@ except Exception:
 def launch_app_tool(inp):
     cmd = _get_arg(inp, ["app_name", "command", "cmd"])
     try:
-        subprocess.Popen(
-            shlex.split(cmd), stdout=subprocess.DEVNULL, start_new_session=True
-        )
+        subprocess.Popen(shlex.split(cmd), stdout=subprocess.DEVNULL, start_new_session=True)
         return f"🚀 Launched: {cmd}"
     except Exception as e:
         return f"Error: {e}"
@@ -174,9 +172,7 @@ def visual_click_tool(inp):
     coords = vision.find_text_on_screen(description)
 
     if not coords or "x" not in coords:
-        print(
-            f"⚠️ OCR could not locate '{description}', falling back to VLM Grid analysis..."
-        )
+        print(f"⚠️ OCR could not locate '{description}', falling back to VLM Grid analysis...")
         coords = vision.analyze_screen_for_coordinates(description)
 
     if coords and "x" in coords:

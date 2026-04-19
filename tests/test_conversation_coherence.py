@@ -21,8 +21,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from collections import deque
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from src.agent import ArgosAgent, _count_tokens
 from src.core.engine import CoreAgent
 
@@ -90,9 +88,7 @@ class TestSystemPromptPolicies:
 
     def test_response_format_with_done_true(self):
         """Il formato JSON per risposta finale deve essere nel prompt."""
-        assert "done" in self.prompt and (
-            "true" in self.prompt or "True" in self.prompt
-        )
+        assert "done" in self.prompt and ("true" in self.prompt or "True" in self.prompt)
 
     def test_execute_only_what_requested(self):
         """Argos deve eseguire SOLO quello richiesto, senza azioni extra."""
@@ -119,9 +115,7 @@ class TestSessionMemoryStorage:
 
         # Riempi oltre maxlen
         for i in range(510):
-            agent._session_memories.append(
-                {"content": f"fact_{i:04d}", "category": "fact"}
-            )
+            agent._session_memories.append({"content": f"fact_{i:04d}", "category": "fact"})
 
         assert len(agent._session_memories) == 500
         # La più vecchia (fact_0000) deve essere sparita
@@ -184,10 +178,7 @@ class TestSessionMemoryRetrieval:
         """Il parametro top_k deve limitare il numero di risultati."""
         agent = CoreAgent(memory_mode="session", inject_git_context=False)
         agent._session_memories = deque(
-            [
-                {"content": f"Python fatto numero {i}", "category": "fact"}
-                for i in range(10)
-            ]
+            [{"content": f"Python fatto numero {i}", "category": "fact"} for i in range(10)]
         )
 
         results = agent._retrieve_session_memories("Python", top_k=2)
@@ -208,9 +199,7 @@ class TestSessionMemoryRetrieval:
         agent1 = CoreAgent(memory_mode="session", inject_git_context=False)
         agent2 = CoreAgent(memory_mode="session", inject_git_context=False)
 
-        agent1._session_memories.append(
-            {"content": "fatto agente 1", "category": "fact"}
-        )
+        agent1._session_memories.append({"content": "fatto agente 1", "category": "fact"})
 
         assert len(agent2._session_memories) == 0
 
@@ -304,9 +293,7 @@ class TestMultiTurnHistory:
         ]
 
         async def run():
-            with patch.object(
-                agent._llm, "think_async", new_callable=AsyncMock
-            ) as mock_think:
+            with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think:
                 mock_think.return_value = '{"thought":"ok","response":"OK","done":true}'
                 await agent.run_task_async("task che consuma la history iniettata")
 

@@ -27,9 +27,7 @@ def run():
             rows = cur.fetchall()
             cur.close()
         else:
-            cur = conn.execute(
-                "SELECT user_id, content, category FROM tg_memory_vectors"
-            )
+            cur = conn.execute("SELECT user_id, content, category FROM tg_memory_vectors")
             rows = cur.fetchall()
 
         for row in rows:
@@ -51,9 +49,7 @@ def run():
         logger.info("Dropping table data and updating pgvector dimension to 1024...")
         cur.execute("DROP INDEX IF EXISTS idx_tg_mem_hnsw")
         cur.execute("TRUNCATE TABLE tg_memory_vectors RESTART IDENTITY CASCADE")
-        cur.execute(
-            "ALTER TABLE tg_memory_vectors ALTER COLUMN embedding TYPE vector(1024)"
-        )
+        cur.execute("ALTER TABLE tg_memory_vectors ALTER COLUMN embedding TYPE vector(1024)")
         cur.execute("""
             CREATE INDEX IF NOT EXISTS idx_tg_mem_hnsw ON tg_memory_vectors
             USING hnsw (embedding vector_cosine_ops)

@@ -27,7 +27,7 @@ def _get_desktop_path():
     xdg_config = os.path.join(home, ".config", "user-dirs.dirs")
     if os.path.exists(xdg_config):
         try:
-            with open(xdg_config, "r") as f:
+            with open(xdg_config) as f:
                 for line in f:
                     if line.startswith("XDG_DESKTOP_DIR"):
                         parts = line.split("=")
@@ -74,9 +74,7 @@ def _normalize_path(path_str):
 
     # Enforce that the resolved path stays inside an allowed root
     allowed_roots = _get_allowed_roots()
-    if not any(
-        real == root or real.startswith(root + os.sep) for root in allowed_roots
-    ):
+    if not any(real == root or real.startswith(root + os.sep) for root in allowed_roots):
         raise ValueError(
             f"Path traversal attempt blocked: '{path_str}' resolves to '{real}' "
             f"which is outside the allowed directories."

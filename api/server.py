@@ -6,7 +6,6 @@ End-to-end refactored with OTel tracing and PostgreSQL support.
 import logging
 import os
 import sys
-import time
 from contextlib import asynccontextmanager
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -118,9 +117,7 @@ app.include_router(health.router)
 from fastapi.staticfiles import StaticFiles
 
 if os.path.isdir("dashboard/dist"):
-    app.mount(
-        "/", StaticFiles(directory="dashboard/dist", html=True), name="dashboard_ui"
-    )
+    app.mount("/", StaticFiles(directory="dashboard/dist", html=True), name="dashboard_ui")
 
 
 @app.get("/metrics", tags=["System"], dependencies=[Depends(verify_api_key)])
@@ -138,6 +135,6 @@ async def last_log():
     log_files = sorted(glob.glob("logs/argos_*.log"))
     if not log_files:
         raise HTTPException(status_code=404, detail="Nessun log disponibile.")
-    with open(log_files[-1], "r", encoding="utf-8") as f:
+    with open(log_files[-1], encoding="utf-8") as f:
         lines = f.readlines()
     return JSONResponse({"log_file": log_files[-1], "lines": lines[-100:]})

@@ -12,9 +12,9 @@ Analogous to Claude Code's SessionMemory service (sessionMemory.ts).
 
 import logging
 import os
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
 
 logger = logging.getLogger("argos")
 
@@ -53,7 +53,7 @@ class SessionMemory:
         clear()              — deletes the file and resets state (e.g. on /clear)
     """
 
-    def __init__(self, memory_path: Optional[Path] = None):
+    def __init__(self, memory_path: Path | None = None):
         self._path: Path = Path(memory_path) if memory_path else Path(_DEFAULT_PATH)
         self._tool_call_count: int = 0
         self._last_content: str = ""
@@ -66,15 +66,11 @@ class SessionMemory:
 
     def should_update(self) -> bool:
         """Returns True when the update threshold has been crossed."""
-        return (
-            self._tool_call_count > 0 and self._tool_call_count % _UPDATE_EVERY_N == 0
-        )
+        return self._tool_call_count > 0 and self._tool_call_count % _UPDATE_EVERY_N == 0
 
     # ── Read / Write ──────────────────────────────────────────────────────
 
-    def update(
-        self, history: list[dict], llm_call_fn: Callable[[list[dict]], str]
-    ) -> None:
+    def update(self, history: list[dict], llm_call_fn: Callable[[list[dict]], str]) -> None:
         """
         Extracts current working state from `history` via `llm_call_fn` and
         writes it to the session memory file.
@@ -85,16 +81,12 @@ class SessionMemory:
         if len(history) <= 2:
             return
         try:
-            messages = list(history) + [
-                {"role": "user", "content": SESSION_MEMORY_PROMPT}
-            ]
+            messages = list(history) + [{"role": "user", "content": SESSION_MEMORY_PROMPT}]
             content = llm_call_fn(messages)
             if not content or content.startswith(
                 ("API Error", "Connection Error", "LLM Error", "Error:")
             ):
-                logger.debug(
-                    "[SessionMemory] LLM call returned error — skipping update"
-                )
+                logger.debug("[SessionMemory] LLM call returned error — skipping update")
                 return
 
             self._last_content = content.strip()

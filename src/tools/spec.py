@@ -7,8 +7,9 @@ testo AVAILABLE TOOLS nel system prompt.
 """
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Type
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -38,14 +39,14 @@ class ToolSpec:
 
     name: str
     description: str
-    input_schema: Type[ToolInput]
+    input_schema: type[ToolInput]
     executor: Callable[[dict], str]
     risk: str
     category: str
     icon: str
     label: str
     dashboard_allowed: bool = False
-    group: Optional[str] = None  # "coding" | "research" | "automation" | None (tutti)
+    group: str | None = None  # "coding" | "research" | "automation" | None (tutti)
 
     def prompt_example(self) -> str:
         """Genera il JSON di esempio per il system prompt dal Pydantic schema."""
@@ -154,7 +155,7 @@ class ToolRegistry:
     def __len__(self) -> int:
         return len(self._specs)
 
-    def get(self, name: str) -> Optional[ToolSpec]:
+    def get(self, name: str) -> ToolSpec | None:
         return self._specs.get(name)
 
     def names(self) -> list[str]:
@@ -182,9 +183,7 @@ class ToolRegistry:
         }
         allowed_categories = _GROUP_CATEGORIES.get(group, set())
         filtered = [
-            s
-            for s in self._specs.values()
-            if s.group is None or s.category in allowed_categories
+            s for s in self._specs.values() if s.group is None or s.category in allowed_categories
         ]
         return ToolRegistry(filtered)
 
@@ -231,20 +230,14 @@ class ToolRegistry:
             from src.core.memory import get_embedding
 
             names = list(self._specs.keys())
-            corpus = [
-                f"{s.name} {s.description} {s.category}" for s in self._specs.values()
-            ]
+            corpus = [f"{s.name} {s.description} {s.category}" for s in self._specs.values()]
 
             query_vec = get_embedding(query)
-            tool_vecs = np.array(
-                [get_embedding(text) for text in corpus], dtype=np.float32
-            )
+            tool_vecs = np.array([get_embedding(text) for text in corpus], dtype=np.float32)
 
             # Cosine similarity
             query_norm = query_vec / (np.linalg.norm(query_vec) + 1e-8)
-            tool_norms = tool_vecs / (
-                np.linalg.norm(tool_vecs, axis=1, keepdims=True) + 1e-8
-            )
+            tool_norms = tool_vecs / (np.linalg.norm(tool_vecs, axis=1, keepdims=True) + 1e-8)
             scores = tool_norms @ query_norm
 
             top_indices = scores.argsort()[-top_k:][::-1]
@@ -260,7 +253,7 @@ class ToolRegistry:
         except Exception:
             return self
 
-    def build_prompt_block(self, group: Optional[str] = None) -> str:
+    def build_prompt_block(self, group: str | None = None) -> str:
         """
         Genera il blocco AVAILABLE TOOLS per il system prompt, raggruppato per categoria.
         Questa è l'unica fonte di verità: nessun testo hardcoded altrove.

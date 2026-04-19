@@ -77,8 +77,6 @@ class TestTelegramAttach:
         """Simulate Telegram returning a non-success for getFile."""
         from unittest.mock import AsyncMock, MagicMock, patch
 
-        import httpx
-
         async def _mock_get(*args, **kwargs):
             resp = MagicMock()
             resp.is_success = False
@@ -97,8 +95,6 @@ class TestTelegramAttach:
     def test_attach_invalid_filename_extension_returns_422(self, client, monkeypatch):
         """Simulate Telegram returning a valid file but filename is .exe."""
         from unittest.mock import AsyncMock, MagicMock, patch
-
-        import httpx
 
         fake_content = b"MZ payload"
         call_count = {"n": 0}
@@ -160,9 +156,7 @@ class TestTelegramChatWithAttachments:
         from unittest.mock import MagicMock, patch
 
         # Pre-register an upload_id in the registry
-        uid = upload_module.save_upload(
-            user_id=42, filename="voice.ogg", content=b"OGG fake"
-        )
+        uid = upload_module.save_upload(user_id=42, filename="voice.ogg", content=b"OGG fake")
 
         # Patch the Telegram agent and DB calls (local imports inside the route)
         with (
@@ -170,17 +164,13 @@ class TestTelegramChatWithAttachments:
                 "src.telegram.db.db_get_user",
                 return_value={"status": "approved", "msg_count_total": 1},
             ),
-            patch(
-                "src.telegram.db.db_get_profile", return_value={"display_name": "Test"}
-            ),
+            patch("src.telegram.db.db_get_profile", return_value={"display_name": "Test"}),
             patch("src.telegram.db.db_get_conversation_window", return_value=[]),
             patch("src.telegram.memory.retrieve_relevant_memories", return_value=[]),
             patch("src.telegram.db.db_get_open_tasks", return_value=[]),
             patch("src.telegram.db.db_increment_msg_count"),
             patch("src.telegram.db.db_save_conversation_turn"),
-            patch(
-                "src.telegram.prompt.build_telegram_system_prompt", return_value="sys"
-            ),
+            patch("src.telegram.prompt.build_telegram_system_prompt", return_value="sys"),
             patch("src.workflows_config.get_workflows_config") as mock_cfg,
         ):
             cfg = MagicMock()

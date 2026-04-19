@@ -15,7 +15,6 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import pytest
 from pydantic import Field
 
 from src.tools.spec import ToolInput, ToolRegistry, ToolSpec
@@ -37,9 +36,7 @@ def _dummy_executor(inp: dict) -> str:
     return "ok"
 
 
-def _make_spec(
-    name="test_tool", risk="none", dashboard_allowed=False, category="web", group=None
-):
+def _make_spec(name="test_tool", risk="none", dashboard_allowed=False, category="web", group=None):
     return ToolSpec(
         name=name,
         description="A test tool",
@@ -144,18 +141,14 @@ class TestToolRegistry:
     def _make_registry(self):
         return ToolRegistry(
             [
-                _make_spec(
-                    "tool_a", risk="none", dashboard_allowed=True, category="web"
-                ),
+                _make_spec("tool_a", risk="none", dashboard_allowed=True, category="web"),
                 _make_spec(
                     "tool_b",
                     risk="high",
                     dashboard_allowed=False,
                     category="filesystem",
                 ),
-                _make_spec(
-                    "tool_c", risk="critical", dashboard_allowed=True, category="code"
-                ),
+                _make_spec("tool_c", risk="critical", dashboard_allowed=True, category="code"),
             ]
         )
 

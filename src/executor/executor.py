@@ -5,10 +5,10 @@ Accetta ToolSpec invece di un callable grezzo: l'input viene validato tramite
 lo schema Pydantic prima dell'esecuzione.
 """
 
-import asyncio
 import logging
 import time
-from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any
 
 from src.actions.base import ActionResult, ActionStatus
 from src.config import TOOL_TIMEOUT_SECONDS
@@ -125,15 +125,11 @@ def execute_with_retry(
             import concurrent.futures
 
             try:
-                with concurrent.futures.ThreadPoolExecutor(
-                    max_workers=1
-                ) as executor_pool:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor_pool:
                     future = executor_pool.submit(executor_fn, validated)
                     result = future.result(timeout=TOOL_TIMEOUT_SECONDS)
             except concurrent.futures.TimeoutError:
-                logger.warning(
-                    f"[Executor] Tool '{name}' timed out after {TOOL_TIMEOUT_SECONDS}s"
-                )
+                logger.warning(f"[Executor] Tool '{name}' timed out after {TOOL_TIMEOUT_SECONDS}s")
                 return ActionResult(
                     status=ActionStatus.FAILED,
                     message=f"Tool '{name}' timed out after {TOOL_TIMEOUT_SECONDS}s",

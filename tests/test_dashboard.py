@@ -11,7 +11,7 @@ os.environ["ADMIN_CHAT_ID"] = "12345"
 os.environ["DB_BACKEND"] = "sqlite"
 os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = ""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -47,11 +47,9 @@ class TestDashboardStats:
         from src.config import RATE_LIMIT_PER_HOUR, RATE_LIMIT_PER_MINUTE
 
         linux_user = os.environ.get("USER", "argos")
-        user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (
-            2**31
-        )
+        user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)
 
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         minute_win = now.strftime("%Y-%m-%dT%H:%M:00Z")
         hour_win = now.strftime("%Y-%m-%dT%H:00:00Z")
 
@@ -105,7 +103,7 @@ class TestDashboardStats:
     def test_security_stats(self):
         import datetime
 
-        now = datetime.datetime.now(datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.UTC)
         today = now.strftime("%Y-%m-%d")
 
         _test_conn.execute("""CREATE TABLE IF NOT EXISTS tg_suspicious_memories (

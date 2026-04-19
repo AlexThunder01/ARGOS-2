@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Optional
 
 from litellm import acompletion
 from tenacity import (
@@ -36,7 +36,7 @@ class ToolCall:
 class LLMResponse:
     """Structured response from one LLM completion call."""
 
-    content: Optional[str]
+    content: str | None
     tool_calls: list[ToolCall] = field(default_factory=list)
     prompt_tokens: int = 0
     completion_tokens: int = 0
@@ -45,10 +45,10 @@ class LLMResponse:
 def _build_kwargs(
     model: str,
     messages: list[dict],
-    tools: Optional[list[dict]],
+    tools: list[dict] | None,
     temperature: float,
-    api_key: Optional[str],
-    api_base: Optional[str],
+    api_key: str | None,
+    api_base: str | None,
     stream: bool = False,
 ) -> dict:
     kwargs: dict = {
@@ -88,11 +88,11 @@ def _parse_tool_calls(raw_tool_calls) -> list[ToolCall]:
 )
 async def complete(
     messages: list[dict],
-    tools: Optional[list[dict]] = None,
-    model: Optional[str] = None,
+    tools: list[dict] | None = None,
+    model: str | None = None,
     temperature: float = 0.0,
-    api_key: Optional[str] = None,
-    api_base: Optional[str] = None,
+    api_key: str | None = None,
+    api_base: str | None = None,
 ) -> LLMResponse:
     """Single async LLM completion call via LiteLLM with automatic retry."""
     from src.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
@@ -120,10 +120,10 @@ async def complete(
 
 async def stream(
     messages: list[dict],
-    model: Optional[str] = None,
+    model: str | None = None,
     temperature: float = 0.0,
-    api_key: Optional[str] = None,
-    api_base: Optional[str] = None,
+    api_key: str | None = None,
+    api_base: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Streaming LLM call via LiteLLM. Yields text chunks."""
     from src.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL

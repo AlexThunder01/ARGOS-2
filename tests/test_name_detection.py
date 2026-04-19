@@ -59,11 +59,7 @@ def _detect_name(text: str):
     if negation:
         return None  # cancellazione esplicita
 
-    m = (
-        _RE_INTRO.search(text)
-        or _RE_INTRO_LOWER.search(text)
-        or _RE_CORRECTION.search(text)
-    )
+    m = _RE_INTRO.search(text) or _RE_INTRO_LOWER.search(text) or _RE_CORRECTION.search(text)
     return m.group(1).capitalize() if m else None
 
 

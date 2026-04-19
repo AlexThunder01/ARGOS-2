@@ -37,7 +37,7 @@ def read_file_tool(inp):
     if os.path.isdir(path):
         return "Target is a directory, use list_files instead."
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             return f"📄 CONTENT:\n{f.read(3000)}"
     except Exception as e:
         return f"Error: {e}"

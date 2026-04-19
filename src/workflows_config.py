@@ -12,7 +12,6 @@ import atexit
 import logging
 import os
 import threading
-from typing import List
 
 import yaml
 from watchdog.events import FileSystemEventHandler
@@ -32,20 +31,12 @@ class WorkflowsConfig:
         return self._data.get("gmail_assistant", {}).get("enabled", False)
 
     @property
-    def ignore_senders(self) -> List[str]:
-        return (
-            self._data.get("gmail_assistant", {})
-            .get("filters", {})
-            .get("ignore_senders", [])
-        )
+    def ignore_senders(self) -> list[str]:
+        return self._data.get("gmail_assistant", {}).get("filters", {}).get("ignore_senders", [])
 
     @property
-    def allowed_languages(self) -> List[str]:
-        return (
-            self._data.get("gmail_assistant", {})
-            .get("filters", {})
-            .get("allowed_languages", [])
-        )
+    def allowed_languages(self) -> list[str]:
+        return self._data.get("gmail_assistant", {}).get("filters", {}).get("allowed_languages", [])
 
     @property
     def min_priority(self) -> str:
@@ -66,11 +57,7 @@ class WorkflowsConfig:
 
     @property
     def custom_signature(self) -> str:
-        return (
-            self._data.get("gmail_assistant", {})
-            .get("behavior", {})
-            .get("custom_signature", "")
-        )
+        return self._data.get("gmail_assistant", {}).get("behavior", {}).get("custom_signature", "")
 
     # --- Telegram Chat Module Properties ---
 
@@ -92,11 +79,7 @@ class WorkflowsConfig:
 
     @property
     def telegram_persona(self) -> str:
-        return (
-            self._data.get("telegram_assistant", {})
-            .get("identity", {})
-            .get("persona", "")
-        )
+        return self._data.get("telegram_assistant", {}).get("identity", {}).get("persona", "")
 
     @property
     def telegram_welcome_message(self) -> str:
@@ -148,11 +131,7 @@ class WorkflowsConfig:
 
     @property
     def telegram_auto_approve(self) -> bool:
-        return (
-            self._data.get("telegram_assistant", {})
-            .get("admin", {})
-            .get("auto_approve", False)
-        )
+        return self._data.get("telegram_assistant", {}).get("admin", {}).get("auto_approve", False)
 
     @property
     def telegram_notify_on_new_user(self) -> bool:
@@ -166,16 +145,14 @@ class WorkflowsConfig:
 # Thread-Safe Global Cache
 _config_lock = threading.Lock()
 _config_cache = {}
-_config_file_path = os.path.join(
-    os.path.dirname(os.path.dirname(__file__)), "config.yaml"
-)
+_config_file_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
 
 
 def _reload_config():
     """Reads the YAML file from disk and updates the in-memory cache safely."""
     try:
         if os.path.exists(_config_file_path):
-            with open(_config_file_path, "r", encoding="utf-8") as f:
+            with open(_config_file_path, encoding="utf-8") as f:
                 new_config = yaml.safe_load(f) or {}
                 with _config_lock:
                     _config_cache.clear()
@@ -199,9 +176,7 @@ _reload_config()
 _observer = Observer()
 # We watch the parent directory because editors (vim/nano) often do atomic saves
 # (creating a new file and renaming), which breaks single-file watches.
-_observer.schedule(
-    ConfigFileHandler(), path=os.path.dirname(_config_file_path), recursive=False
-)
+_observer.schedule(ConfigFileHandler(), path=os.path.dirname(_config_file_path), recursive=False)
 _observer.start()
 atexit.register(_observer.stop)
 

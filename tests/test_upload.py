@@ -15,7 +15,6 @@ import pytest
 
 import src.upload as upload_module
 from src.upload import (
-    ALLOWED_EXTENSIONS,
     build_attachment_context,
     cleanup_expired,
     resolve_upload_id,

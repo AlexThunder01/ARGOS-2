@@ -111,15 +111,12 @@ def validate_upload(filename: str, size: int) -> None:
     suffix = Path(filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
         raise ValueError(
-            f"File type not supported: {suffix!r}. "
-            f"Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+            f"File type not supported: {suffix!r}. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
         )
     max_bytes = _get_max_bytes()
     if size > max_bytes:
         mb = max_bytes // (1024 * 1024)
-        raise ValueError(
-            f"File too large (max {mb} MB, got {size // (1024 * 1024)} MB)"
-        )
+        raise ValueError(f"File too large (max {mb} MB, got {size // (1024 * 1024)} MB)")
 
 
 def save_upload(user_id: int, filename: str, content: bytes) -> str:
@@ -172,9 +169,7 @@ def build_attachment_context(upload_ids: list[str]) -> str:
             path = resolve_upload_id(uid)
             size_bytes = os.path.getsize(path)
             size_kb = size_bytes / 1024
-            size_str = (
-                f"{size_kb:.0f} KB" if size_kb < 1024 else f"{size_kb / 1024:.1f} MB"
-            )
+            size_str = f"{size_kb:.0f} KB" if size_kb < 1024 else f"{size_kb / 1024:.1f} MB"
             suffix = Path(path).suffix.lower()
             ftype = suffix.upper().lstrip(".")
             tool = _EXT_TO_TOOL.get(suffix, "read_file")

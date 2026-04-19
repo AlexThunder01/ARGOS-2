@@ -17,13 +17,10 @@ os.environ["DB_BACKEND"] = "sqlite"
 
 import sqlite3
 
-import pytest
-
 from src.db.migrations import (
     _applied_versions,
     _ensure_tracking_table,
     run_migrations,
-    run_sqlite_migrations,
 )
 
 
@@ -80,9 +77,7 @@ class TestMigrationRunner:
         run_migrations(test_db)
         second_applied = _applied_versions(test_db)
 
-        assert first_applied == second_applied, (
-            "Second run should not duplicate migrations"
-        )
+        assert first_applied == second_applied, "Second run should not duplicate migrations"
         assert 1 in second_applied and 2 in second_applied
 
     def test_applied_versions_returns_correct_set_after_migration(self, test_db):
@@ -201,9 +196,7 @@ class TestFeatureParity:
 
         # Check expected columns
         assert "user_id" in columns, "tg_rate_limits should have user_id column"
-        assert "window_start" in columns, (
-            "tg_rate_limits should have window_start column"
-        )
+        assert "window_start" in columns, "tg_rate_limits should have window_start column"
         assert "hit_count" in columns, "tg_rate_limits should have hit_count column"
 
     def test_feature_parity_schema_migrations_tracking_table(self, test_db):
@@ -227,9 +220,7 @@ class TestFeatureParity:
         # Check key columns exist
         assert "version" in columns, "schema_migrations should have version column"
         assert "name" in columns, "schema_migrations should have name column"
-        assert "applied_at" in columns, (
-            "schema_migrations should have applied_at column"
-        )
+        assert "applied_at" in columns, "schema_migrations should have applied_at column"
 
 
 class TestMigrationTracking:
@@ -266,16 +257,12 @@ class TestMigrationTracking:
 
         if isinstance(test_db, sqlite3.Connection):
             # SQLite
-            cursor = test_db.execute(
-                "SELECT version, name FROM schema_migrations ORDER BY version"
-            )
+            cursor = test_db.execute("SELECT version, name FROM schema_migrations ORDER BY version")
             records = list(cursor.fetchall())
         else:
             # PostgreSQL
             cursor = test_db.cursor()
-            cursor.execute(
-                "SELECT version, name FROM schema_migrations ORDER BY version"
-            )
+            cursor.execute("SELECT version, name FROM schema_migrations ORDER BY version")
             records = list(cursor.fetchall())
 
         # Should have both migrations recorded
@@ -287,9 +274,5 @@ class TestMigrationTracking:
 
         # Names should match module names
         names = {r[0]: r[1] for r in records}
-        assert "001_telegram_module" in names.values(), (
-            "Migration 001 name should be recorded"
-        )
-        assert "002_rate_limits" in names.values(), (
-            "Migration 002 name should be recorded"
-        )
+        assert "001_telegram_module" in names.values(), "Migration 001 name should be recorded"
+        assert "002_rate_limits" in names.values(), "Migration 002 name should be recorded"

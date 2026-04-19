@@ -111,9 +111,7 @@ class TestFilesystemTools:
         assert "Hello World" in result
 
         # Modify (overwrite)
-        result = TOOLS["modify_file"](
-            {"path": test_file, "content": "Updated", "mode": "write"}
-        )
+        result = TOOLS["modify_file"]({"path": test_file, "content": "Updated", "mode": "write"})
         assert "Modified" in result
 
         # Read again to verify modification
@@ -127,9 +125,7 @@ class TestFilesystemTools:
     def test_modify_append(self, tmp_path):
         test_file = str(tmp_path / "append_test.txt")
         TOOLS["create_file"]({"path": test_file, "content": "Line1"})
-        TOOLS["modify_file"](
-            {"path": test_file, "content": "\nLine2", "mode": "append"}
-        )
+        TOOLS["modify_file"]({"path": test_file, "content": "\nLine2", "mode": "append"})
         result = TOOLS["read_file"]({"path": test_file})
         assert "Line1" in result
         assert "Line2" in result
@@ -148,9 +144,7 @@ class TestFilesystemTools:
         assert "📂" in result
 
     def test_read_nonexistent_file(self, tmp_path):
-        result = TOOLS["read_file"](
-            {"path": str(tmp_path / "this_file_does_not_exist.txt")}
-        )
+        result = TOOLS["read_file"]({"path": str(tmp_path / "this_file_does_not_exist.txt")})
         assert "not found" in result.lower()
 
     def test_rename_file(self, tmp_path):
@@ -216,9 +210,7 @@ class TestNetworkToolsMocked:
     @patch("src.tools.web.DDGS", create=True)
     def test_web_search_success(self, mock_ddgs_cls):
         mock_instance = MagicMock()
-        mock_instance.text.return_value = [
-            {"title": "Test Result", "body": "This is a test."}
-        ]
+        mock_instance.text.return_value = [{"title": "Test Result", "body": "This is a test."}]
         mock_ddgs_cls.return_value = mock_instance
 
         with patch("ddgs.DDGS", mock_ddgs_cls):
@@ -539,9 +531,7 @@ class TestFilesystemLLMEdgeCases:
     def sandbox(self, tmp_path, monkeypatch):
         monkeypatch.setattr("src.tools.helpers._HOME", str(tmp_path))
         # Also redirect the desktop default to tmp_path so "DESKTOP" resolves there
-        monkeypatch.setattr(
-            "src.tools.helpers._get_desktop_path", lambda: str(tmp_path)
-        )
+        monkeypatch.setattr("src.tools.helpers._get_desktop_path", lambda: str(tmp_path))
 
     # --- list_files ---
 
@@ -620,9 +610,7 @@ class TestFilesystemLLMEdgeCases:
         existing = tmp_path / "existing.txt"
         existing.write_text("original content")
 
-        result = TOOLS["create_file"](
-            {"filename": str(existing), "content": "overwrite attempt"}
-        )
+        result = TOOLS["create_file"]({"filename": str(existing), "content": "overwrite attempt"})
         assert "already exists" in result.lower() or "error" in result.lower()
         # Original content must be preserved
         assert existing.read_text() == "original content"
@@ -637,9 +625,7 @@ class TestFilesystemLLMEdgeCases:
 
     def test_modify_file_nonexistent(self, tmp_path):
         """LLM tries to modify a file that doesn't exist yet."""
-        result = TOOLS["modify_file"](
-            {"filename": str(tmp_path / "ghost.txt"), "content": "data"}
-        )
+        result = TOOLS["modify_file"]({"filename": str(tmp_path / "ghost.txt"), "content": "data"})
         assert "not found" in result.lower() or "error" in result.lower()
 
     def test_modify_file_empty_filename(self):
@@ -726,9 +712,7 @@ class TestNetworkLLMEdgeCases:
 
         result = TOOLS["web_scrape"]({"url": "https://example.com/file.bin"})
         assert (
-            "non-text" in result.lower()
-            or "error" in result.lower()
-            or "cannot" in result.lower()
+            "non-text" in result.lower() or "error" in result.lower() or "cannot" in result.lower()
         )
 
     @patch("src.tools.scraper.http_client.get")
@@ -788,9 +772,7 @@ class TestNetworkLLMEdgeCases:
             eur_mock = MagicMock()
             eur_mock.fast_info.last_price = None  # conversion unavailable
 
-            mock_ticker_cls.side_effect = lambda sym: (
-                eur_mock if sym == "EURUSD=X" else asset_mock
-            )
+            mock_ticker_cls.side_effect = lambda sym: eur_mock if sym == "EURUSD=X" else asset_mock
             result = TOOLS["finance_price"]({"asset": "gold"})
             assert "unavailable" in result.lower() or "eur" in result.lower()
 

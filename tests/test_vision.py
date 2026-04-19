@@ -13,9 +13,7 @@ from src.vision import _call_vlm
 def test_vlm_openai_payload(mock_post):
     mock_response = mock_post.return_value
     mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "choices": [{"message": {"content": "Screen contents"}}]
-    }
+    mock_response.json.return_value = {"choices": [{"message": {"content": "Screen contents"}}]}
 
     result = _call_vlm("What is this?", "base64_img_data")
 
@@ -79,8 +77,7 @@ def test_vlm_payload_has_image_content(mock_post):
     # Content can be a list (multimodal) or string
     if isinstance(content, list):
         has_image = any(
-            "image" in str(part).lower() or "abc123base64data" in str(part)
-            for part in content
+            "image" in str(part).lower() or "abc123base64data" in str(part) for part in content
         )
         assert has_image, "Image data not found in multimodal message"
     else:

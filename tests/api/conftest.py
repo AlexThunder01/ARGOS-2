@@ -11,9 +11,7 @@ import os
 import sqlite3
 import sys
 
-sys.path.insert(
-    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 os.environ["DB_BACKEND"] = "sqlite"
 os.environ["ARGOS_API_KEY"] = ""

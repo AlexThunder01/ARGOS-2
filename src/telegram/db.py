@@ -14,8 +14,6 @@ from datetime import date
 
 from src.db.connection import DB_BACKEND
 from src.db.repository import (
-    _Ctx,
-    _date_expr,
     _db,
     _now_expr,
     _stale_expr,
@@ -44,9 +42,7 @@ def db_get_user(user_id: int) -> dict | None:
         return dict(row) if row else None
 
 
-def db_register_user(
-    user_id: int, first_name: str = "", username: str = "", last_name: str = ""
-):
+def db_register_user(user_id: int, first_name: str = "", username: str = "", last_name: str = ""):
     with _db() as db:
         if DB_BACKEND == "postgres":
             db.execute(
@@ -93,9 +89,7 @@ def db_increment_msg_count(user_id: int):
     """Increments message counters. Lazily resets daily counter when the date changes."""
     with _db() as db:
         today = date.today().isoformat()
-        cur = db.execute(
-            "SELECT last_daily_reset FROM tg_users WHERE user_id=?", (user_id,)
-        )
+        cur = db.execute("SELECT last_daily_reset FROM tg_users WHERE user_id=?", (user_id,))
         row = cur.fetchone()
 
         reset_val = None
@@ -206,9 +200,7 @@ def db_save_conversation_turn(user_id: int, user_text: str, assistant_text: str)
         db.commit()
 
 
-def db_get_conversation_window(
-    user_id: int, limit: int = 20, max_tokens: int = 4000
-) -> list[dict]:
+def db_get_conversation_window(user_id: int, limit: int = 20, max_tokens: int = 4000) -> list[dict]:
     with _db() as db:
         cur = db.execute(
             "SELECT role, content, token_count FROM tg_conversations "
@@ -284,9 +276,7 @@ def db_get_user_stats(user_id: int) -> dict:
             (user_id,),
         )
         user = cur.fetchone()
-        cur2 = db.execute(
-            "SELECT COUNT(*) as c FROM tg_memory_vectors WHERE user_id=?", (user_id,)
-        )
+        cur2 = db.execute("SELECT COUNT(*) as c FROM tg_memory_vectors WHERE user_id=?", (user_id,))
         mem_count = cur2.fetchone()
         cur3 = db.execute(
             "SELECT COUNT(*) as c FROM tg_tasks WHERE user_id=? AND status='open'",

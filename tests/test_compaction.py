@@ -16,7 +16,6 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import pytest
 
 from src.core.compaction import COMPACT_MIN_MESSAGES, compact_conversation
 
@@ -55,9 +54,7 @@ This is the private reasoning block. It should be stripped.
 
 SUMMARY_WITH_TAGS = f"<summary>\n{GOOD_SUMMARY}\n</summary>"
 
-SUMMARY_WITH_BOTH = (
-    f"<analysis>\nreasoning\n</analysis>\n<summary>\n{GOOD_SUMMARY}\n</summary>"
-)
+SUMMARY_WITH_BOTH = f"<analysis>\nreasoning\n</analysis>\n<summary>\n{GOOD_SUMMARY}\n</summary>"
 
 
 # ==========================================================================

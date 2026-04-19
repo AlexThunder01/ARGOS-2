@@ -15,7 +15,7 @@ If the model produces free-form text (final response), it is treated as "done: t
 import logging
 import re
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from src.llm.client import LLMResponse
@@ -68,11 +68,11 @@ class PlannerDecision:
     """
 
     thought: str
-    tool: Optional[str]
-    tool_input: Optional[dict]
+    tool: str | None
+    tool_input: dict | None
     confidence: float
     done: bool
-    response: Optional[str]  # Final textual reply (when done=True)
+    response: str | None  # Final textual reply (when done=True)
     raw: str  # Raw model output (for debugging)
 
 
@@ -93,9 +93,7 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
         text = _ANALYSIS_RE.sub("", text).strip()
         if not text:
             # Model returned only an <analysis> block — treat as no structured output
-            logger.debug(
-                "[Planner] Response was only <analysis> — treating as final text"
-            )
+            logger.debug("[Planner] Response was only <analysis> — treating as final text")
             return PlannerDecision(
                 thought="(analysis block only, no JSON)",
                 tool=None,
@@ -193,9 +191,7 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
     # inject a format-correction message and retry.
     import re as _re
 
-    _looks_like_action = text.startswith("{") and _re.search(
-        r'"(action|tool)"\s*:', text
-    )
+    _looks_like_action = text.startswith("{") and _re.search(r'"(action|tool)"\s*:', text)
     if _looks_like_action:
         # Try regex to salvage tool name even from truncated JSON
         _tool_match = _re.search(r'"tool"\s*:\s*"([^"]+)"', text)
@@ -206,9 +202,7 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
             try:
                 import json as _json
 
-                _salvaged_input = (
-                    _json.loads(_input_match.group(1)) if _input_match else {}
-                )
+                _salvaged_input = _json.loads(_input_match.group(1)) if _input_match else {}
             except Exception:
                 _salvaged_input = {}
             logger.warning(

@@ -39,20 +39,13 @@ from src.tools.downloader import (
 
 class TestExtractFilenameFromCD:
     def test_plain_filename(self):
-        assert (
-            _extract_filename_from_cd('attachment; filename="report.pdf"')
-            == "report.pdf"
-        )
+        assert _extract_filename_from_cd('attachment; filename="report.pdf"') == "report.pdf"
 
     def test_filename_without_quotes(self):
-        assert (
-            _extract_filename_from_cd("attachment; filename=report.pdf") == "report.pdf"
-        )
+        assert _extract_filename_from_cd("attachment; filename=report.pdf") == "report.pdf"
 
     def test_utf8_filename(self):
-        result = _extract_filename_from_cd(
-            "attachment; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf"
-        )
+        result = _extract_filename_from_cd("attachment; filename*=UTF-8''r%C3%A9sum%C3%A9.pdf")
         assert result is not None
         assert "sum" in result  # résumé decoded
 
@@ -73,10 +66,7 @@ class TestExtractFilenameFromCD:
 
 class TestExtractFilenameFromURL:
     def test_simple_url(self):
-        assert (
-            _extract_filename_from_url("https://example.com/files/data.csv")
-            == "data.csv"
-        )
+        assert _extract_filename_from_url("https://example.com/files/data.csv") == "data.csv"
 
     def test_url_with_query(self):
         result = _extract_filename_from_url("https://example.com/file.pdf?token=abc")
@@ -213,9 +203,7 @@ class TestDownloadSuccess:
         mock_resp.iter_content = MagicMock(return_value=[content])
         mock_get.return_value = mock_resp
 
-        result = download_file_tool(
-            {"url": "https://example.com/test.pdf", "save_path": save_path}
-        )
+        result = download_file_tool({"url": "https://example.com/test.pdf", "save_path": save_path})
         assert "✅" in result or "Downloaded" in result
 
     @patch("src.tools.downloader._normalize_path")
@@ -236,9 +224,7 @@ class TestDownloadSuccess:
         mock_resp.iter_content = MagicMock(return_value=iter(chunks))
         mock_get.return_value = mock_resp
 
-        result = download_file_tool(
-            {"url": "https://example.com/big.bin", "save_path": save_path}
-        )
+        result = download_file_tool({"url": "https://example.com/big.bin", "save_path": save_path})
         assert "error" in result.lower()
         assert "size" in result.lower() or "limit" in result.lower()
         # File should have been cleaned up
@@ -274,9 +260,7 @@ class TestDownloadErrors:
 
         mock_resp = MagicMock()
         mock_resp.status_code = 404
-        mock_resp.raise_for_status.side_effect = requests.exceptions.HTTPError(
-            response=mock_resp
-        )
+        mock_resp.raise_for_status.side_effect = requests.exceptions.HTTPError(response=mock_resp)
         mock_get.return_value = mock_resp
         result = download_file_tool({"url": "https://example.com/missing.pdf"})
         assert "error" in result.lower()

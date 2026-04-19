@@ -54,9 +54,7 @@ class TestCoreAgentInit:
     def test_init_auto_user_id_from_env(self):
         """User ID should be derived from $USER via sha256 hash."""
         linux_user = os.environ.get("USER", "argos")
-        expected = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (
-            2**31
-        )
+        expected = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)
         agent = CoreAgent()
         assert agent.user_id == expected
 

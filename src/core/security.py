@@ -10,7 +10,7 @@ Promoted from src/telegram/memory.py to be interface-agnostic.
 
 import logging
 import re
-from typing import Callable, Optional
+from collections.abc import Callable
 
 logger = logging.getLogger("argos")
 
@@ -110,9 +110,7 @@ def validate_with_llm_judge(fact_content: str, llm_call_fn: Callable) -> bool:
             logger.warning(f"[Security] LLM Judge flagged: {fact_content[:80]}...")
         return is_safe
     except Exception as e:
-        logger.exception(
-            f"[Security] LLM Judge call failed — blocking as precaution: {e}"
-        )
+        logger.exception(f"[Security] LLM Judge call failed — blocking as precaution: {e}")
         return False  # Fail-safe: block on LLM errors
 
 
@@ -123,7 +121,7 @@ def validate_with_llm_judge(fact_content: str, llm_call_fn: Callable) -> bool:
 
 def run_security_pipeline(
     text: str,
-    llm_call_fn: Optional[Callable] = None,
+    llm_call_fn: Callable | None = None,
     risk_threshold: float = 0.5,
 ) -> tuple[bool, float, str]:
     """

@@ -96,9 +96,7 @@ def _check_migrations() -> str:
             applied_count = cursor.fetchone()[0]
 
         # Count pending migrations (matching pattern [0-9][0-9][0-9]_*.py)
-        migrations_dir = (
-            Path(__file__).parent.parent.parent / "src" / "db" / "migrations"
-        )
+        migrations_dir = Path(__file__).parent.parent.parent / "src" / "db" / "migrations"
         pending_files = list(migrations_dir.glob("[0-9][0-9][0-9]_*.py"))
         total_migrations = len(pending_files)
 
@@ -106,9 +104,7 @@ def _check_migrations() -> str:
             logger.info(f"[Migrations] All {total_migrations} migrations applied")
             return "applied"
         else:
-            logger.warning(
-                f"[Migrations] {applied_count}/{total_migrations} migrations applied"
-            )
+            logger.warning(f"[Migrations] {applied_count}/{total_migrations} migrations applied")
             return "pending"
     except Exception as e:
         logger.error(f"[Migrations] Health check failed: {e}")

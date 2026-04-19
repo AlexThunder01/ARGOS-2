@@ -1,4 +1,3 @@
-import pytest
 from pydantic import Field
 
 from src.tools.spec import ToolInput, ToolRegistry, ToolSpec

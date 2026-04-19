@@ -14,7 +14,6 @@ Coverage:
   - call_lightweight()       : modello leggero, max_retries=1
 """
 
-import asyncio
 import json
 import os
 import sys
@@ -426,7 +425,7 @@ def _make_stream_mock_openai(chunks: list[str]) -> MagicMock:
     lines = []
     for chunk in chunks:
         data = json.dumps({"choices": [{"delta": {"content": chunk}}]})
-        lines.append(f"data: {data}".encode("utf-8"))
+        lines.append(f"data: {data}".encode())
     lines.append(b"data: [DONE]")
 
     mock_resp = MagicMock()
@@ -445,7 +444,7 @@ def _make_stream_mock_anthropic(chunks: list[str]) -> MagicMock:
     lines = []
     for chunk in chunks:
         data = json.dumps({"type": "content_block_delta", "delta": {"text": chunk}})
-        lines.append(f"data: {data}".encode("utf-8"))
+        lines.append(f"data: {data}".encode())
 
     mock_resp = MagicMock()
     mock_resp.status_code = 200
@@ -471,9 +470,7 @@ class TestThinkStream:
                 mock_chunk = MagicMock()
                 mock_chunk.choices = [MagicMock()]
                 mock_chunk.choices[0].delta = MagicMock()
-                mock_chunk.choices[0].delta.content = chunk_data["choices"][0]["delta"][
-                    "content"
-                ]
+                mock_chunk.choices[0].delta.content = chunk_data["choices"][0]["delta"]["content"]
                 yield mock_chunk
 
         mock_acompletion.return_value = mock_stream_generator()
@@ -806,9 +803,7 @@ class TestMicroCompact:
                     "content": '{"action": {"tool": "list_files", "input": {}}}',
                 }
             )
-            agent.history.append(
-                {"role": "user", "content": f"TOOL RESULT: result {i}"}
-            )
+            agent.history.append({"role": "user", "content": f"TOOL RESULT: result {i}"})
         return agent
 
     def test_noop_when_no_compactable_messages(self):
@@ -867,9 +862,7 @@ class TestMicroCompact:
     def test_world_state_messages_cleared(self):
         agent = ArgosAgent()
         for i in range(MICRO_COMPACT_KEEP_RECENT + 2):
-            agent.history.append(
-                {"role": "system", "content": f"WORLD STATE\nstep={i}"}
-            )
+            agent.history.append({"role": "system", "content": f"WORLD STATE\nstep={i}"})
         cleared = agent.micro_compact()
         assert cleared == 2
 
@@ -919,9 +912,7 @@ class TestTrimHistoryTiered:
 
         # Add enough tool results to exceed 80% of the extra budget
         for i in range(15):
-            agent.history.append(
-                {"role": "user", "content": f"TOOL RESULT: {'x' * 50}"}
-            )
+            agent.history.append({"role": "user", "content": f"TOOL RESULT: {'x' * 50}"})
 
         original_len = len(agent.history)
         agent.trim_history()

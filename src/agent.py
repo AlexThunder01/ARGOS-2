@@ -17,7 +17,7 @@ import logging
 import os
 import platform
 import time
-from typing import TYPE_CHECKING, AsyncGenerator, Optional
+from typing import TYPE_CHECKING, Optional
 
 logger = logging.getLogger("argos")
 
@@ -132,7 +132,7 @@ class ArgosAgent:
             registry = REGISTRY
         self._registry = registry
 
-        static_context = """
+        static_context = f"""
         You are ARGOS, an intelligent and precise virtual assistant.
         PRIMARY LANGUAGE: Italian. Always respond in Italian by default, UNLESS the user speaks to you in another language — in that case, respond in their language.
 
@@ -161,9 +161,7 @@ class ArgosAgent:
         6. FILESYSTEM — EXPLORE BEFORE READING: If the user asks to read, open, or inspect a file without specifying an exact path, ALWAYS call `list_files` first to discover what files actually exist. NEVER invent or guess file paths. Every path you use in `read_file` or any other file tool MUST come from a prior `list_files` result in this conversation.
         7. FILE NOT FOUND — NO GUESSING: If any file operation returns "File not found" or "not found", do NOT retry with a different invented path. Call `list_files` on the relevant directory to discover real paths, then retry with a real one. Guessing a different path repeatedly is always wrong.
 
-        """.format(
-            os_system=os_system, user=user, home_dir=home_dir, desktop_path=desktop_path
-        )
+        """
 
         self._static_context = static_context
         self._prompt_suffix = "\n\n" + build_system_prompt_suffix()
@@ -172,9 +170,7 @@ class ArgosAgent:
 
     def _init_history_with_tools(self, tool_block: str):
         """Resets history using a specific tool block (enables per-task Tool RAG)."""
-        self.system_prompt = (
-            self._static_context + "\n" + tool_block + self._prompt_suffix
-        )
+        self.system_prompt = self._static_context + "\n" + tool_block + self._prompt_suffix
         self.history = [{"role": "system", "content": self.system_prompt}]
 
     def _init_history(self):
@@ -221,9 +217,7 @@ class ArgosAgent:
             return 0
 
         compactable_indices = [
-            i
-            for i, msg in enumerate(self.history[1:], start=1)
-            if _is_compactable_message(msg)
+            i for i, msg in enumerate(self.history[1:], start=1) if _is_compactable_message(msg)
         ]
 
         # Keep the most recent MICRO_COMPACT_KEEP_RECENT; clear everything older.
@@ -297,9 +291,7 @@ class ArgosAgent:
             try:
                 from src.core.compaction import compact_conversation
 
-                new_history = compact_conversation(
-                    self.history, self._call_for_compaction
-                )
+                new_history = compact_conversation(self.history, self._call_for_compaction)
                 if len(new_history) < len(self.history):
                     self.history = new_history
                     self._compact_count += 1

@@ -61,9 +61,7 @@ def init_otel():
         return _tracer
 
     except ImportError:
-        logger.warning(
-            "[OTel] opentelemetry packages not installed — tracing disabled."
-        )
+        logger.warning("[OTel] opentelemetry packages not installed — tracing disabled.")
         _tracer = _NoOpTracer()
         return _tracer
     except Exception as e:

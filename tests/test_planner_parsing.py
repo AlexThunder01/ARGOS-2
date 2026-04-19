@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
-from src.planner.planner import PlannerDecision, parse_planner_response
+from src.planner.planner import parse_planner_response
 from src.utils import extract_json
 
 # ==========================================================================
@@ -145,9 +145,7 @@ class TestPlannerEmbeddedJson:
 
     def test_json_before_trailing_text(self):
         """JSON seguito da testo dopo la chiusura della parentesi."""
-        raw = (
-            '{"thought":"ok","response":"Risposta.","done":true}\nTesto dopo ignorato.'
-        )
+        raw = '{"thought":"ok","response":"Risposta.","done":true}\nTesto dopo ignorato.'
         d = parse_planner_response(raw)
         assert d.done is True
         assert d.response == "Risposta."
@@ -505,9 +503,7 @@ class TestToolResultRoleRegression:
             }
         )
 
-        success_result = ActionResult(
-            status=ActionStatus.SUCCESS, message="risultato_echo"
-        )
+        success_result = ActionResult(status=ActionStatus.SUCCESS, message="risultato_echo")
 
         async def run():
             from unittest.mock import MagicMock
@@ -524,12 +520,8 @@ class TestToolResultRoleRegression:
             from src.llm.client import LLMResponse
 
             with (
-                patch.object(
-                    agent._llm, "think_async", new_callable=AsyncMock
-                ) as mock_think,
-                patch(
-                    "src.core.engine.execute_with_retry", return_value=success_result
-                ),
+                patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think,
+                patch("src.core.engine.execute_with_retry", return_value=success_result),
             ):
                 mock_think.side_effect = [
                     LLMResponse(content=tool_response),
@@ -542,9 +534,7 @@ class TestToolResultRoleRegression:
         # Engine now uses OpenAI native tool format: role="tool" with tool_call_id
         tool_result_msgs = [m for m in agent._llm.history if m.get("role") == "tool"]
         assert len(tool_result_msgs) >= 1, "Nessun tool result iniettato in history"
-        assert any(
-            "risultato_echo" in (m.get("content") or "") for m in tool_result_msgs
-        )
+        assert any("risultato_echo" in (m.get("content") or "") for m in tool_result_msgs)
 
 
 # ==========================================================================

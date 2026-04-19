@@ -204,9 +204,7 @@ def main():
 
         voice_ok = start_hybrid_listener()
         if not voice_ok:
-            logger.warning(
-                "Voice enabled but microphone unavailable, falling back to text input."
-            )
+            logger.warning("Voice enabled but microphone unavailable, falling back to text input.")
 
     # Status line
     mode_label = {
@@ -303,9 +301,7 @@ def main():
                     try:
                         from src.telegram.db import db_update_profile
 
-                        db_update_profile(
-                            agent.user_id, display_name=_name_m.group(1).capitalize()
-                        )
+                        db_update_profile(agent.user_id, display_name=_name_m.group(1).capitalize())
                     except Exception:
                         pass
                 elif _negation:
@@ -320,9 +316,7 @@ def main():
             agent._injected_history = conversation_history[-10:]
 
             # Handle @file: inline attachments
-            task_text, inline_ctx = _extract_inline_attachments(
-                user_input, agent.user_id
-            )
+            task_text, inline_ctx = _extract_inline_attachments(user_input, agent.user_id)
             if inline_ctx:
                 task_text = f"{task_text}\n\n{inline_ctx}"
             else:
@@ -335,9 +329,7 @@ def main():
 
             # Accumulate history for next turn (kept to last 10 messages)
             conversation_history.append({"role": "user", "content": user_input})
-            conversation_history.append(
-                {"role": "assistant", "content": result.response}
-            )
+            conversation_history.append({"role": "assistant", "content": result.response})
             if len(conversation_history) > 10:
                 conversation_history = conversation_history[-10:]
 

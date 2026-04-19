@@ -19,7 +19,6 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -158,16 +157,12 @@ class TestLoad:
         assert result == "cached content"
 
     def test_reads_from_disk_when_cache_empty(self, tmp_memory):
-        tmp_memory._path.write_text(
-            "<!-- Session memory — 2026-04-14 10:00 -->\ndisk content\n"
-        )
+        tmp_memory._path.write_text("<!-- Session memory — 2026-04-14 10:00 -->\ndisk content\n")
         result = tmp_memory.load()
         assert "disk content" in result
 
     def test_strips_html_comment_header(self, tmp_memory):
-        tmp_memory._path.write_text(
-            "<!-- Session memory — 2026-04-14 10:00 -->\nactual memory\n"
-        )
+        tmp_memory._path.write_text("<!-- Session memory — 2026-04-14 10:00 -->\nactual memory\n")
         result = tmp_memory.load()
         assert "<!--" not in result
         assert "actual memory" in result

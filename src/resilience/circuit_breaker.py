@@ -14,7 +14,8 @@ State machine:
 
 import logging
 import time
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger("argos")
 
@@ -43,8 +44,8 @@ class CircuitBreaker:
         self.failure_count: int = 0
         self.failure_threshold: int = failure_threshold
         self.timeout_seconds: int = timeout_seconds
-        self.last_failure_time: Optional[float] = None
-        self.half_open_time: Optional[float] = None
+        self.last_failure_time: float | None = None
+        self.half_open_time: float | None = None
 
     def call(self, fn: Callable, *args: Any, **kwargs: Any) -> Any:
         """Execute function with circuit breaker protection.
@@ -74,9 +75,7 @@ class CircuitBreaker:
                 # Timeout expired: transition to half-open for test call
                 old_state = self.state
                 self.state = "half-open"
-                logger.warning(
-                    f"[CircuitBreaker] State transition: {old_state} → {self.state}"
-                )
+                logger.warning(f"[CircuitBreaker] State transition: {old_state} → {self.state}")
             else:
                 # Still in cooldown: reject call
                 raise CircuitBreakerOpen(
@@ -94,9 +93,7 @@ class CircuitBreaker:
                 self.failure_count = 0
                 self.last_failure_time = None
                 self.half_open_time = None
-                logger.info(
-                    f"[CircuitBreaker] State transition: {old_state} → {self.state}"
-                )
+                logger.info(f"[CircuitBreaker] State transition: {old_state} → {self.state}")
 
             return result
 
@@ -109,12 +106,8 @@ class CircuitBreaker:
                 old_state = self.state
                 self.state = "open"
                 self.half_open_time = time.time()
-                logger.error(
-                    f"[CircuitBreaker] Circuit open after {self.failure_count} failures"
-                )
-                logger.warning(
-                    f"[CircuitBreaker] State transition: {old_state} → {self.state}"
-                )
+                logger.error(f"[CircuitBreaker] Circuit open after {self.failure_count} failures")
+                logger.warning(f"[CircuitBreaker] State transition: {old_state} → {self.state}")
 
             # Re-raise the exception to caller
             raise
@@ -138,7 +131,6 @@ class CircuitBreaker:
 
         Same semantics as call(), but awaits fn(*args, **kwargs).
         """
-        import asyncio
 
         self._is_failure_window_expired()
 
@@ -149,9 +141,7 @@ class CircuitBreaker:
             if elapsed > self.timeout_seconds:
                 old_state = self.state
                 self.state = "half-open"
-                logger.warning(
-                    f"[CircuitBreaker] State transition: {old_state} → {self.state}"
-                )
+                logger.warning(f"[CircuitBreaker] State transition: {old_state} → {self.state}")
             else:
                 raise CircuitBreakerOpen(
                     f"Circuit breaker is open (cooldown: {self.timeout_seconds - elapsed:.1f}s remaining)"
@@ -166,9 +156,7 @@ class CircuitBreaker:
                 self.failure_count = 0
                 self.last_failure_time = None
                 self.half_open_time = None
-                logger.info(
-                    f"[CircuitBreaker] State transition: {old_state} → {self.state}"
-                )
+                logger.info(f"[CircuitBreaker] State transition: {old_state} → {self.state}")
 
             return result
 
@@ -180,12 +168,8 @@ class CircuitBreaker:
                 old_state = self.state
                 self.state = "open"
                 self.half_open_time = time.time()
-                logger.error(
-                    f"[CircuitBreaker] Circuit open after {self.failure_count} failures"
-                )
-                logger.warning(
-                    f"[CircuitBreaker] State transition: {old_state} → {self.state}"
-                )
+                logger.error(f"[CircuitBreaker] Circuit open after {self.failure_count} failures")
+                logger.warning(f"[CircuitBreaker] State transition: {old_state} → {self.state}")
 
             raise
 
@@ -200,6 +184,4 @@ class CircuitBreaker:
         self.last_failure_time = None
         self.half_open_time = None
         if old_state != "closed":
-            logger.info(
-                f"[CircuitBreaker] State transition: {old_state} → {self.state}"
-            )
+            logger.info(f"[CircuitBreaker] State transition: {old_state} → {self.state}")

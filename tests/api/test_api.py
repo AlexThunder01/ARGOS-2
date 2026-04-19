@@ -23,11 +23,9 @@ import os
 import sys
 
 # Risali alla root del progetto (tests/api/ → tests/ → root)
-sys.path.insert(
-    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
@@ -142,9 +140,7 @@ class TestRunEndpoint:
             new_callable=AsyncMock,
             return_value=self._make_task_response(),
         ):
-            r = client.post(
-                "/run", json={"task": "test", "require_confirmation": False}
-            )
+            r = client.post("/run", json={"task": "test", "require_confirmation": False})
 
         assert r.status_code == 200
 
@@ -184,10 +180,7 @@ class TestRunAsyncEndpoint:
             json={"task": "test", "webhook_url": "http://localhost/hook"},
         )
         assert r.status_code == 400
-        assert (
-            "webhook_url" in r.json()["detail"].lower()
-            or "Invalid" in r.json()["detail"]
-        )
+        assert "webhook_url" in r.json()["detail"].lower() or "Invalid" in r.json()["detail"]
 
     def test_run_async_private_ip_webhook_blocked(self):
         """Webhook URL con IP privato → 400 (SSRF guard)."""

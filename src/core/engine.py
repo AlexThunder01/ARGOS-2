@@ -25,11 +25,11 @@ import logging
 import os
 import subprocess
 from collections import deque
+from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
-from typing import Callable, Generator, Optional, Set
 
 from src.actions.base import ActionStatus
 from src.agent import ArgosAgent
@@ -41,7 +41,7 @@ from src.hooks.registry import HOOK_REGISTRY, HookEvent
 from src.llm.client import LLMResponse
 from src.logging.otel import get_tracer
 from src.logging.tracer import log_decision, log_step
-from src.planner.planner import parse_litellm_response, parse_planner_response
+from src.planner.planner import parse_litellm_response
 from src.tools.registry import REGISTRY
 from src.tools.spec import ToolSpec
 from src.world_model.state import WorldState
@@ -84,7 +84,7 @@ def _log_permission_decision(
     try:
         _AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
         entry = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "tool": tool_name,
             "risk": risk,
             "decision": decision,
@@ -92,9 +92,8 @@ def _log_permission_decision(
             "input_preview": json.dumps(tool_input or {}, ensure_ascii=False)[:200],
         }
         line = json.dumps(entry, ensure_ascii=False) + "\n"
-        with _AUDIT_LOCK:
-            with open(_AUDIT_PATH, "a", encoding="utf-8") as f:
-                f.write(line)
+        with _AUDIT_LOCK, open(_AUDIT_PATH, "a", encoding="utf-8") as f:
+            f.write(line)
     except Exception as e:
         logger.debug(f"[PermissionAudit] Write failed: {e}")
 
@@ -102,7 +101,7 @@ def _log_permission_decision(
 # ── Context memoization ────────────────────────────────────────────────────
 
 
-def _get_git_context(max_chars: int = 500) -> Optional[str]:
+def _get_git_context(max_chars: int = 500) -> str | None:
     """Returns a compact git status string, or None if not in a git repo."""
     try:
         branch = (
@@ -202,18 +201,16 @@ class CoreAgent:
     def __init__(
         self,
         memory_mode: str = "off",
-        user_id: Optional[int] = None,
-        max_steps: Optional[int] = None,
+        user_id: int | None = None,
+        max_steps: int | None = None,
         require_confirmation: bool = False,
-        confirmation_callback: Optional[Callable] = None,
-        allowed_tools: Optional[Set[str]] = None,
+        confirmation_callback: Callable | None = None,
+        allowed_tools: set[str] | None = None,
         inject_git_context: bool = True,
-        status_callback: Optional[Callable[[str], None]] = None,
+        status_callback: Callable[[str], None] | None = None,
     ):
         if memory_mode not in MEMORY_MODES:
-            raise ValueError(
-                f"Invalid memory_mode '{memory_mode}'. Must be one of {MEMORY_MODES}"
-            )
+            raise ValueError(f"Invalid memory_mode '{memory_mode}'. Must be one of {MEMORY_MODES}")
 
         self.memory_mode = memory_mode
         try:
@@ -226,9 +223,7 @@ class CoreAgent:
             logger.warning(f"[CoreAgent] Failed to initialize ArgosMemory: {e}")
             self._argos_memory = None
         self.max_steps = (
-            max_steps
-            if max_steps is not None
-            else int(os.getenv("ARGOS_MAX_STEPS", "20"))
+            max_steps if max_steps is not None else int(os.getenv("ARGOS_MAX_STEPS", "20"))
         )
         self.require_confirmation = require_confirmation
         self.confirmation_callback = confirmation_callback
@@ -236,9 +231,7 @@ class CoreAgent:
         self.status_callback = status_callback
 
         # Build filtered or full ToolSpec registry
-        active_registry = (
-            REGISTRY.filter(allowed_tools) if allowed_tools is not None else REGISTRY
-        )
+        active_registry = REGISTRY.filter(allowed_tools) if allowed_tools is not None else REGISTRY
         self._available_tools: dict[str, ToolSpec] = {
             name: active_registry[name] for name in active_registry.names()
         }
@@ -248,9 +241,7 @@ class CoreAgent:
             self.user_id = user_id
         else:
             linux_user = os.environ.get("USER", "argos")
-            self.user_id = int(
-                hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16
-            ) % (2**31)
+            self.user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)
 
         # LLM provider — receives filtered registry so prompt matches available tools
         self._llm = ArgosAgent(registry=active_registry)
@@ -266,7 +257,7 @@ class CoreAgent:
         self._injected_history: list[dict] = []
 
         # Context cache: computed once per task, cleared between tasks
-        self._git_context_cache: Optional[str] = None
+        self._git_context_cache: str | None = None
 
         # Task counter used for memory extraction debounce
         self._task_count: int = 0
@@ -324,9 +315,7 @@ class CoreAgent:
         tracer = get_tracer()
 
         # ── SESSION_START ──────────────────────────────────────────────────
-        HOOK_REGISTRY.fire_session(
-            HookEvent.SESSION_START, task=task, user_id=self.user_id
-        )
+        HOOK_REGISTRY.fire_session(HookEvent.SESSION_START, task=task, user_id=self.user_id)
 
         with tracer.start_as_current_span(
             "core.run_task",
@@ -345,10 +334,8 @@ class CoreAgent:
                     self._git_context_cache = await asyncio.wait_for(
                         asyncio.to_thread(_get_git_context), timeout=5.0
                     )
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "[CoreAgent] Git context fetch timed out — skipping."
-                    )
+                except TimeoutError:
+                    logger.warning("[CoreAgent] Git context fetch timed out — skipping.")
                     self._git_context_cache = None
 
             # ── Phase 2: Memory retrieval ──────────────────────────────────
@@ -357,7 +344,7 @@ class CoreAgent:
                     relevant_memories = await asyncio.wait_for(
                         asyncio.to_thread(self._retrieve_memories, task), timeout=10.0
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.warning(
                         "[CoreAgent] Memory retrieval timed out — continuing without memories."
                     )
@@ -431,9 +418,7 @@ class CoreAgent:
             HOOK_REGISTRY.fire_pre_tool(tool_name, tool_input)
 
             try:
-                action_result = await asyncio.to_thread(
-                    execute_with_retry, spec, tool_input
-                )
+                action_result = await asyncio.to_thread(execute_with_retry, spec, tool_input)
                 result_str = action_result.message
                 success = action_result.status == ActionStatus.SUCCESS
                 HOOK_REGISTRY.fire_post_tool(
@@ -494,7 +479,7 @@ class CoreAgent:
                 try:
                     await asyncio.wait_for(asyncio.shield(stop.wait()), timeout=30.0)
                     return  # stop event fired
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     msg = f"[step {state.step_count}/{self.max_steps}] {task[:60]}"
                     logger.info(f"[ActivitySummary] {msg}")
                     if self.status_callback:
@@ -504,9 +489,7 @@ class CoreAgent:
                             pass
 
         _activity_task = asyncio.create_task(_emit_activity(_activity_stop))
-        _BROWSER_NAV_NUDGE_THRESHOLD = (
-            5  # inject nudge after N consecutive browser_navigate
-        )
+        _BROWSER_NAV_NUDGE_THRESHOLD = 5  # inject nudge after N consecutive browser_navigate
         _WEB_SEARCH_NUDGE_THRESHOLD = 4  # inject nudge after N consecutive web_search
 
         _compact_count_before = self._llm._compact_count
@@ -557,9 +540,7 @@ class CoreAgent:
 
                 self._git_context_cache = None
                 self._session_memory.clear()
-                logger.info(
-                    "[CoreAgent] Post-compact cleanup: git cache + session memory reset."
-                )
+                logger.info("[CoreAgent] Post-compact cleanup: git cache + session memory reset.")
 
             # ── Parse decisions (may be multiple for parallel tool calls) ─────────
             decisions = parse_litellm_response(llm_response)
@@ -572,9 +553,7 @@ class CoreAgent:
             # Log first decision (backward compat)
             if decisions:
                 first = decisions[0]
-                log_decision(
-                    logger, first.thought, first.tool or "done", first.confidence
-                )
+                log_decision(logger, first.thought, first.tool or "done", first.confidence)
 
             # ── Diminishing returns detection ──────────────────────────────
             if (
@@ -700,19 +679,13 @@ class CoreAgent:
                     )
 
                 # Git context refresh after filesystem mutations
-                if (
-                    success
-                    and tool_name in _FILESYSTEM_MUTATING_TOOLS
-                    and self.inject_git_context
-                ):
+                if success and tool_name in _FILESYSTEM_MUTATING_TOOLS and self.inject_git_context:
                     try:
                         self._git_context_cache = await asyncio.wait_for(
                             asyncio.to_thread(_get_git_context), timeout=5.0
                         )
-                    except asyncio.TimeoutError:
-                        logger.warning(
-                            "[CoreAgent] Git context refresh timed out — skipping."
-                        )
+                    except TimeoutError:
+                        logger.warning("[CoreAgent] Git context refresh timed out — skipping.")
                         self._git_context_cache = None
                     if self._git_context_cache:
                         self._llm.add_message(
@@ -720,9 +693,7 @@ class CoreAgent:
                             f"WORKSPACE STATE UPDATED:\n{self._git_context_cache}",
                         )
 
-                state.record_action(
-                    tool_name, tool_decisions[i].tool_input, result_str, success
-                )
+                state.record_action(tool_name, tool_decisions[i].tool_input, result_str, success)
                 log_step(logger, state, tool_name, result_str, success)
 
                 step_records.append(
@@ -732,7 +703,7 @@ class CoreAgent:
                         tool_input=tool_decisions[i].tool_input or {},
                         result=result_str[:500],
                         success=success,
-                        timestamp=datetime.now(timezone.utc).isoformat(),
+                        timestamp=datetime.now(UTC).isoformat(),
                     )
                 )
 
@@ -805,9 +776,7 @@ class CoreAgent:
     # LLM Context Builder (shared by run_task and run_task_async)
     # ==========================================================================
 
-    def _build_llm_context(
-        self, task: str, relevant_memories: list[str | dict]
-    ) -> None:
+    def _build_llm_context(self, task: str, relevant_memories: list[str | dict]) -> None:
         """
         Initialises the LLM history for a new task.
 
@@ -816,9 +785,7 @@ class CoreAgent:
         task message.  Called identically from run_task() and run_task_async()
         so both paths always receive the same context.
         """
-        filtered_registry = self._llm._registry.select_for_query(
-            task, top_k=self._tool_rag_top_k
-        )
+        filtered_registry = self._llm._registry.select_for_query(task, top_k=self._tool_rag_top_k)
         # Store for hit rate logging in _reasoning_loop
         self._current_task_filtered_registry = filtered_registry
         self._llm._init_history_with_tools(filtered_registry.build_prompt_block())
@@ -828,11 +795,7 @@ class CoreAgent:
             from src.telegram.db import db_get_profile
 
             profile = db_get_profile(self.user_id)
-            if (
-                profile
-                and profile.get("display_name")
-                and profile["display_name"].strip()
-            ):
+            if profile and profile.get("display_name") and profile["display_name"].strip():
                 self._llm.add_message(
                     "system",
                     f"USER NAME: The user has previously introduced themselves as "
@@ -858,9 +821,7 @@ class CoreAgent:
             memory_lines = []
             for m in relevant_memories:
                 if isinstance(m, dict):
-                    memory_lines.append(
-                        f"- [{m.get('category', 'fact')}] {m.get('content', '')}"
-                    )
+                    memory_lines.append(f"- [{m.get('category', 'fact')}] {m.get('content', '')}")
                 else:
                     memory_lines.append(f"- [memory] {m}")
             memory_context = "\n".join(memory_lines)
@@ -879,11 +840,7 @@ class CoreAgent:
 
         if self._injected_history:
             for msg in self._injected_history:
-                role = (
-                    "assistant"
-                    if msg.get("role") == "agent"
-                    else msg.get("role", "user")
-                )
+                role = "assistant" if msg.get("role") == "agent" else msg.get("role", "user")
                 self._llm.add_message(role, msg["content"])
 
         self._llm.add_message("user", task)
@@ -954,9 +911,7 @@ class CoreAgent:
 
         # ── Safe tools: always allowed ──
         if not spec.requires_confirmation():
-            _log_permission_decision(
-                spec.name, tool_input or {}, "allowed", spec.risk, "safe"
-            )
+            _log_permission_decision(spec.name, tool_input or {}, "allowed", spec.risk, "safe")
             return True
 
         # ── API mode: auto-block ──
@@ -980,7 +935,5 @@ class CoreAgent:
             return allowed
 
         # ── Default: allow ──
-        _log_permission_decision(
-            spec.name, tool_input or {}, "allowed", spec.risk, "default"
-        )
+        _log_permission_decision(spec.name, tool_input or {}, "allowed", spec.risk, "default")
         return True

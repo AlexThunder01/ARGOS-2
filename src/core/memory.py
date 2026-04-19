@@ -51,13 +51,9 @@ def get_embedding(text: str) -> np.ndarray:
         vec = response.json()["data"][0]["embedding"]
         return np.array(vec, dtype=np.float32)
     except requests.exceptions.ConnectionError as e:
-        raise RuntimeError(
-            f"Embedding service unreachable at {EMBEDDING_BASE_URL}: {e}"
-        ) from e
+        raise RuntimeError(f"Embedding service unreachable at {EMBEDDING_BASE_URL}: {e}") from e
     except requests.exceptions.Timeout:
-        raise RuntimeError(
-            f"Embedding service timed out at {EMBEDDING_BASE_URL}"
-        ) from None
+        raise RuntimeError(f"Embedding service timed out at {EMBEDDING_BASE_URL}") from None
 
 
 def check_embedding_dimensions():
@@ -189,12 +185,8 @@ def save_extracted_memories(
 
         # --- Layer 1: Intercept POISONING_ATTEMPT_DETECTED marker ---
         if content == "POISONING_ATTEMPT_DETECTED":
-            logger.warning(
-                f"[AntiPoison] Extraction LLM flagged poisoning for user {user_id}"
-            )
-            db_log_suspicious_memory(
-                user_id, content, category, 1.0, "extraction_marker"
-            )
+            logger.warning(f"[AntiPoison] Extraction LLM flagged poisoning for user {user_id}")
+            db_log_suspicious_memory(user_id, content, category, 1.0, "extraction_marker")
             continue
 
         if poisoning_enabled:
@@ -203,18 +195,12 @@ def save_extracted_memories(
 
             # NEW: Auto-reject extremely high risk content (no LLM judge needed)
             if risk >= 0.8:
-                logger.warning(
-                    f"[AntiPoison] BLOCKED (high risk={risk:.2f}): {content[:80]}..."
-                )
-                db_log_suspicious_memory(
-                    user_id, content, category, risk, "risk_score_high"
-                )
+                logger.warning(f"[AntiPoison] BLOCKED (high risk={risk:.2f}): {content[:80]}...")
+                db_log_suspicious_memory(user_id, content, category, risk, "risk_score_high")
                 continue
 
             if risk >= risk_threshold:
-                logger.warning(
-                    f"[AntiPoison] BLOCKED (score={risk:.2f}): {content[:80]}..."
-                )
+                logger.warning(f"[AntiPoison] BLOCKED (score={risk:.2f}): {content[:80]}...")
                 db_log_suspicious_memory(user_id, content, category, risk, "risk_score")
                 continue
 
@@ -224,18 +210,14 @@ def save_extracted_memories(
                     logger.warning(
                         f"[AntiPoison] BLOCKED by LLM judge (score={risk:.2f}): {content[:80]}..."
                     )
-                    db_log_suspicious_memory(
-                        user_id, content, category, risk, "llm_judge"
-                    )
+                    db_log_suspicious_memory(user_id, content, category, risk, "llm_judge")
                     continue
             elif risk >= 0.2 and not llm_call_fn:
                 # NEW: Log warning if LLM judge unavailable for medium-risk content
                 logger.warning(
                     f"[AntiPoison] LLM judge unavailable for medium-risk content (score={risk:.2f})"
                 )
-                db_log_suspicious_memory(
-                    user_id, content, category, risk, "llm_judge_unavailable"
-                )
+                db_log_suspicious_memory(user_id, content, category, risk, "llm_judge_unavailable")
                 continue  # Fail-safe: reject uncertain content
 
         # --- All checks passed: save the memory ---

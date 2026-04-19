@@ -29,12 +29,8 @@ def _get_telegram_agent():
 
 class TelegramAttachRequest(BaseModel):
     file_id: str = Field(..., description="Telegram file_id to download")
-    filename: str = Field(
-        ..., description="Original filename (e.g. document.pdf, voice.ogg)"
-    )
-    user_id: int = Field(
-        ..., description="Telegram user_id (used for upload directory)"
-    )
+    filename: str = Field(..., description="Original filename (e.g. document.pdf, voice.ogg)")
+    user_id: int = Field(..., description="Telegram user_id (used for upload directory)")
 
 
 class TelegramChatRequest(BaseModel):
@@ -164,9 +160,7 @@ def _handle_telegram_command(text: str, user_id: int, config) -> str | None:
         if not target_user:
             return "❌ User not found in database."
         if target_user["status"] != "pending":
-            return (
-                f"⚠️ Action already taken. User is currently `{target_user['status']}`."
-            )
+            return f"⚠️ Action already taken. User is currently `{target_user['status']}`."
 
         if cmd.startswith("/approve_"):
             from src.telegram.db import db_approve_user
@@ -208,9 +202,7 @@ async def telegram_attach(req: TelegramAttachRequest):
                     detail=f"Telegram getFile failed: {r.status_code}",
                 )
             tg_path = r.json()["result"]["file_path"]
-            dl = await client.get(
-                f"https://api.telegram.org/file/bot{bot_token}/{tg_path}"
-            )
+            dl = await client.get(f"https://api.telegram.org/file/bot{bot_token}/{tg_path}")
             dl.raise_for_status()
 
         try:
@@ -232,9 +224,7 @@ async def telegram_attach(req: TelegramAttachRequest):
     return {"upload_id": upload_id, "filename": req.filename}
 
 
-@router.post(
-    "/chat", response_model=TelegramChatResponse, dependencies=[Depends(verify_api_key)]
-)
+@router.post("/chat", response_model=TelegramChatResponse, dependencies=[Depends(verify_api_key)])
 async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTasks):
     from src.telegram.db import (
         db_approve_user,
@@ -317,9 +307,7 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
 
     cmd_response = _handle_telegram_command(req.text, req.user_id, config)
     if cmd_response is not None:
-        return TelegramChatResponse(
-            status="ok", reply=cmd_response, user_id=req.user_id
-        )
+        return TelegramChatResponse(status="ok", reply=cmd_response, user_id=req.user_id)
 
     db_increment_msg_count(req.user_id)
     msg_count = (user.get("msg_count_total", 0) or 0) + 1
@@ -364,9 +352,7 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
             user_id=req.user_id,
         )
 
-    background_tasks.add_task(
-        db_save_conversation_turn, req.user_id, req.text, raw_reply
-    )
+    background_tasks.add_task(db_save_conversation_turn, req.user_id, req.text, raw_reply)
 
     if should_extract_memory(req.text, msg_count):
         tg_cfg = getattr(config, "telegram_config", {})
@@ -378,12 +364,9 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
 
         def _do_extraction():
             existing = [
-                {"content": m["content"], "category": m["category"]}
-                for m in relevant_memories
+                {"content": m["content"], "category": m["category"]} for m in relevant_memories
             ]
-            facts = extract_memories_from_text(
-                req.text, existing, agent.call_lightweight
-            )
+            facts = extract_memories_from_text(req.text, existing, agent.call_lightweight)
             if facts:
                 save_extracted_memories(
                     req.user_id,

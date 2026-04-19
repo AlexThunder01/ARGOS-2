@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from src.config import RATE_LIMIT_PER_HOUR, RATE_LIMIT_PER_MINUTE
 from src.db.connection import DB_BACKEND, get_connection, return_pg_connection
@@ -19,7 +19,7 @@ def check_rate_limit(user_id: int):
     if not RATE_LIMIT_PER_HOUR and not RATE_LIMIT_PER_MINUTE:
         return
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     # Troncatura timestamp: "YYYY-MM-DDTHH:MM" per minuto, "YYYY-MM-DDTHH:00" per ora
     minute_window = now.strftime("%Y-%m-%dT%H:%M:00Z")
     hour_window = now.strftime("%Y-%m-%dT%H:00:00Z")
@@ -53,9 +53,7 @@ def check_rate_limit(user_id: int):
                     )
                     row = cur.fetchone()
                     hour_hits = (
-                        row.get("hit_count")
-                        if isinstance(row, dict)
-                        else (row[0] if row else 0)
+                        row.get("hit_count") if isinstance(row, dict) else (row[0] if row else 0)
                     )
                     if hour_hits > RATE_LIMIT_PER_HOUR:
                         raise RateLimitExceeded(
@@ -76,9 +74,7 @@ def check_rate_limit(user_id: int):
                     )
                     row = cur.fetchone()
                     minute_hits = (
-                        row.get("hit_count")
-                        if isinstance(row, dict)
-                        else (row[0] if row else 0)
+                        row.get("hit_count") if isinstance(row, dict) else (row[0] if row else 0)
                     )
                     if minute_hits > RATE_LIMIT_PER_MINUTE:
                         raise RateLimitExceeded(
@@ -101,9 +97,7 @@ def check_rate_limit(user_id: int):
                 ).fetchone()
                 hour_hits = res["hit_count"] if res else 1
                 if hour_hits > RATE_LIMIT_PER_HOUR:
-                    raise RateLimitExceeded(
-                        f"Rate limit orario superato ({RATE_LIMIT_PER_HOUR})"
-                    )
+                    raise RateLimitExceeded(f"Rate limit orario superato ({RATE_LIMIT_PER_HOUR})")
 
             if RATE_LIMIT_PER_MINUTE > 0:
                 res = conn.execute(

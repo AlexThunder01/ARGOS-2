@@ -2,10 +2,8 @@
 
 import json
 
-import pytest
-
 from src.llm.client import LLMResponse, ToolCall
-from src.planner.planner import PlannerDecision, parse_litellm_response
+from src.planner.planner import parse_litellm_response
 
 
 def test_parse_single_tool_call():
@@ -25,9 +23,7 @@ def test_parse_parallel_tool_calls():
         content=None,
         tool_calls=[
             ToolCall(id="call_1", name="list_files", arguments={"path": "."}),
-            ToolCall(
-                id="call_2", name="web_search", arguments={"query": "argos agent"}
-            ),
+            ToolCall(id="call_2", name="web_search", arguments={"query": "argos agent"}),
         ],
     )
     decisions = parse_litellm_response(response)

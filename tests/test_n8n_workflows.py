@@ -78,9 +78,7 @@ def _headers() -> dict:
 
 
 def _get(path: str, params: dict | None = None) -> dict:
-    r = requests.get(
-        f"{N8N_BASE}/api/v1{path}", headers=_headers(), params=params, timeout=10
-    )
+    r = requests.get(f"{N8N_BASE}/api/v1{path}", headers=_headers(), params=params, timeout=10)
     r.raise_for_status()
     return r.json()
 
@@ -192,9 +190,7 @@ def test_workflow_executions(workflow: dict):
     executions = _get_executions(wf_id)
 
     if not executions:
-        pytest.skip(
-            f"No executions found for workflow '{wf_name}' — trigger it at least once."
-        )
+        pytest.skip(f"No executions found for workflow '{wf_name}' — trigger it at least once.")
 
     failures: list[str] = []
 

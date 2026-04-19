@@ -15,7 +15,6 @@ import logging
 import urllib.parse
 import uuid
 from threading import Lock
-from typing import List, Optional
 
 import requests
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
@@ -108,15 +107,11 @@ def _validate_webhook_url(url: str) -> None:
 
 
 class TaskRequest(BaseModel):
-    task: str = Field(
-        ..., description="Natural language task description to be executed"
-    )
+    task: str = Field(..., description="Natural language task description to be executed")
     require_confirmation: bool = Field(
         default=False, description="If True, halts execution on dangerous actions"
     )
-    max_steps: int = Field(
-        default=5, ge=1, le=20, description="Maximum internal step bound"
-    )
+    max_steps: int = Field(default=5, ge=1, le=20, description="Maximum internal step bound")
     attachments: list[str] = Field(
         default_factory=list,
         description="Optional list of upload_id UUIDs from POST /api/upload",
@@ -149,7 +144,7 @@ class TaskResponse(BaseModel):
     task: str
     steps_executed: int
     result: str
-    history: List[StepRecord]
+    history: list[StepRecord]
     backend: str
     model: str
 
@@ -198,7 +193,7 @@ async def _run_task_async_core(
 
     try:
         result = await agent.run_task_async(task)
-    except (asyncio.TimeoutError, asyncio.CancelledError):
+    except (TimeoutError, asyncio.CancelledError):
         # Timeout or cancellation — don't treat as LLM failure
         logger.warning("[CoreAgent] Task execution cancelled or timed out")
         raise
@@ -210,9 +205,7 @@ async def _run_task_async_core(
     return _task_result_to_response(result, agent, task)
 
 
-def _run_task_sync(
-    task: str, require_confirmation: bool, max_steps: int
-) -> TaskResponse:
+def _run_task_sync(task: str, require_confirmation: bool, max_steps: int) -> TaskResponse:
     """Sync fallback — used only by the webhook background worker."""
     agent = _get_agent(require_confirmation, max_steps)
     try:
@@ -229,9 +222,7 @@ def _run_task_async_worker(
     job_id: str, webhook_url: str, task: str, req_conf: bool, max_steps: int
 ):
     """Background worker for asynchronous task execution."""
-    logger.info(
-        f"⏳ Async Job [{job_id}] initialized for target webhook: {webhook_url}"
-    )
+    logger.info(f"⏳ Async Job [{job_id}] initialized for target webhook: {webhook_url}")
 
     # NEW: Re-validate webhook URL before use (defense in depth)
     try:
@@ -249,12 +240,13 @@ def _run_task_async_worker(
         # If credential_id is present in payload and becomes None, fail immediately
         cred_id = payload.get("n8n_credential_id")
         if "n8n_credential_id" in payload and cred_id is None:
-            error_msg = "n8n credential creation returned None cred_id — aborting workflow activation"
+            error_msg = (
+                "n8n credential creation returned None cred_id — aborting workflow activation"
+            )
             logger.error(f"[n8n] {error_msg}")
             raise ValueError(error_msg)
 
         # NEW: n8n OAuth2 authorization check (D-03)
-        import os
 
         try:
             from src.config import N8N_BASE_URL
@@ -283,9 +275,7 @@ def _run_task_async_worker(
             logger.info(f"✅ Webhook successfully delivered for Job [{job_id}]")
 
     except Exception as e:
-        logger.error(
-            f"❌ Critical exception caught in async job worker [{job_id}]: {e}"
-        )
+        logger.error(f"❌ Critical exception caught in async job worker [{job_id}]: {e}")
         try:
             requests.post(
                 webhook_url,
@@ -297,9 +287,7 @@ def _run_task_async_worker(
                 timeout=5,
             )
         except Exception:
-            logger.warning(
-                f"[Job {job_id}] Failed to deliver error payload to webhook."
-            )
+            logger.warning(f"[Job {job_id}] Failed to deliver error payload to webhook.")
 
 
 # ==========================================================================
@@ -317,9 +305,7 @@ async def status():
     )
 
 
-@router.post(
-    "/run", response_model=TaskResponse, dependencies=[Depends(verify_api_key)]
-)
+@router.post("/run", response_model=TaskResponse, dependencies=[Depends(verify_api_key)])
 async def run_task(req: TaskRequest):
     from src.core.rate_limit import RateLimitExceeded, check_rate_limit
 
@@ -352,7 +338,7 @@ async def run_task(req: TaskRequest):
 async def run_task_async(
     req: TaskAsyncRequest,
     background_tasks: BackgroundTasks,
-    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     from src.core.rate_limit import RateLimitExceeded, check_rate_limit
 

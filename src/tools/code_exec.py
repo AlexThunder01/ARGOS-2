@@ -90,9 +90,7 @@ def _run_in_docker(image: str, command: list, timeout: int = EXEC_TIMEOUT) -> st
             )
 
         if len(output) > MAX_OUTPUT:
-            output = (
-                output[:MAX_OUTPUT] + f"\n... [truncated, {len(output)} total chars]"
-            )
+            output = output[:MAX_OUTPUT] + f"\n... [truncated, {len(output)} total chars]"
 
         return output
 
@@ -148,8 +146,7 @@ def python_repl_tool(inp):
             )
             if output2.strip() and "no output" not in output2.lower():
                 output = (
-                    output2
-                    + "\n(auto-printed variables — add explicit print() to control output)"
+                    output2 + "\n(auto-printed variables — add explicit print() to control output)"
                 )
 
         return f"🐍 Python Result:\n{output}"

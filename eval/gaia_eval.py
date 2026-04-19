@@ -125,8 +125,6 @@ def run_eval(limit: int | None = None) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GAIA Level 1 evaluation")
-    parser.add_argument(
-        "--limit", type=int, default=None, help="Run only first N tasks"
-    )
+    parser.add_argument("--limit", type=int, default=None, help="Run only first N tasks")
     args = parser.parse_args()
     run_eval(limit=args.limit)

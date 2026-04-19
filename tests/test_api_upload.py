@@ -118,7 +118,7 @@ class TestRunWithAttachments:
         return res.json()["upload_id"]
 
     def _make_fake_result(self):
-        from unittest.mock import AsyncMock, MagicMock
+        from unittest.mock import MagicMock
 
         from src.core.engine import TaskResult
 
@@ -130,7 +130,7 @@ class TestRunWithAttachments:
         return result
 
     def test_run_with_attachment_injects_context(self, client, monkeypatch):
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import patch
 
         upload_id = self._upload_file(client)
         captured_task = {}

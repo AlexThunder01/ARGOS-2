@@ -17,7 +17,6 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from src.hooks.registry import HOOK_REGISTRY, HookEvent
 
@@ -27,7 +26,7 @@ logger = logging.getLogger("argos.hooks")
 # ─── 1. Audit Log ─────────────────────────────────────────────────────────
 
 
-def register_audit_log(path: Optional[str] = None) -> None:
+def register_audit_log(path: str | None = None) -> None:
     """
     Registra un hook che scrive ogni tool execution su file JSON Lines.
 
@@ -73,7 +72,7 @@ def register_audit_log(path: Optional[str] = None) -> None:
 def register_telegram_alerts(
     bot_token: str,
     chat_id: str,
-    tools: Optional[list[str]] = None,
+    tools: list[str] | None = None,
 ) -> None:
     """
     Registra un hook che invia un messaggio Telegram dopo ogni tool execution.
@@ -145,8 +144,7 @@ def register_tool_rate_limit(
 
         if len(call_times) >= max_calls:
             logger.warning(
-                f"[RateLimit] Tool '{tool_name}' rate limited "
-                f"({max_calls}/{window_seconds}s)"
+                f"[RateLimit] Tool '{tool_name}' rate limited ({max_calls}/{window_seconds}s)"
             )
             return False  # Blocca
 
@@ -165,7 +163,7 @@ def register_tool_rate_limit(
 
 
 def register_business_hours_guard(
-    tools: Optional[list[str]] = None,
+    tools: list[str] | None = None,
     allowed_hours: tuple[int, int] = (8, 20),
 ) -> None:
     """

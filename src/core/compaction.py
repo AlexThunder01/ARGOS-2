@@ -13,7 +13,7 @@ Inspired by Claude Code's compact.ts / prompt.ts.
 
 import logging
 import re
-from typing import Callable
+from collections.abc import Callable
 
 logger = logging.getLogger("argos")
 
@@ -95,9 +95,7 @@ def compact_conversation(
         messages_to_summarize = history + [{"role": "user", "content": COMPACT_PROMPT}]
         raw = llm_call_fn(messages_to_summarize)
 
-        if not raw or raw.startswith(
-            ("API Error", "Connection Error", "LLM Error", "Error:")
-        ):
+        if not raw or raw.startswith(("API Error", "Connection Error", "LLM Error", "Error:")):
             logger.warning(
                 f"[Compact] LLM returned an error — keeping original history. Response: {raw[:80]}"
             )
@@ -112,22 +110,18 @@ def compact_conversation(
         summary = summary.strip()
 
         if not summary:
-            logger.warning(
-                "[Compact] Empty summary after stripping tags — keeping original"
-            )
+            logger.warning("[Compact] Empty summary after stripping tags — keeping original")
             return history
 
         logger.info(
-            f"[Compact] Compacted {len(history)} messages → 3 "
-            f"(summary: {len(summary)} chars)"
+            f"[Compact] Compacted {len(history)} messages → 3 (summary: {len(summary)} chars)"
         )
         return [
             system_msg,
             {
                 "role": "user",
                 "content": (
-                    "[CONVERSATION SUMMARY — context was compacted to save tokens]\n\n"
-                    + summary
+                    "[CONVERSATION SUMMARY — context was compacted to save tokens]\n\n" + summary
                 ),
             },
             {

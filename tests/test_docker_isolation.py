@@ -12,8 +12,6 @@ Integration tests against a real Docker daemon can be enabled by passing
 import os
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 os.environ.setdefault("DOCKER_HOST", "tcp://127.0.0.1:2375")
 os.environ.setdefault("HOST_WORKSPACE_DIR", os.path.abspath("./workspace"))
 os.environ.setdefault("WORKSPACE_DIR", os.path.abspath("./workspace"))
@@ -103,9 +101,7 @@ class TestPythonReplTool:
         assert "mem_limit" in kwargs, "Docker container must have a memory limit set"
 
     @patch("src.tools.code_exec._get_docker_client")
-    def test_nonzero_exit_code_returns_output(
-        self, mock_get_client, tmp_path, monkeypatch
-    ):
+    def test_nonzero_exit_code_returns_output(self, mock_get_client, tmp_path, monkeypatch):
         """A nonzero exit code still returns the captured output (logs)."""
         from src.tools import code_exec
 
@@ -113,9 +109,7 @@ class TestPythonReplTool:
 
         from src.tools.code_exec import python_repl_tool
 
-        container = _mock_container(
-            stderr=b"SyntaxError: invalid syntax\n", exit_code=1
-        )
+        container = _mock_container(stderr=b"SyntaxError: invalid syntax\n", exit_code=1)
         mock_get_client.return_value = _mock_docker_client(container)
 
         result = python_repl_tool({"code": "def("})
@@ -128,9 +122,7 @@ class TestPythonReplTool:
         assert result.lower().startswith("error")
 
     @patch("src.tools.code_exec._get_docker_client")
-    def test_docker_unavailable_returns_error(
-        self, mock_get_client, tmp_path, monkeypatch
-    ):
+    def test_docker_unavailable_returns_error(self, mock_get_client, tmp_path, monkeypatch):
         from src.tools import code_exec
 
         monkeypatch.setattr(code_exec, "WORKSPACE_DIR", str(tmp_path))
@@ -171,9 +163,7 @@ class TestBashExecTool:
         bash_exec_tool({"command": "echo isolated"})
 
         _, kwargs = client.containers.run.call_args
-        assert kwargs.get("network_mode") == "none", (
-            "bash_exec must run with network_mode='none'"
-        )
+        assert kwargs.get("network_mode") == "none", "bash_exec must run with network_mode='none'"
 
     def test_missing_command_argument(self):
         from src.tools.code_exec import bash_exec_tool

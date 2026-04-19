@@ -99,7 +99,9 @@ def _check_postgres_available() -> bool:
     try:
         import psycopg
 
-        conn_string = f"postgresql://{postgres_user}:{postgres_password}@{postgres_host}/{postgres_db}"
+        conn_string = (
+            f"postgresql://{postgres_user}:{postgres_password}@{postgres_host}/{postgres_db}"
+        )
         conn = psycopg.connect(conn_string, timeout=2)
         conn.close()
         return True

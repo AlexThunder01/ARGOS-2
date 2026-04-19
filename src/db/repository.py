@@ -90,8 +90,7 @@ def db_get_all_memory_blobs(user_id: int) -> list[tuple]:
         )
         rows = cur.fetchall()
         return [
-            (r["id"], r["content"], r["embedding"], r["category"], r["confidence"])
-            for r in rows
+            (r["id"], r["content"], r["embedding"], r["category"], r["confidence"]) for r in rows
         ]
 
 
@@ -116,9 +115,7 @@ def db_update_memory_access(memory_ids: list[int]):
         db.commit()
 
 
-def db_insert_memory(
-    user_id: int, content: str, embedding_blob, category: str = "general"
-):
+def db_insert_memory(user_id: int, content: str, embedding_blob, category: str = "general"):
     """
     Inserts a memory vector.
     embedding_blob: bytes (SQLite) or list[float] (PostgreSQL).

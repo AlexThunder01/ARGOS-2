@@ -90,7 +90,7 @@ class TestCircuitBreaker:
         cb = CircuitBreaker(failure_threshold=1, timeout_seconds=1)
 
         with pytest.raises(IOError):
-            cb.call(lambda: (_ for _ in ()).throw(IOError("down")))
+            cb.call(lambda: (_ for _ in ()).throw(OSError("down")))
 
         assert cb.state == "open"
         time.sleep(1.1)

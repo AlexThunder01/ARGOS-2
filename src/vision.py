@@ -80,9 +80,7 @@ def add_grid_to_image(image, step=80):
     try:
         from PIL import ImageFont
 
-        font = ImageFont.truetype(
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14
-        )
+        font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 14)
     except Exception:
         font = ImageDraw.Draw(image).getfont()
 
@@ -122,9 +120,7 @@ def find_text_on_screen(text_to_find, lang="ita+eng"):
 
     # Esegui OCR restituendo dizionario dati (parole, bounding box, confidenza)
     try:
-        data = pytesseract.image_to_data(
-            screen, lang=lang, output_type=pytesseract.Output.DICT
-        )
+        data = pytesseract.image_to_data(screen, lang=lang, output_type=pytesseract.Output.DICT)
     except Exception as e:
         print(f"❌ OCR Error: {e}")
         return None
@@ -161,9 +157,7 @@ def find_text_on_screen(text_to_find, lang="ita+eng"):
                         data["height"][i],
                     )
                     cx, cy = x + w // 2, y + h // 2
-                    print(
-                        f"🎯 OCR Trovato '{word}' (da frase) -> Coordinate: ({cx}, {cy})"
-                    )
+                    print(f"🎯 OCR Trovato '{word}' (da frase) -> Coordinate: ({cx}, {cy})")
                     return {"x": cx, "y": cy}
 
     print("❌ OCR did not find the target text.")
@@ -271,9 +265,7 @@ def analyze_screen_for_coordinates(description):
 
 
 # --- FUNZIONE 2: ANALISI IMMAGINE DA FILE ---
-def analyze_image_file(
-    path: str, question: str = "Describe this image in detail."
-) -> str:
+def analyze_image_file(path: str, question: str = "Describe this image in detail.") -> str:
     """
     Analyzes an arbitrary image file using the vision backend.
     Accepts PNG, JPEG, GIF, BMP, WEBP files.

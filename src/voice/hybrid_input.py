@@ -112,9 +112,7 @@ def _process_background_audio(recognizer, audio):
     continuare ad ascoltare."""
     if not _listening:
         return
-    threading.Thread(
-        target=_process_background_impl, args=(recognizer, audio), daemon=True
-    ).start()
+    threading.Thread(target=_process_background_impl, args=(recognizer, audio), daemon=True).start()
 
 
 def start_hybrid_listener():

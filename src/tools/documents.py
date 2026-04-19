@@ -58,9 +58,7 @@ def read_pdf_tool(inp):
             try:
                 if "-" in page_spec:
                     start, end = page_spec.split("-", 1)
-                    page_range = range(
-                        max(0, int(start) - 1), min(total_pages, int(end))
-                    )
+                    page_range = range(max(0, int(start) - 1), min(total_pages, int(end)))
                 else:
                     page_idx = int(page_spec) - 1
                     if 0 <= page_idx < total_pages:
@@ -124,7 +122,7 @@ def read_csv_tool(inp):
             pass
 
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             # Detect delimiter
             sample = f.read(4096)
             f.seek(0)
@@ -177,7 +175,7 @@ def read_json_tool(inp):
         return f"Error: File '{path}' not found."
 
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
 
         formatted = json.dumps(data, indent=2, ensure_ascii=False)
@@ -247,9 +245,7 @@ def read_excel_tool(inp):
         wb.close()
 
         if not rows:
-            return (
-                f"📊 Excel '{os.path.basename(path)}': Sheet '{target_sheet}' is empty."
-            )
+            return f"📊 Excel '{os.path.basename(path)}': Sheet '{target_sheet}' is empty."
 
         header = " | ".join(rows[0])
         separator = "-" * min(len(header), 120)
@@ -288,7 +284,9 @@ def analyze_image_tool(inp):
     except ValueError as e:
         return f"Error: {e}"
 
-    question = "Describe this image in detail, extracting all visible text, numbers, labels, and data."
+    question = (
+        "Describe this image in detail, extracting all visible text, numbers, labels, and data."
+    )
     if isinstance(inp, dict) and inp.get("question"):
         question = inp["question"]
 
@@ -369,8 +367,7 @@ def query_table_tool(inp):
                 existing = [
                     c
                     for c in cols
-                    if c in result.index
-                    or (hasattr(result, "columns") and c in result.columns)
+                    if c in result.index or (hasattr(result, "columns") and c in result.columns)
                 ]
                 if existing and hasattr(result, "columns"):
                     result = result[existing]
@@ -383,9 +380,7 @@ def query_table_tool(inp):
         cols = inp["select"] if isinstance(inp["select"], list) else [inp["select"]]
         missing = [c for c in cols if c not in df.columns]
         if missing:
-            return (
-                f"Error: Columns not found: {missing}. Available: {df.columns.tolist()}"
-            )
+            return f"Error: Columns not found: {missing}. Available: {df.columns.tolist()}"
         df = df[cols]
 
     # Default: show head
@@ -437,9 +432,7 @@ def transcribe_audio_tool(inp):
     try:
         import speech_recognition as sr
     except ImportError:
-        return (
-            "Error: SpeechRecognition not installed. Run: pip install SpeechRecognition"
-        )
+        return "Error: SpeechRecognition not installed. Run: pip install SpeechRecognition"
 
     recognizer = sr.Recognizer()
     try:
@@ -452,7 +445,9 @@ def transcribe_audio_tool(inp):
         text = recognizer.recognize_google(audio, language=language)
         return f"🎤 Transcription of '{os.path.basename(path)}':\n\n{text}"
     except sr.UnknownValueError:
-        return f"Could not understand audio in '{os.path.basename(path)}' (speech unclear or silent)."
+        return (
+            f"Could not understand audio in '{os.path.basename(path)}' (speech unclear or silent)."
+        )
     except sr.RequestError as e:
         return f"Speech recognition service error: {e}"
     except Exception as e:

@@ -1,6 +1,6 @@
 """Tests for mem0 adapter — all mem0 calls mocked."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -10,15 +10,11 @@ from src.core.mem0_adapter import ArgosMemory
 @pytest.fixture
 def mock_mem0(monkeypatch):
     mock = MagicMock()
-    mock.add.return_value = {
-        "results": [{"id": "mem_1", "memory": "user likes Python"}]
-    }
+    mock.add.return_value = {"results": [{"id": "mem_1", "memory": "user likes Python"}]}
     mock.search.return_value = {
         "results": [{"id": "mem_1", "memory": "user likes Python", "score": 0.92}]
     }
-    mock.get_all.return_value = {
-        "results": [{"id": "mem_1", "memory": "user likes Python"}]
-    }
+    mock.get_all.return_value = {"results": [{"id": "mem_1", "memory": "user likes Python"}]}
     monkeypatch.setattr("src.core.mem0_adapter._build_mem0", lambda: mock)
     return mock
 

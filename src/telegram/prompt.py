@@ -137,12 +137,8 @@ def build_telegram_system_prompt(
 
     name = identity.get("bot_name", "AI Assistant")
     persona = identity.get("persona", "")
-    language = (user_profile or {}).get(
-        "language", behavior.get("default_language", "it")
-    )
-    tone = (user_profile or {}).get(
-        "preferred_tone", behavior.get("default_tone", "neutral")
-    )
+    language = (user_profile or {}).get("language", behavior.get("default_language", "it"))
+    tone = (user_profile or {}).get("preferred_tone", behavior.get("default_tone", "neutral"))
     display_name = (user_profile or {}).get("display_name", "")
 
     tone_desc = {

@@ -5,7 +5,6 @@ tg_suspicious_memories senza toccare il DB reale.
 """
 
 import os
-import sqlite3
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -13,7 +12,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["DB_BACKEND"] = "sqlite"
 os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"] = ""
 
-import pytest
 
 # NOTE: DB fixtures are provided by the root conftest.py (autouse patch_db).
 # No need to duplicate _create_test_db() here.

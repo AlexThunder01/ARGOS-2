@@ -14,8 +14,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import json
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -204,9 +203,7 @@ class TestAnalyzeImage:
         img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
 
         with patch("src.vision.analyze_image_file", return_value="Italy") as mock_vlm:
-            TOOLS["analyze_image"](
-                {"filename": str(img), "question": "What country is shown?"}
-            )
+            TOOLS["analyze_image"]({"filename": str(img), "question": "What country is shown?"})
 
         _, question_arg = mock_vlm.call_args[0]
         assert question_arg == "What country is shown?"
@@ -216,9 +213,7 @@ class TestAnalyzeImage:
         img = tmp_path / "diagram.jpg"
         img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)  # fake JPEG
 
-        with patch(
-            "src.vision.analyze_image_file", return_value="A diagram."
-        ) as mock_vlm:
+        with patch("src.vision.analyze_image_file", return_value="A diagram.") as mock_vlm:
             TOOLS["analyze_image"]({"filename": str(img)})
 
         _, question_arg = mock_vlm.call_args[0]
@@ -271,9 +266,7 @@ class TestQueryTable:
 
     def test_filter_rows(self, sample_csv):
         """filter= selects a subset of rows."""
-        result = TOOLS["query_table"](
-            {"filename": sample_csv, "filter": "continent == 'Europe'"}
-        )
+        result = TOOLS["query_table"]({"filename": sample_csv, "filter": "continent == 'Europe'"})
         assert "Italy" in result
         assert "Brazil" not in result
 
@@ -308,18 +301,14 @@ class TestQueryTable:
 
     def test_select_columns(self, sample_csv):
         """select= limits the columns in the output."""
-        result = TOOLS["query_table"](
-            {"filename": sample_csv, "select": ["country", "gdp"]}
-        )
+        result = TOOLS["query_table"]({"filename": sample_csv, "select": ["country", "gdp"]})
         assert "country" in result
         assert "gdp" in result
         assert "continent" not in result
 
     def test_invalid_filter(self, sample_csv):
         """A broken filter expression returns a helpful error."""
-        result = TOOLS["query_table"](
-            {"filename": sample_csv, "filter": "nonexistent_col == 42"}
-        )
+        result = TOOLS["query_table"]({"filename": sample_csv, "filter": "nonexistent_col == 42"})
         assert "error" in result.lower()
 
     def test_invalid_aggregate(self, sample_csv):
@@ -379,8 +368,6 @@ class TestTranscribeAudio:
         f = tmp_path / "speech.wav"
         f.write_bytes(b"RIFF" + b"\x00" * 36 + b"data" + b"\x00" * 4)
 
-        import speech_recognition as sr
-
         mock_recognizer = MagicMock()
         mock_audio = MagicMock()
         mock_recognizer.record.return_value = mock_audio
@@ -415,9 +402,7 @@ class TestTranscribeAudio:
             mock_audio_file.return_value.__exit__ = MagicMock(return_value=False)
             TOOLS["transcribe_audio"]({"filename": str(f), "language": "it-IT"})
 
-        mock_recognizer.recognize_google.assert_called_with(
-            mock_audio, language="it-IT"
-        )
+        mock_recognizer.recognize_google.assert_called_with(mock_audio, language="it-IT")
 
     def test_unknown_value_error(self, tmp_path):
         """When speech is unclear, tool returns a graceful message."""
@@ -477,9 +462,7 @@ def reset_browser_state():
     bm._state.update({"pw": None, "browser": None, "page": None})
 
 
-def _mock_page(
-    title="Test Page", url="https://example.com", body="Hello world from test."
-):
+def _mock_page(title="Test Page", url="https://example.com", body="Hello world from test."):
     page = MagicMock()
     page.title.return_value = title
     page.url = url
@@ -529,9 +512,7 @@ class TestBrowserNavigate:
         )
         bm._state["page"] = page
 
-        result = TOOLS["browser_navigate"](
-            {"url": "https://en.wikipedia.org/wiki/Python"}
-        )
+        result = TOOLS["browser_navigate"]({"url": "https://en.wikipedia.org/wiki/Python"})
         assert "Wikipedia: Python" in result
         page.goto.assert_called_once_with(
             "https://en.wikipedia.org/wiki/Python",
@@ -643,9 +624,7 @@ class TestBrowserType:
         page = _mock_page()
         bm._state["page"] = page
 
-        result = TOOLS["browser_type"](
-            {"selector": "input[name='q']", "text": "search query"}
-        )
+        result = TOOLS["browser_type"]({"selector": "input[name='q']", "text": "search query"})
         assert "search query" in result
         page.fill.assert_called_with("input[name='q']", "search query", timeout=5000)
 
@@ -656,9 +635,7 @@ class TestBrowserType:
         page = _mock_page(title="Search Results")
         bm._state["page"] = page
 
-        result = TOOLS["browser_type"](
-            {"selector": "input", "text": "query", "press_enter": True}
-        )
+        result = TOOLS["browser_type"]({"selector": "input", "text": "query", "press_enter": True})
         page.keyboard.press.assert_called_with("Enter")
         assert "Search Results" in result
 

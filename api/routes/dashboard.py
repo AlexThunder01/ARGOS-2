@@ -1,8 +1,9 @@
 import asyncio
 import json
 import logging
+from datetime import UTC
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from api.security import verify_api_key
@@ -18,9 +19,7 @@ def _collect_docker_stats():
     import docker
 
     client = docker.DockerClient(base_url=DOCKER_HOST, timeout=5)
-    containers = [
-        c for c in client.containers.list(all=True) if c.name.startswith("argos-")
-    ]
+    containers = [c for c in client.containers.list(all=True) if c.name.startswith("argos-")]
 
     stats = {}
     for c in containers:
@@ -38,9 +37,7 @@ async def docker_stats():
     Recupera lo stato dei container Docker via thread pool (non blocca l'event loop).
     """
     try:
-        stats = await asyncio.wait_for(
-            asyncio.to_thread(_collect_docker_stats), timeout=8.0
-        )
+        stats = await asyncio.wait_for(asyncio.to_thread(_collect_docker_stats), timeout=8.0)
         return {"status": "ok", "containers": stats}
     except Exception as e:
         logger.error(f"Errore caricamento Docker stats: {e}")
@@ -52,11 +49,11 @@ async def rate_limits():
     """
     Ritorna il monitoraggio base del rate limit per l'interfaccia.
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from src.config import RATE_LIMIT_PER_HOUR, RATE_LIMIT_PER_MINUTE
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     minute_win = now.strftime("%Y-%m-%dT%H:%M:00Z")
     hour_win = now.strftime("%Y-%m-%dT%H:00:00Z")
 
@@ -66,9 +63,7 @@ async def rate_limits():
         import os
 
         linux_user = os.environ.get("USER", "argos")
-        user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (
-            2**31
-        )
+        user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)
 
         conn = get_connection()
         cursor = conn.cursor()
@@ -84,9 +79,7 @@ async def rate_limits():
                 (user_id, minute_win),
             )
         row = cursor.fetchone()
-        min_used = (
-            row.get("hit_count", 0) if isinstance(row, dict) else (row[0] if row else 0)
-        )
+        min_used = row.get("hit_count", 0) if isinstance(row, dict) else (row[0] if row else 0)
 
         if DB_BACKEND == "postgres":
             cursor.execute(
@@ -99,9 +92,7 @@ async def rate_limits():
                 (user_id, hour_win),
             )
         row = cursor.fetchone()
-        hr_used = (
-            row.get("hit_count", 0) if isinstance(row, dict) else (row[0] if row else 0)
-        )
+        hr_used = row.get("hit_count", 0) if isinstance(row, dict) else (row[0] if row else 0)
 
         return {
             "minute": {"used": min_used, "max": RATE_LIMIT_PER_MINUTE},
@@ -132,11 +123,7 @@ async def system_stats():
         from src.db.connection import _pg_pool
 
         if _pg_pool:
-            db_pool_txt = (
-                f"{_pg_pool.get_stats()}"
-                if hasattr(_pg_pool, "get_stats")
-                else "active"
-            )
+            db_pool_txt = f"{_pg_pool.get_stats()}" if hasattr(_pg_pool, "get_stats") else "active"
         else:
             db_pool_txt = "active"
     else:
@@ -156,9 +143,9 @@ async def system_stats():
 @router.get("/stats/security", dependencies=[Depends(verify_api_key)])
 async def security_stats():
     """Ritorna stat live sui blocchi per attività sospette."""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     today = now.strftime("%Y-%m-%d")
 
     blocked_count = 0

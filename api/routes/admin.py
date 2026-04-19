@@ -42,9 +42,7 @@ async def admin_list_users(status_filter: str = "pending"):
 
 
 @router.get("/suspicious", dependencies=[Depends(verify_api_key)])
-async def admin_suspicious_memories(
-    admin_chat_id: int, limit: int = 50, offset: int = 0
-):
+async def admin_suspicious_memories(admin_chat_id: int, limit: int = 50, offset: int = 0):
     from src.telegram.db import db_get_suspicious
 
     if str(admin_chat_id) != get_admin_chat_id():
