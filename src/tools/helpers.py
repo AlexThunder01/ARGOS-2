@@ -64,10 +64,7 @@ def _normalize_path(path_str):
     if "~" in path_str:
         path_str = os.path.expanduser(path_str)
 
-    if os.path.isabs(path_str):
-        candidate = path_str
-    else:
-        candidate = os.path.join(_get_desktop_path(), path_str)
+    candidate = path_str if os.path.isabs(path_str) else os.path.join(_get_desktop_path(), path_str)
 
     # Resolve symlinks and ".." components before the sandbox check
     real = os.path.realpath(candidate)

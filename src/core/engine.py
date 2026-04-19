@@ -19,6 +19,7 @@ Usage:
 """
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -487,10 +488,8 @@ class CoreAgent:
                     msg = f"[step {state.step_count}/{self.max_steps}] {task[:60]}"
                     logger.info(f"[ActivitySummary] {msg}")
                     if self.status_callback:
-                        try:
+                        with contextlib.suppress(Exception):
                             self.status_callback(msg)
-                        except Exception:
-                            pass
 
         _activity_task = asyncio.create_task(_emit_activity(_activity_stop))
         _BROWSER_NAV_NUDGE_THRESHOLD = 5  # inject nudge after N consecutive browser_navigate
@@ -720,7 +719,8 @@ class CoreAgent:
             self._session_memory.record_tool_call()
             if self._session_memory.should_update():
                 history_snapshot = list(self._llm.history)
-                try:
+                with contextlib.suppress(RuntimeError):
+                    # No running event loop (e.g. sync test context) — skip silently
                     asyncio.create_task(
                         asyncio.to_thread(
                             self._session_memory.update,
@@ -728,9 +728,6 @@ class CoreAgent:
                             self._llm.call_lightweight,
                         )
                     )
-                except RuntimeError:
-                    # No running event loop (e.g. sync test context) — skip silently
-                    pass
 
             # Update final response and loop success from results
             if results:
@@ -866,7 +863,7 @@ class CoreAgent:
         memories = list(self._session_memories)
         documents = [m["content"] for m in memories]
         scores = _keyword_similarity(query, documents)
-        scored = sorted(zip(scores, memories), key=lambda x: x[0], reverse=True)
+        scored = sorted(zip(scores, memories, strict=True), key=lambda x: x[0], reverse=True)
         return [m for score, m in scored[:top_k] if score > 0.05]
 
     def _maybe_extract_memories(

@@ -1,3 +1,4 @@
+import contextlib
 import logging
 from datetime import UTC, datetime
 
@@ -119,10 +120,9 @@ def check_rate_limit(user_id: int):
 
     except Exception:
         # Roll back any partial writes so hit_count stays consistent
-        try:
+        with contextlib.suppress(Exception):
             conn.rollback()
-        except Exception:
-            pass
+
         raise
     finally:
         if DB_BACKEND == "postgres":

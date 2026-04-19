@@ -11,6 +11,7 @@ Dependencies:
   - Vision backend (for analyze_image)
 """
 
+import contextlib
 import csv
 import json
 import os
@@ -116,10 +117,8 @@ def read_csv_tool(inp):
 
     max_rows = 20
     if isinstance(inp, dict) and "rows" in inp:
-        try:
+        with contextlib.suppress(ValueError, TypeError):
             max_rows = min(int(inp["rows"]), 100)
-        except (ValueError, TypeError):
-            pass
 
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
@@ -221,10 +220,8 @@ def read_excel_tool(inp):
 
     max_rows = 20
     if isinstance(inp, dict) and "rows" in inp:
-        try:
+        with contextlib.suppress(ValueError, TypeError):
             max_rows = min(int(inp["rows"]), 100)
-        except (ValueError, TypeError):
-            pass
 
     target_sheet = inp.get("sheet") if isinstance(inp, dict) else None
 

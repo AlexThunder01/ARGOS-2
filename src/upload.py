@@ -10,6 +10,7 @@ Responsibilities:
 - Prompt context generation for LLM injection
 """
 
+import contextlib
 import os
 import time
 import uuid
@@ -190,10 +191,9 @@ def cleanup_expired(ttl_hours: int) -> int:
     removed = 0
     for uid, (path, created_at) in list(_registry.items()):
         if created_at < cutoff:
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(path)
-            except OSError:
-                pass
+
             del _registry[uid]
             removed += 1
     return removed

@@ -1,6 +1,7 @@
 import contextlib
 import json
 import os
+import platform
 import shutil
 import sys
 import time
@@ -38,7 +39,6 @@ def no_alsa_err():
 
 
 # --- SOPPRESSIONE GLOBALE ALSA C-LEVEL ---
-import platform
 
 if platform.system() == "Linux":
     try:

@@ -10,6 +10,7 @@ Dependencies:
 """
 
 import atexit
+import contextlib
 import threading
 
 from .helpers import _get_arg
@@ -53,15 +54,13 @@ def _ensure_page():
 def _cleanup():
     with _lock:
         if _state["browser"]:
-            try:
+            with contextlib.suppress(Exception):
                 _state["browser"].close()
-            except Exception:
-                pass
+
         if _state["pw"]:
-            try:
+            with contextlib.suppress(Exception):
                 _state["pw"].stop()
-            except Exception:
-                pass
+
         _state["browser"] = None
         _state["pw"] = None
         _state["page"] = None
@@ -82,7 +81,7 @@ def _page_to_text(page, max_chars: int = 12000) -> str:
             anchor = current_url.split("#", 1)[1]
 
         if anchor:
-            try:
+            with contextlib.suppress(Exception):
                 element = page.query_selector(f"#{anchor}, [name='{anchor}']")
                 if element:
                     # Walk siblings after the anchor, collecting text until next header
@@ -114,8 +113,6 @@ def _page_to_text(page, max_chars: int = 12000) -> str:
                         if len(combined) > max_chars:
                             combined = combined[:max_chars] + "\n... [truncated]"
                         return combined
-            except Exception:
-                pass
 
         html = page.content()
         text = html2text(html)
@@ -183,10 +180,8 @@ def browser_click_tool(inp):
         except Exception:
             page.click(target, timeout=5000)
 
-        try:
+        with contextlib.suppress(Exception):
             page.wait_for_load_state("domcontentloaded", timeout=10000)
-        except Exception:
-            pass
 
         title = page.title()
         text = _page_to_text(page)
@@ -217,11 +212,9 @@ def browser_type_tool(inp):
     try:
         # Try CSS selector first, then individual fallback strategies
         filled = False
-        try:
+        with contextlib.suppress(Exception):
             page.fill(selector, text, timeout=5000)
             filled = True
-        except Exception:
-            pass
 
         if not filled:
             # Try each strategy separately to avoid CSS injection issues when selector
@@ -244,10 +237,9 @@ def browser_type_tool(inp):
 
         if press_enter:
             page.keyboard.press("Enter")
-            try:
+            with contextlib.suppress(Exception):
                 page.wait_for_load_state("domcontentloaded", timeout=10000)
-            except Exception:
-                pass
+
             title = page.title()
             text_content = _page_to_text(page)
             return f"Typed and pressed Enter.\nTitle: {title}\nURL: {page.url}\n\n{text_content}"

@@ -15,13 +15,13 @@ Tipi di evento:
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger("argos.hooks")
 
 
-class HookEvent(str, Enum):
+class HookEvent(StrEnum):
     PRE_TOOL_USE = "pre_tool_use"
     POST_TOOL_USE = "post_tool_use"
     POST_TOOL_FAILURE = "post_tool_failure"

@@ -19,8 +19,6 @@ import platform
 import time
 from typing import TYPE_CHECKING, Optional
 
-logger = logging.getLogger("argos")
-
 from src.llm.client import LLMResponse
 from src.llm.client import complete as llm_complete
 from src.llm.client import stream as llm_stream
@@ -33,6 +31,8 @@ from .config import (
 
 if TYPE_CHECKING:
     from src.tools.spec import ToolRegistry
+
+logger = logging.getLogger("argos")
 
 # Token budget applied by trim_history(). One token ≈ 4 chars (conservative estimate).
 DEFAULT_TOKEN_BUDGET = int(os.getenv("MAX_HISTORY_TOKENS", "8000"))
@@ -73,9 +73,7 @@ def _is_compactable_message(msg: dict) -> bool:
         return True
     if role == "system" and any(marker in content for marker in _WORLD_STATE_MARKERS):
         return True
-    if role == "assistant" and content.strip().startswith('{"action":'):
-        return True
-    return False
+    return role == "assistant" and content.strip().startswith('{"action":')
 
 
 # Time-based micro-compact: if the gap since the last LLM call exceeds this

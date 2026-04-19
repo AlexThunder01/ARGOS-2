@@ -13,6 +13,7 @@ For async FastAPI usage, see init_async_pool() / get_async_pool().
 """
 
 import atexit
+import contextlib
 import logging
 import os
 import sqlite3
@@ -57,10 +58,8 @@ def _get_sqlite_connection() -> sqlite3.Connection:
 def _close_sqlite_all():
     with _sqlite_lock:
         for c in _all_sqlite_connections:
-            try:
+            with contextlib.suppress(Exception):
                 c.close()
-            except Exception:
-                pass
         _all_sqlite_connections.clear()
     logger.info("[DB Pool/SQLite] All connections closed.")
 

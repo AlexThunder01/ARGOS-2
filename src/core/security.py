@@ -139,8 +139,7 @@ def run_security_pipeline(
         return False, risk, "risk_score"
 
     # Gray zone: 0.2 <= score < threshold — consult the Judge
-    if risk >= 0.2 and llm_call_fn:
-        if not validate_with_llm_judge(text, llm_call_fn):
-            return False, risk, "llm_judge"
+    if risk >= 0.2 and llm_call_fn and not validate_with_llm_judge(text, llm_call_fn):
+        return False, risk, "llm_judge"
 
     return True, risk, ""

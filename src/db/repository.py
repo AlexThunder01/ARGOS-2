@@ -6,6 +6,7 @@ modules import from here. src/telegram/db.py imports infrastructure from here â€
 that direction (telegram depends on repository, never the reverse) must be preserved.
 """
 
+import contextlib
 import logging
 
 from src.db.connection import DB_BACKEND, get_connection, ph, return_pg_connection
@@ -57,10 +58,9 @@ class _Ctx:
 
     def close(self):
         if DB_BACKEND == "postgres":
-            try:
+            with contextlib.suppress(Exception):
                 self.conn.rollback()
-            except Exception:
-                pass
+
             return_pg_connection(self.conn)
         # SQLite connections are thread-local, never closed here
 
