@@ -8,7 +8,74 @@ Dual-backend support: Tests can be parametrized to run against both SQLite
 and PostgreSQL backends by using the db_backend fixture.
 """
 
+import json as json_module
+import logging
 import os
+import sys
+import unittest.mock as mock
+
+
+# Mock pythonjsonlogger before any imports that depend on it
+class MockJsonFormatter(logging.Formatter):
+    """Minimal JSON formatter for tests when pythonjsonlogger is not available."""
+
+    def __init__(self, *args, rename_fields=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.rename_fields = rename_fields or {}
+
+    def format(self, record: logging.LogRecord) -> str:
+        log_dict = {
+            "timestamp": self.formatTime(record, self.datefmt or "%Y-%m-%dT%H:%M:%SZ"),
+            "logger": record.name,
+            "level": record.levelname,
+            "message": record.getMessage(),
+        }
+        # Apply field renames
+        renamed_dict = {}
+        for key, value in log_dict.items():
+            new_key = self.rename_fields.get(key, key)
+            renamed_dict[new_key] = value
+
+        # Add any extra fields from the record
+        for key, value in record.__dict__.items():
+            if key not in {
+                "name",
+                "msg",
+                "args",
+                "created",
+                "filename",
+                "funcName",
+                "levelname",
+                "levelno",
+                "lineno",
+                "module",
+                "msecs",
+                "message",
+                "pathname",
+                "process",
+                "processName",
+                "relativeCreated",
+                "thread",
+                "threadName",
+                "exc_info",
+                "exc_text",
+                "stack_info",
+                "taskName",
+                "trace_id",
+            }:
+                renamed_dict[key] = value
+
+        # Add trace_id if present
+        if hasattr(record, "trace_id"):
+            renamed_dict["trace_id"] = record.trace_id
+
+        return json_module.dumps(renamed_dict)
+
+
+mock_pythonjsonlogger = mock.MagicMock()
+mock_pythonjsonlogger.json.JsonFormatter = MockJsonFormatter
+sys.modules["pythonjsonlogger"] = mock_pythonjsonlogger
+sys.modules["pythonjsonlogger.json"] = mock_pythonjsonlogger.json
 
 os.environ["DB_BACKEND"] = "sqlite"
 

@@ -486,7 +486,14 @@ class CoreAgent:
                     return  # stop event fired
                 except TimeoutError:
                     msg = f"[step {state.step_count}/{self.max_steps}] {task[:60]}"
-                    logger.info(f"[ActivitySummary] {msg}")
+                    logger.info(
+                        "activity_summary",
+                        extra={
+                            "current_step": state.step_count,
+                            "max_steps": self.max_steps,
+                            "task_preview": task[:60],
+                        },
+                    )
                     if self.status_callback:
                         with contextlib.suppress(Exception):
                             self.status_callback(msg)
@@ -512,10 +519,13 @@ class CoreAgent:
             state.estimated_cost_usd = state.tokens_used * COST_PER_TOKEN
 
             logger.info(
-                f"[Cost] task={self.user_id} "
-                f"tokens_this_call={tokens_this_call} "
-                f"tokens_total={state.tokens_used} "
-                f"estimated_cost=${state.estimated_cost_usd:.6f}"
+                "cost_tracking",
+                extra={
+                    "task_user_id": self.user_id,
+                    "tokens_this_call": tokens_this_call,
+                    "tokens_total": state.tokens_used,
+                    "estimated_cost_usd": round(state.estimated_cost_usd, 6),
+                },
             )
 
             # ── Post-compact cleanup ───────────────────────────────────────
@@ -537,8 +547,13 @@ class CoreAgent:
 
                 # Log compaction metrics (D-12, D-13)
                 logger.info(
-                    f"[Compaction] tier={tier} trigger_count={self._compaction_count} "
-                    f"tokens_before={tokens_before} tokens_after={tokens_after}"
+                    "compaction_complete",
+                    extra={
+                        "tier": tier,
+                        "trigger_count": self._compaction_count,
+                        "tokens_before": tokens_before,
+                        "tokens_after": tokens_after,
+                    },
                 )
 
                 self._git_context_cache = None
@@ -674,11 +689,14 @@ class CoreAgent:
                     miss_tools = [t for t in recommended_tools if t != tool_name]
 
                     logger.info(
-                        f"[ToolRAG] task={self.user_id} "
-                        f"recommended={len(recommended_tools)} "
-                        f"used={tool_name} "
-                        f"hit={hit} "
-                        f"miss_tools={miss_tools}"
+                        "tool_rag_hit_rate",
+                        extra={
+                            "task_user_id": self.user_id,
+                            "recommended_count": len(recommended_tools),
+                            "tool_used": tool_name,
+                            "hit": hit,
+                            "miss_tools": miss_tools,
+                        },
                     )
 
                 # Git context refresh after filesystem mutations
@@ -917,7 +935,13 @@ class CoreAgent:
 
         # ── API mode: auto-block ──
         if self.require_confirmation:
-            logger.warning(f"[CoreAgent] Auto-blocked '{spec.name}' (risk={spec.risk})")
+            logger.warning(
+                "tool_auto_blocked",
+                extra={
+                    "tool_name": spec.name,
+                    "risk_level": spec.risk,
+                },
+            )
             _log_permission_decision(
                 spec.name, tool_input or {}, "denied_auto", spec.risk, "api_auto"
             )
