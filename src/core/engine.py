@@ -31,6 +31,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Callable, Generator, Optional, Set
 
+from src.actions.base import ActionStatus
 from src.agent import ArgosAgent
 from src.config import COST_PER_TOKEN, TOOL_RAG_TOP_K
 from src.core.memory import EXTRACT_MIN_LENGTH
@@ -418,26 +419,28 @@ class CoreAgent:
             if not authorized:
                 return tool_name, f"Tool '{tool_name}' was not authorized.", False
 
-            HOOK_REGISTRY.fire(HookEvent.PRE_TOOL_USE, tool=tool_name, input=tool_input)
+            HOOK_REGISTRY.fire_pre_tool(tool_name, tool_input)
 
             try:
-                result_str = await asyncio.to_thread(
+                action_result = await asyncio.to_thread(
                     execute_with_retry, spec, tool_input
                 )
-                HOOK_REGISTRY.fire(
-                    HookEvent.POST_TOOL_USE,
-                    tool=tool_name,
-                    input=tool_input,
-                    output=result_str,
+                result_str = action_result.message
+                success = action_result.status == ActionStatus.SUCCESS
+                HOOK_REGISTRY.fire_post_tool(
+                    tool_name,
+                    tool_input,
+                    result_str,
+                    success=success,
                 )
-                return tool_name, result_str, True
+                return tool_name, result_str, success
             except Exception as exc:
                 err = str(exc)
-                HOOK_REGISTRY.fire(
-                    HookEvent.POST_TOOL_USE_FAILURE,
-                    tool=tool_name,
-                    input=tool_input,
-                    error=err,
+                HOOK_REGISTRY.fire_post_tool(
+                    tool_name,
+                    tool_input,
+                    err,
+                    success=False,
                 )
                 return tool_name, f"Tool error: {err}", False
 
