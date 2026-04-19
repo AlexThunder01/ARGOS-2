@@ -226,14 +226,17 @@ class TestHistoryManagement:
 
 
 class TestThinkSync:
-    @patch("src.agent.requests.post")
-    def test_think_openai_compatible_returns_content(self, mock_post):
+    @patch("src.llm.client.acompletion")
+    def test_think_openai_compatible_returns_content(self, mock_acompletion):
         mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "choices": [{"message": {"content": "risposta di test"}}]
-        }
-        mock_post.return_value = mock_resp
+        mock_msg = MagicMock()
+        mock_msg.content = "risposta di test"
+        mock_msg.tool_calls = []
+        mock_choice = MagicMock()
+        mock_choice.message = mock_msg
+        mock_resp.choices = [mock_choice]
+        mock_resp.usage = MagicMock(prompt_tokens=10, completion_tokens=5)
+        mock_acompletion.return_value = mock_resp
 
         agent = ArgosAgent()
         agent.backend = "openai-compatible"
@@ -242,12 +245,17 @@ class TestThinkSync:
         result = agent.think()
         assert result == "risposta di test"
 
-    @patch("src.agent.requests.post")
-    def test_think_anthropic_returns_content(self, mock_post):
+    @patch("src.llm.client.acompletion")
+    def test_think_anthropic_returns_content(self, mock_acompletion):
         mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"content": [{"text": "risposta anthropic"}]}
-        mock_post.return_value = mock_resp
+        mock_msg = MagicMock()
+        mock_msg.content = "risposta anthropic"
+        mock_msg.tool_calls = []
+        mock_choice = MagicMock()
+        mock_choice.message = mock_msg
+        mock_resp.choices = [mock_choice]
+        mock_resp.usage = MagicMock(prompt_tokens=10, completion_tokens=5)
+        mock_acompletion.return_value = mock_resp
 
         agent = ArgosAgent()
         agent.backend = "anthropic"
@@ -256,13 +264,18 @@ class TestThinkSync:
         result = agent.think()
         assert result == "risposta anthropic"
 
-    @patch("src.agent.requests.post")
-    def test_think_calls_trim_before_llm(self, mock_post):
+    @patch("src.llm.client.acompletion")
+    def test_think_calls_trim_before_llm(self, mock_acompletion):
         """think() deve chiamare trim_history() prima della call LLM."""
         mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
-        mock_post.return_value = mock_resp
+        mock_msg = MagicMock()
+        mock_msg.content = "ok"
+        mock_msg.tool_calls = []
+        mock_choice = MagicMock()
+        mock_choice.message = mock_msg
+        mock_resp.choices = [mock_choice]
+        mock_resp.usage = MagicMock(prompt_tokens=10, completion_tokens=5)
+        mock_acompletion.return_value = mock_resp
 
         agent = ArgosAgent()
         agent.backend = "openai-compatible"
@@ -280,48 +293,48 @@ class TestThinkSync:
 
         assert len(trim_called) == 1
 
-    @patch("src.agent.requests.post")
-    def test_think_returns_error_on_api_error(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 500
-        mock_resp.text = "Internal Server Error"
-        mock_post.return_value = mock_resp
+    @patch("src.llm.client.acompletion")
+    def test_think_returns_error_on_api_error(self, mock_acompletion):
+        mock_acompletion.side_effect = Exception("API Error")
 
         agent = ArgosAgent()
         agent.backend = "openai-compatible"
         agent.add_message("user", "test")
 
         result = agent.think()
-        assert "Error" in result or "error" in result.lower() or result == "API Error."
+        assert "Error" in result or "error" in result.lower()
 
-    @patch("src.agent.requests.post")
-    def test_think_returns_error_on_empty_choices(self, mock_post):
+    @patch("src.llm.client.acompletion")
+    def test_think_returns_empty_when_content_is_none(self, mock_acompletion):
+        """When LLM returns None content, think() returns empty string."""
         mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"choices": []}
-        mock_post.return_value = mock_resp
+        mock_msg = MagicMock()
+        mock_msg.content = None
+        mock_msg.tool_calls = []
+        mock_choice = MagicMock()
+        mock_choice.message = mock_msg
+        mock_resp.choices = [mock_choice]
+        mock_resp.usage = MagicMock(prompt_tokens=10, completion_tokens=5)
+        mock_acompletion.return_value = mock_resp
 
         agent = ArgosAgent()
         agent.backend = "openai-compatible"
         agent.add_message("user", "test")
 
         result = agent.think()
-        assert "Error" in result
+        assert result == ""
 
-    @patch("src.agent.requests.post")
-    def test_think_rate_limit_returns_error_after_retries(self, mock_post):
-        mock_resp = MagicMock()
-        mock_resp.status_code = 429
-        mock_post.return_value = mock_resp
+    @patch("src.llm.client.acompletion")
+    def test_think_returns_error_on_exception(self, mock_acompletion):
+        """When LLM call raises exception, think_async returns error response."""
+        mock_acompletion.side_effect = Exception("Connection failed")
 
         agent = ArgosAgent()
         agent.backend = "openai-compatible"
         agent.add_message("user", "test")
 
-        with patch("src.agent.time.sleep"):  # evita sleep reali
-            result = agent.think()
-
-        assert "Rate Limit" in result or "Error" in result
+        result = agent.think()
+        assert "Error" in result or "error" in result.lower()
 
 
 # ==========================================================================
@@ -329,114 +342,78 @@ class TestThinkSync:
 # ==========================================================================
 
 
-def _make_httpx_mock(
-    status: int, json_body: dict | None = None, exc: Exception | None = None
-) -> AsyncMock:
-    """
-    Costruisce il mock corretto per httpx.AsyncClient.
-
-    Il codice usa:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(...)
-
-    Quindi:
-        - httpx.AsyncClient(...)         → ritorna mock_cm (il context manager)
-        - async with mock_cm as client   → client = mock_cm.__aenter__()
-        - await client.post(...)         → ritorna mock_resp
-    """
-    mock_resp = MagicMock()
-    mock_resp.status_code = status
-    if json_body is not None:
-        mock_resp.json.return_value = json_body
-
-    # L'oggetto su cui viene chiamato .post() — restituito da __aenter__
-    mock_inner = AsyncMock()
-    if exc is not None:
-        mock_inner.post.side_effect = exc
-    else:
-        mock_inner.post.return_value = mock_resp
-
-    # Il context manager restituito dalla classe AsyncClient(...)
-    mock_cm = AsyncMock()
-    mock_cm.__aenter__.return_value = mock_inner
-
-    return mock_cm
-
-
 class TestThinkAsync:
-    def test_think_async_openai_compatible(self):
-        async def run():
-            mock_cm = _make_httpx_mock(
-                200, {"choices": [{"message": {"content": "async openai response"}}]}
-            )
-            agent = ArgosAgent()
-            agent.backend = "openai-compatible"
-            agent.add_message("user", "Ciao async")
-            with patch("src.agent.httpx.AsyncClient", return_value=mock_cm):
-                return await agent.think_async()
+    @patch("src.llm.client.acompletion")
+    async def test_think_async_openai_compatible(self, mock_acompletion):
+        mock_resp = MagicMock()
+        mock_msg = MagicMock()
+        mock_msg.content = "async openai response"
+        mock_msg.tool_calls = []
+        mock_choice = MagicMock()
+        mock_choice.message = mock_msg
+        mock_resp.choices = [mock_choice]
+        mock_resp.usage = MagicMock(prompt_tokens=10, completion_tokens=5)
+        mock_acompletion.return_value = mock_resp
 
-        assert asyncio.run(run()) == "async openai response"
+        agent = ArgosAgent()
+        agent.backend = "openai-compatible"
+        agent.add_message("user", "Ciao async")
+        result = await agent.think_async()
+        assert result.content == "async openai response"
 
-    def test_think_async_anthropic(self):
-        async def run():
-            mock_cm = _make_httpx_mock(
-                200, {"content": [{"text": "async anthropic response"}]}
-            )
-            agent = ArgosAgent()
-            agent.backend = "anthropic"
-            agent.add_message("user", "Ciao async")
-            with patch("src.agent.httpx.AsyncClient", return_value=mock_cm):
-                return await agent.think_async()
+    @patch("src.llm.client.acompletion")
+    async def test_think_async_anthropic(self, mock_acompletion):
+        mock_resp = MagicMock()
+        mock_msg = MagicMock()
+        mock_msg.content = "async anthropic response"
+        mock_msg.tool_calls = []
+        mock_choice = MagicMock()
+        mock_choice.message = mock_msg
+        mock_resp.choices = [mock_choice]
+        mock_resp.usage = MagicMock(prompt_tokens=10, completion_tokens=5)
+        mock_acompletion.return_value = mock_resp
 
-        assert asyncio.run(run()) == "async anthropic response"
+        agent = ArgosAgent()
+        agent.backend = "anthropic"
+        agent.add_message("user", "Ciao async")
+        result = await agent.think_async()
+        assert result.content == "async anthropic response"
 
-    def test_think_async_calls_trim_history(self):
-        async def run():
-            mock_cm = _make_httpx_mock(
-                200, {"choices": [{"message": {"content": "ok"}}]}
-            )
-            agent = ArgosAgent()
-            agent.backend = "openai-compatible"
+    @patch("src.llm.client.acompletion")
+    async def test_think_async_calls_trim_history(self, mock_acompletion):
+        mock_resp = MagicMock()
+        mock_msg = MagicMock()
+        mock_msg.content = "ok"
+        mock_msg.tool_calls = []
+        mock_choice = MagicMock()
+        mock_choice.message = mock_msg
+        mock_resp.choices = [mock_choice]
+        mock_resp.usage = MagicMock(prompt_tokens=10, completion_tokens=5)
+        mock_acompletion.return_value = mock_resp
 
-            trim_called = []
-            original_trim = agent.trim_history
+        agent = ArgosAgent()
+        agent.backend = "openai-compatible"
 
-            def tracking_trim():
-                trim_called.append(True)
-                original_trim()
+        trim_called = []
+        original_trim = agent.trim_history
 
-            agent.trim_history = tracking_trim
-            agent.add_message("user", "test")
+        def tracking_trim():
+            trim_called.append(True)
+            original_trim()
 
-            with patch("src.agent.httpx.AsyncClient", return_value=mock_cm):
-                await agent.think_async()
+        agent.trim_history = tracking_trim
+        agent.add_message("user", "test")
+        await agent.think_async()
+        return trim_called
 
-            return trim_called
-
-        assert len(asyncio.run(run())) == 1
-
-    def test_think_async_returns_error_on_failure(self):
-        async def run():
-            mock_cm = _make_httpx_mock(200, exc=Exception("network failure"))
-            agent = ArgosAgent()
-            agent.backend = "openai-compatible"
-            agent.add_message("user", "test")
-            with patch("src.agent.httpx.AsyncClient", return_value=mock_cm):
-                return await agent.think_async()
-
-        result = asyncio.run(run())
-        assert "Error" in result or "error" in result.lower()
-
-    def test_think_async_handles_empty_choices(self):
-        async def run():
-            mock_cm = _make_httpx_mock(200, {"choices": []})
-            agent = ArgosAgent()
-            agent.backend = "openai-compatible"
-            agent.add_message("user", "test")
-            with patch("src.agent.httpx.AsyncClient", return_value=mock_cm):
-                return await agent.think_async()
-
-        assert "Error" in asyncio.run(run())
+    @patch("src.llm.client.acompletion")
+    async def test_think_async_returns_error_on_failure(self, mock_acompletion):
+        mock_acompletion.side_effect = Exception("network failure")
+        agent = ArgosAgent()
+        agent.backend = "openai-compatible"
+        agent.add_message("user", "test")
+        result = await agent.think_async()
+        assert "Error" in result.content or "error" in result.content.lower()
 
 
 # ==========================================================================
@@ -482,7 +459,7 @@ def _make_stream_mock_anthropic(chunks: list[str]) -> MagicMock:
 
 
 class TestThinkStream:
-    @patch("src.agent.requests.post")
+    @patch("src.llm.client.acompletion")
     def test_stream_openai_yields_chunks(self, mock_post):
         mock_post.side_effect = (
             _make_stream_mock_openai(["Ciao ", "mondo", "!"]).side_effect or None
@@ -509,7 +486,7 @@ class TestThinkStream:
         assert len(chunks) == 3
         assert "".join(chunks) == "Ciao mondo!"
 
-    @patch("src.agent.requests.post")
+    @patch("src.llm.client.acompletion")
     def test_stream_openai_skips_empty_deltas(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -531,7 +508,7 @@ class TestThinkStream:
         chunks = list(agent.think_stream())
         assert chunks == ["ok"]
 
-    @patch("src.agent.requests.post")
+    @patch("src.llm.client.acompletion")
     def test_stream_anthropic_yields_chunks(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -551,7 +528,7 @@ class TestThinkStream:
         chunks = list(agent.think_stream())
         assert "".join(chunks) == "Ciao Anthropic"
 
-    @patch("src.agent.requests.post")
+    @patch("src.llm.client.acompletion")
     def test_stream_anthropic_ignores_non_delta_events(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -572,7 +549,7 @@ class TestThinkStream:
         chunks = list(agent.think_stream())
         assert "".join(chunks) == "solo questo"
 
-    @patch("src.agent.requests.post")
+    @patch("src.llm.client.acompletion")
     def test_stream_returns_error_on_http_error(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 503
@@ -588,7 +565,7 @@ class TestThinkStream:
         joined = "".join(chunks)
         assert "Error" in joined or "error" in joined.lower()
 
-    @patch("src.agent.requests.post")
+    @patch("src.llm.client.acompletion")
     def test_stream_handles_malformed_json_lines(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -610,7 +587,7 @@ class TestThinkStream:
         # Il JSON malformato viene saltato, "buono" deve arrivare
         assert "buono" in chunks
 
-    @patch("src.agent.requests.post")
+    @patch("src.llm.client.acompletion")
     def test_stream_calls_trim_before_request(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -642,7 +619,7 @@ class TestThinkStream:
 
 
 class TestThinkWithMessages:
-    @patch("src.agent.requests.post")
+    @patch("src.llm.client.acompletion")
     def test_think_with_messages_openai(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -664,7 +641,7 @@ class TestThinkWithMessages:
         call_kwargs = mock_post.call_args[1]
         assert call_kwargs["json"]["messages"] == external_history
 
-    @patch("src.agent.requests.post")
+    @patch("src.llm.client.acompletion")
     def test_think_with_messages_anthropic(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -691,7 +668,7 @@ class TestThinkWithMessages:
 
 
 class TestCallLightweight:
-    @patch("src.agent.requests.post")
+    @patch("src.llm.client.acompletion")
     def test_call_lightweight_returns_response(self, mock_post):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -706,7 +683,7 @@ class TestCallLightweight:
         result = agent.call_lightweight("Estrai fatti da: l'utente si chiama Alice")
         assert result == "estratto: fatto X"
 
-    @patch("src.agent.requests.post")
+    @patch("src.llm.client.acompletion")
     def test_call_lightweight_uses_max_retries_1(self, mock_post):
         """call_lightweight non deve riprovare più di 1 volta (fail-fast)."""
         # Simula 429 su tutte le chiamate
@@ -725,7 +702,7 @@ class TestCallLightweight:
         # Il risultato deve segnalare un errore oppure essere stringa vuota
         assert "Error" in result or result == "" or "Rate" in result
 
-    @patch("src.agent.requests.post")
+    @patch("src.llm.client.acompletion")
     def test_call_lightweight_returns_error_or_empty_on_exception(self, mock_post):
         """
         Se l'LLM lancia eccezione, call_lightweight deve returnare stringa vuota

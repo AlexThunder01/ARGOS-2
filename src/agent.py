@@ -1,16 +1,15 @@
 """
-ARGOS Core Agent — LLM-driven cognitive loop with model-agnostic multi-backend support.
+ARGOS Core Agent — LLM-driven cognitive loop with LiteLLM-based multi-backend support.
 
 This module encapsulates the agent's system prompt, conversational memory management,
-and provider-specific API integration logic with automatic key rotation for rate-limit
-resilience.
+and provider-agnostic LLM integration via LiteLLM (automatic retry, key rotation, provider routing).
 
-Changes:
+Architecture:
 - System prompt AVAILABLE TOOLS section generated from ToolRegistry (single source of truth).
 - trim_history() enforces a real token budget instead of a raw message count.
-- think_stream() yields tokens progressively for end-to-end streaming.
-- think_async() / _call_*_async() use httpx.AsyncClient — non-blocking in FastAPI.
-- call_lightweight() uses max_retries=1 (fail-fast for background tasks).
+- think_async() returns LLMResponse with tool_calls or content via LiteLLM.
+- think_stream() yields tokens progressively for end-to-end streaming via LiteLLM.
+- think_with_messages() and call_lightweight() use asyncio.run() for sync contexts (Telegram).
 """
 
 import asyncio
@@ -18,86 +17,16 @@ import logging
 import os
 import platform
 import time
-from typing import TYPE_CHECKING, AsyncGenerator, Generator, Optional
+from typing import TYPE_CHECKING, AsyncGenerator, Optional
 
 logger = logging.getLogger("argos")
 
-import re
-
-import httpx
-import requests
-
+from src.llm.client import LLMResponse
+from src.llm.client import complete as llm_complete
+from src.llm.client import stream as llm_stream
 from src.planner.planner import build_system_prompt_suffix
 
-# Qwen-3 (and similar thinking models) wrap internal reasoning inside
-# <think>...</think> tags. These MUST be stripped before the text reaches
-# the planner or gets displayed to the user.
-# Two patterns: closed tags and unclosed tags (model truncated mid-thought).
-_THINK_CLOSED_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
-_THINK_OPEN_RE = re.compile(r"<think>.*", re.DOTALL)
-
-
-def _strip_think_tags(text: str) -> str:
-    """Removes <think>...</think> blocks emitted by thinking models (e.g. Qwen-3).
-
-    Handles two cases:
-    1. Properly closed: <think>reasoning</think> actual response
-    2. Unclosed (truncated): <think>reasoning that never closes...
-    """
-    # First pass: remove properly closed <think>...</think> pairs
-    text = _THINK_CLOSED_RE.sub("", text)
-    # Second pass: remove unclosed <think> (model truncated mid-thought)
-    text = _THINK_OPEN_RE.sub("", text)
-    return text.strip()
-
-
-def _stream_filter_think(
-    gen: "Generator[str, None, None]",
-) -> "Generator[str, None, None]":
-    """Filters <think>...</think> blocks from a streaming text generator.
-
-    Buffers incoming chunks to detect tag boundaries that may span multiple
-    chunks. Text outside think blocks is yielded immediately once safe.
-    """
-    buffer = ""
-    in_think = False
-    # Minimum chars to hold back to catch a partial opening/closing tag
-    _OPEN_TAG = "<think>"
-    _CLOSE_TAG = "</think>"
-    _HOLD = max(len(_OPEN_TAG), len(_CLOSE_TAG)) - 1
-
-    for chunk in gen:
-        buffer += chunk
-        while True:
-            if not in_think:
-                pos = buffer.find(_OPEN_TAG)
-                if pos == -1:
-                    safe = buffer[:-_HOLD] if len(buffer) > _HOLD else ""
-                    if safe:
-                        yield safe
-                        buffer = buffer[len(safe) :]
-                    break
-                if pos > 0:
-                    yield buffer[:pos]
-                buffer = buffer[pos + len(_OPEN_TAG) :]
-                in_think = True
-            else:
-                pos = buffer.find(_CLOSE_TAG)
-                if pos == -1:
-                    buffer = buffer[-_HOLD:] if len(buffer) > _HOLD else buffer
-                    break
-                buffer = buffer[pos + len(_CLOSE_TAG) :]
-                in_think = False
-
-    if buffer and not in_think:
-        yield buffer
-
-
-from src.resilience.circuit_breaker import CircuitBreaker, CircuitBreakerOpen
-
 from .config import (
-    CIRCUIT_BREAKER_FAILURE_THRESHOLD,
-    CIRCUIT_BREAKER_TIMEOUT_SECONDS,
     LLM_BACKEND,
     LLM_MODEL,
 )
@@ -155,14 +84,6 @@ def _is_compactable_message(msg: dict) -> bool:
 # context. Override via ARGOS_MC_TTL_MINUTES env var.
 _TIME_BASED_MC_TTL_S: int = int(os.getenv("ARGOS_MC_TTL_MINUTES", "60")) * 60
 
-# LLM HTTP timeout — increase for slow local/tunneled models (e.g. Ollama on Kaggle).
-# Override via LLM_TIMEOUT_S env var.
-_LLM_TIMEOUT: int = int(os.getenv("LLM_TIMEOUT_S", "300"))
-
-# Anthropic max_tokens — increase for complex responses (file gen, long analysis).
-# Override via ANTHROPIC_MAX_TOKENS env var.
-_ANTHROPIC_MAX_TOKENS: int = int(os.getenv("ANTHROPIC_MAX_TOKENS", "4096"))
-
 
 def _count_tokens(text: str) -> int:
     """Estimates token count. CJK characters count as ~1 token each; other text ~4 chars/token."""
@@ -178,25 +99,6 @@ def _count_tokens(text: str) -> int:
         )
     )
     return max(1, cjk + (len(text) - cjk) // 4)
-
-
-def _split_anthropic_messages(messages: list[dict]) -> tuple[str, list[dict]]:
-    """Splits history into Anthropic-format system string + user/assistant messages."""
-    system_parts: list[str] = []
-    user_msgs: list[dict] = []
-    for m in messages:
-        if m["role"] == "system":
-            system_parts.append(m["content"])
-        else:
-            user_msgs.append(m)
-    return "\n".join(system_parts).strip(), user_msgs
-
-
-# --- Circuit Breaker (Resilience) ---
-_llm_circuit_breaker = CircuitBreaker(
-    failure_threshold=CIRCUIT_BREAKER_FAILURE_THRESHOLD,
-    timeout_seconds=CIRCUIT_BREAKER_TIMEOUT_SECONDS,
-)
 
 
 class ArgosAgent:
@@ -341,23 +243,24 @@ class ArgosAgent:
     def _call_for_compaction(self, messages: list[dict]) -> str:
         """Lightweight LLM call used exclusively by structured compaction (Tier 2).
 
-        Uses the lightweight model with max_retries=1 so a slow/unavailable
-        service fails fast and falls through to Tier 3 without blocking long.
+        Uses the lightweight model for fast compaction.
         """
-        from .config import LLM_LIGHTWEIGHT_MODEL
+        from src.config import LLM_API_KEY, LLM_BASE_URL, LLM_LIGHTWEIGHT_MODEL
 
-        if self.backend == "anthropic":
-            return self._call_anthropic(
-                messages,
-                temperature=0.0,
-                model_override=LLM_LIGHTWEIGHT_MODEL,
+        try:
+            response = asyncio.run(
+                llm_complete(
+                    messages=messages,
+                    model=LLM_LIGHTWEIGHT_MODEL,
+                    temperature=0.0,
+                    api_key=LLM_API_KEY or None,
+                    api_base=LLM_BASE_URL or None,
+                )
             )
-        return self._call_openai_compatible(
-            messages,
-            temperature=0.0,
-            model_override=LLM_LIGHTWEIGHT_MODEL,
-            max_retries=1,
-        )
+            return response.content or ""
+        except Exception as e:
+            logger.error(f"[LLM] Compaction call failed: {e}")
+            return ""
 
     def trim_history(self):
         """
@@ -431,433 +334,58 @@ class ArgosAgent:
     # ──────────────────────────────────────────────────────────────────────
 
     def think(self) -> str:
-        """Executes one step of the agent's reasoning loop (blocking).
-        Use think_async() when calling from an async context (FastAPI)."""
-        self._check_time_based_mc()
-        self.trim_history()
-        try:
-            if self.backend == "anthropic":
-                result = _llm_circuit_breaker.call(
-                    self._call_anthropic, self.history, temperature=0.0
-                )
-            else:
-                result = _llm_circuit_breaker.call(
-                    self._call_openai_compatible, self.history, temperature=0.0
-                )
-            self._last_llm_call_time = time.monotonic()
-            return result
-        except CircuitBreakerOpen as e:
-            logger.error(f"[LLM] Circuit breaker open; LLM unavailable: {e}")
-            raise
-        except Exception as e:
-            return f"LLM Error: {e}"
-
-    def _call_openai_compatible(
-        self,
-        messages: list[dict],
-        temperature: float = 0.0,
-        model_override: str = None,
-        max_retries: int = 3,
-    ) -> str:
-        """Sync OpenAI-compatible call with dual-key rotation on rate limits."""
-        from .config import LLM_API_KEY, LLM_API_KEY_2, LLM_BASE_URL
-
-        available_keys = [k for k in [LLM_API_KEY, LLM_API_KEY_2] if k]
-        url = f"{LLM_BASE_URL.rstrip('/')}/chat/completions"
-        payload = {
-            "model": model_override or self.model,
-            "messages": messages,
-            "temperature": temperature,
-        }
-
-        exhausted: set[str] = set()
-        current_key = available_keys[0] if available_keys else None
-
-        for attempt in range(max_retries + 1):
-            headers = {"Content-Type": "application/json"}
-            if current_key:
-                headers["Authorization"] = f"Bearer {current_key}"
-
-            try:
-                response = requests.post(
-                    url, headers=headers, json=payload, timeout=_LLM_TIMEOUT
-                )
-
-                if response.status_code == 429:
-                    if current_key:
-                        exhausted.add(current_key)
-                    remaining = [k for k in available_keys if k not in exhausted]
-                    if remaining and attempt < max_retries:
-                        logger.warning("[LLM] Rate Limit. Rotating to next key...")
-                        current_key = remaining[0]
-                        continue
-                    elif attempt < max_retries:
-                        wait_time = 5 * (attempt + 1)
-                        exhausted.clear()
-                        logger.warning(
-                            f"[LLM] All keys rate-limited. Waiting {wait_time}s..."
-                        )
-                        time.sleep(wait_time)
-                        current_key = available_keys[0] if available_keys else None
-                        continue
-                    return "Error: Rate Limit exceeded."
-
-                if response.status_code != 200:
-                    logger.error(
-                        f"[LLM] OpenAI-compatible error {response.status_code}: {response.text[:200]}"
-                    )
-                    return "API Error."
-
-                choices = response.json().get("choices", [])
-                if not choices:
-                    logger.error("[LLM] OpenAI-compatible: empty 'choices' in response")
-                    return "API Error: empty response from LLM."
-                return _strip_think_tags(choices[0]["message"]["content"])
-
-            except Exception as e:
-                return f"Connection Error: {e}"
-
-        return "Error: Rate Limit exceeded."
-
-    def _call_anthropic(
-        self,
-        messages: list[dict],
-        temperature: float = 0.0,
-        model_override: str = None,
-    ) -> str:
-        """Sync Anthropic API call."""
-        from .config import LLM_API_KEY
-
-        system_msg, user_msgs = _split_anthropic_messages(messages)
-
-        headers = {
-            "x-api-key": LLM_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        }
-        payload = {
-            "model": model_override or self.model,
-            "system": system_msg,
-            "messages": user_msgs,
-            "max_tokens": _ANTHROPIC_MAX_TOKENS,
-            "temperature": temperature,
-        }
-
-        try:
-            response = requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers=headers,
-                json=payload,
-                timeout=_LLM_TIMEOUT,
-            )
-            if response.status_code != 200:
-                logger.error(
-                    f"[LLM] Anthropic error {response.status_code}: {response.text[:200]}"
-                )
-                return "API Error."
-            content_blocks = response.json().get("content", [])
-            if not content_blocks:
-                logger.error("[LLM] Anthropic: empty 'content' in response")
-                return "API Error: empty response from LLM."
-            return _strip_think_tags(content_blocks[0]["text"])
-        except Exception as e:
-            return f"Connection Error: {e}"
+        """Sync wrapper for CLI use. Returns text content of the LLM response."""
+        response = asyncio.run(self.think_async())
+        return response.content or ""
 
     # ──────────────────────────────────────────────────────────────────────
     # Async inference (FastAPI — non-blocking)
     # ──────────────────────────────────────────────────────────────────────
 
-    async def think_async(self) -> str:
-        """
-        Non-blocking version of think(). Uses httpx.AsyncClient.
-        Does not block the FastAPI event loop under concurrent load.
-        """
+    async def think_async(self) -> LLMResponse:
+        """Single LLM reasoning step — non-blocking. Returns LLMResponse with tool_calls or content."""
         self._check_time_based_mc()
         self.trim_history()
-        try:
-            if self.backend == "anthropic":
-                result = await _llm_circuit_breaker.async_call(
-                    self._call_anthropic_async, self.history, temperature=0.0
-                )
-            else:
-                result = await _llm_circuit_breaker.async_call(
-                    self._call_openai_compatible_async, self.history, temperature=0.0
-                )
-            self._last_llm_call_time = time.monotonic()
-            return result
-        except CircuitBreakerOpen as e:
-            logger.error(f"[LLM] Circuit breaker open; LLM unavailable: {e}")
-            raise
-        except Exception as e:
-            return f"LLM Error: {e}"
+        self._last_llm_call_time = time.monotonic()
 
-    async def _call_openai_compatible_async(
-        self,
-        messages: list[dict],
-        temperature: float = 0.0,
-        model_override: str = None,
-        max_retries: int = 3,
-    ) -> str:
-        """Async OpenAI-compatible call with key rotation on rate limits."""
-        from .config import LLM_API_KEY, LLM_API_KEY_2, LLM_BASE_URL
+        from src.config import LLM_API_KEY, LLM_BASE_URL
+        from src.tools.registry import REGISTRY
 
-        url = f"{LLM_BASE_URL.rstrip('/')}/chat/completions"
-        payload = {
-            "model": model_override or self.model,
-            "messages": messages,
-            "temperature": temperature,
-        }
-
-        available_keys = [k for k in [LLM_API_KEY, LLM_API_KEY_2] if k]
-        exhausted: set[str] = set()
-        current_key = available_keys[0] if available_keys else None
-
-        for attempt in range(max_retries + 1):
-            headers = {"Content-Type": "application/json"}
-            if current_key:
-                headers["Authorization"] = f"Bearer {current_key}"
-
-            try:
-                async with httpx.AsyncClient(timeout=_LLM_TIMEOUT) as client:
-                    resp = await client.post(url, headers=headers, json=payload)
-
-                if resp.status_code == 429:
-                    logger.warning(
-                        f"[LLM/async] 429 received (attempt={attempt}): {resp.text[:300]}"
-                    )
-                    if current_key:
-                        exhausted.add(current_key)
-                    remaining = [k for k in available_keys if k not in exhausted]
-                    if remaining and attempt < max_retries:
-                        logger.warning(
-                            "[LLM/async] Rate Limit. Rotating to next key..."
-                        )
-                        current_key = remaining[0]
-                        continue
-                    elif attempt < max_retries:
-                        wait = 5 * (attempt + 1)
-                        exhausted.clear()
-                        logger.warning(
-                            f"[LLM/async] All keys rate-limited. Waiting {wait}s..."
-                        )
-                        await asyncio.sleep(wait)
-                        current_key = available_keys[0] if available_keys else None
-                        continue
-                    return "Error: Rate Limit exceeded."
-
-                if resp.status_code != 200:
-                    logger.error(
-                        f"[LLM/async] OpenAI-compatible error {resp.status_code}: {resp.text[:200]}"
-                    )
-                    return "API Error."
-
-                choices = resp.json().get("choices", [])
-                if not choices:
-                    # Some providers (e.g. OpenRouter free tier) occasionally return
-                    # empty choices transiently — retry before giving up
-                    if attempt < max_retries:
-                        logger.warning(
-                            f"[LLM/async] Empty choices on attempt {attempt + 1} — retrying..."
-                        )
-                        await asyncio.sleep(2 * (attempt + 1))
-                        continue
-                    logger.error(
-                        "[LLM/async] OpenAI-compatible: empty 'choices' in response"
-                    )
-                    return "API Error: empty response from LLM."
-                return _strip_think_tags(choices[0]["message"]["content"])
-
-            except httpx.TimeoutException:
-                if attempt < max_retries:
-                    await asyncio.sleep(2**attempt)
-                    continue
-                return "Connection Error: timeout"
-            except Exception as e:
-                return f"Connection Error: {e}"
-
-        return "Error: Rate Limit exceeded."
-
-    async def _call_anthropic_async(
-        self,
-        messages: list[dict],
-        temperature: float = 0.0,
-        model_override: str = None,
-    ) -> str:
-        """Async Anthropic API call."""
-        from .config import LLM_API_KEY
-
-        system_msg, user_msgs = _split_anthropic_messages(messages)
-
-        headers = {
-            "x-api-key": LLM_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        }
-        payload = {
-            "model": model_override or self.model,
-            "system": system_msg,
-            "messages": user_msgs,
-            "max_tokens": _ANTHROPIC_MAX_TOKENS,
-            "temperature": temperature,
-        }
+        tools = REGISTRY.as_openai_tools()
 
         try:
-            async with httpx.AsyncClient(timeout=_LLM_TIMEOUT) as client:
-                resp = await client.post(
-                    "https://api.anthropic.com/v1/messages",
-                    headers=headers,
-                    json=payload,
-                )
-            if resp.status_code != 200:
-                logger.error(
-                    f"[LLM/async] Anthropic error {resp.status_code}: {resp.text[:200]}"
-                )
-                return "API Error."
-            content_blocks = resp.json().get("content", [])
-            if not content_blocks:
-                logger.error("[LLM/async] Anthropic: empty 'content' in response")
-                return "API Error: empty response from LLM."
-            return _strip_think_tags(content_blocks[0]["text"])
+            return await llm_complete(
+                messages=self.history,
+                tools=tools if tools else None,
+                model=self.model,
+                temperature=0.0,
+                api_key=LLM_API_KEY or None,
+                api_base=LLM_BASE_URL or None,
+            )
         except Exception as e:
-            return f"Connection Error: {e}"
+            logger.error(f"[LLM] think_async failed: {e}")
+            return LLMResponse(content=f"LLM Error: {e}", tool_calls=[])
 
     # ──────────────────────────────────────────────────────────────────────
     # Streaming inference (sync generator — SSE / CLI)
     # ──────────────────────────────────────────────────────────────────────
 
-    def think_stream(self) -> Generator[str, None, None]:
-        """Yields text chunks as they arrive from the LLM (sync streaming).
-        <think>...</think> blocks are filtered in real-time before yielding."""
+    async def think_stream(self):
+        """Streaming LLM call. Async generator yielding text chunks."""
         self._check_time_based_mc()
         self.trim_history()
         self._last_llm_call_time = time.monotonic()
-        try:
-            if self.backend == "anthropic":
-                raw = self._call_anthropic_stream(self.history, temperature=0.0)
-            else:
-                raw = self._call_openai_compatible_stream(self.history, temperature=0.0)
-            yield from _stream_filter_think(raw)
-        except Exception as e:
-            yield f"LLM Error: {e}"
 
-    def _call_openai_compatible_stream(
-        self,
-        messages: list[dict],
-        temperature: float = 0.0,
-        model_override: str = None,
-    ) -> Generator[str, None, None]:
-        """Streaming OpenAI-compatible call. Parses SSE chunks and yields text deltas."""
-        import json as _json
+        from src.config import LLM_API_KEY, LLM_BASE_URL
 
-        from .config import LLM_API_KEY, LLM_BASE_URL
-
-        headers = {"Content-Type": "application/json"}
-        if LLM_API_KEY:
-            headers["Authorization"] = f"Bearer {LLM_API_KEY}"
-
-        payload = {
-            "model": model_override or self.model,
-            "messages": messages,
-            "temperature": temperature,
-            "stream": True,
-        }
-
-        try:
-            url = f"{LLM_BASE_URL.rstrip('/')}/chat/completions"
-            with requests.post(
-                url, headers=headers, json=payload, timeout=_LLM_TIMEOUT, stream=True
-            ) as resp:
-                if resp.status_code != 200:
-                    yield f"API Error: HTTP {resp.status_code}"
-                    return
-
-                for raw_line in resp.iter_lines():
-                    if not raw_line:
-                        continue
-                    line = (
-                        raw_line.decode("utf-8")
-                        if isinstance(raw_line, bytes)
-                        else raw_line
-                    )
-                    if not line.startswith("data: "):
-                        continue
-                    data = line[6:]
-                    if data.strip() == "[DONE]":
-                        break
-                    try:
-                        chunk = _json.loads(data)
-                        delta = (
-                            chunk.get("choices", [{}])[0]
-                            .get("delta", {})
-                            .get("content", "")
-                        )
-                        if delta:
-                            yield delta
-                    except _json.JSONDecodeError:
-                        continue
-        except Exception as e:
-            yield f"Connection Error: {e}"
-
-    def _call_anthropic_stream(
-        self,
-        messages: list[dict],
-        temperature: float = 0.0,
-        model_override: str = None,
-    ) -> Generator[str, None, None]:
-        """Streaming Anthropic call. Parses SSE events and yields text deltas."""
-        import json as _json
-
-        from .config import LLM_API_KEY
-
-        system_msg, user_msgs = _split_anthropic_messages(messages)
-
-        headers = {
-            "x-api-key": LLM_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        }
-        payload = {
-            "model": model_override or self.model,
-            "system": system_msg,
-            "messages": user_msgs,
-            "max_tokens": _ANTHROPIC_MAX_TOKENS,
-            "temperature": temperature,
-            "stream": True,
-        }
-
-        try:
-            with requests.post(
-                "https://api.anthropic.com/v1/messages",
-                headers=headers,
-                json=payload,
-                timeout=_LLM_TIMEOUT,
-                stream=True,
-            ) as resp:
-                if resp.status_code != 200:
-                    yield f"API Error: HTTP {resp.status_code}"
-                    return
-
-                for raw_line in resp.iter_lines():
-                    if not raw_line:
-                        continue
-                    line = (
-                        raw_line.decode("utf-8")
-                        if isinstance(raw_line, bytes)
-                        else raw_line
-                    )
-                    if not line.startswith("data: "):
-                        continue
-                    data = line[6:]
-                    try:
-                        event = _json.loads(data)
-                        if event.get("type") == "content_block_delta":
-                            text = event.get("delta", {}).get("text", "")
-                            if text:
-                                yield text
-                    except _json.JSONDecodeError:
-                        continue
-        except Exception as e:
-            yield f"Connection Error: {e}"
+        async for chunk in llm_stream(
+            messages=self.history,
+            model=self.model,
+            temperature=0.0,
+            api_key=LLM_API_KEY or None,
+            api_base=LLM_BASE_URL or None,
+        ):
+            yield chunk
 
     # ──────────────────────────────────────────────────────────────────────
     # External History Methods (Telegram Chat Module)
@@ -865,31 +393,40 @@ class ArgosAgent:
 
     def think_with_messages(self, messages: list[dict]) -> str:
         """Sync inference with externally-provided history (Telegram)."""
-        if self.backend == "anthropic":
-            return self._call_anthropic(messages, temperature=0.3)
-        else:
-            return self._call_openai_compatible(messages, temperature=0.3)
+        from src.config import LLM_API_KEY, LLM_BASE_URL
+
+        try:
+            response = asyncio.run(
+                llm_complete(
+                    messages=messages,
+                    model=self.model,
+                    temperature=0.3,
+                    api_key=LLM_API_KEY or None,
+                    api_base=LLM_BASE_URL or None,
+                )
+            )
+            return response.content or ""
+        except Exception as e:
+            logger.error(f"[LLM] think_with_messages failed: {e}")
+            return ""
 
     def call_lightweight(self, prompt: str) -> str:
         """
         Sync lightweight model call for background tasks (memory extraction).
-        max_retries=1: fails fast, does not block the agent on background work.
+        Fails fast with LiteLLM's retry strategy.
         """
-        from .config import LLM_LIGHTWEIGHT_MODEL
+        from src.config import LLM_API_KEY, LLM_BASE_URL, LLM_LIGHTWEIGHT_MODEL
 
         try:
-            if self.backend == "anthropic":
-                return self._call_anthropic(
-                    [{"role": "user", "content": prompt}],
+            response = asyncio.run(
+                llm_complete(
+                    messages=[{"role": "user", "content": prompt}],
+                    model=LLM_LIGHTWEIGHT_MODEL,
                     temperature=0.0,
-                    model_override=LLM_LIGHTWEIGHT_MODEL,
+                    api_key=LLM_API_KEY or None,
+                    api_base=LLM_BASE_URL or None,
                 )
-            else:
-                return self._call_openai_compatible(
-                    [{"role": "user", "content": prompt}],
-                    temperature=0.0,
-                    model_override=LLM_LIGHTWEIGHT_MODEL,
-                    max_retries=1,
-                )
+            )
+            return response.content or ""
         except Exception:
             return ""

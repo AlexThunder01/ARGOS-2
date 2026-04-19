@@ -17,7 +17,6 @@ import uuid
 from threading import Lock
 from typing import List, Optional
 
-import pybreaker
 import requests
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -28,8 +27,6 @@ from src.core import CoreAgent
 
 router = APIRouter(tags=["Agent"])
 logger = logging.getLogger("argos")
-
-llm_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
 
 # ── Idempotency store ──────────────────────────────────────────────────────
 # Maps idempotency_key → job_id for deduplication of async requests.
@@ -195,28 +192,12 @@ async def _run_task_async_core(
     task: str, require_confirmation: bool, max_steps: int
 ) -> TaskResponse:
     """
-    Executes a task via the async CoreAgent (non-blocking httpx LLM calls).
-
-    pybreaker.CircuitBreaker.call() is sync-only; we manually honour the
-    breaker's open state and delegate success/failure tracking to it via a
-    thread so we don't block the event loop.
+    Executes a task via the async CoreAgent (non-blocking LLM calls via LiteLLM).
     """
     agent = _get_agent(require_confirmation, max_steps)
 
     try:
         result = await agent.run_task_async(task)
-        # Record success so the breaker can close from HALF_OPEN
-        await asyncio.to_thread(llm_breaker.call, lambda: None)
-    except pybreaker.CircuitBreakerError:
-        return TaskResponse(
-            success=False,
-            task=task,
-            steps_executed=0,
-            result="LLM Service unavailable (Circuit Breaker OPEN)",
-            history=[],
-            backend=agent.backend,
-            model=agent.model,
-        )
     except (asyncio.TimeoutError, asyncio.CancelledError):
         # Timeout or cancellation — don't treat as LLM failure
         logger.warning("[CoreAgent] Task execution cancelled or timed out")
@@ -235,17 +216,12 @@ def _run_task_sync(
     """Sync fallback — used only by the webhook background worker."""
     agent = _get_agent(require_confirmation, max_steps)
     try:
-        result = llm_breaker.call(agent.run_task, task)
-    except pybreaker.CircuitBreakerError:
-        return TaskResponse(
-            success=False,
-            task=task,
-            steps_executed=0,
-            result="LLM Service unavailable (Circuit Breaker OPEN)",
-            history=[],
-            backend=agent.backend,
-            model=agent.model,
-        )
+        result = agent.run_task(task)
+    except Exception as e:
+        # Any exception should propagate to the async worker
+        logger.exception(f"[CoreAgent] Error in run_task_sync: {e}")
+        raise
+
     return _task_result_to_response(result, agent, task)
 
 

@@ -4,7 +4,6 @@ import os
 import re
 
 import httpx
-import pybreaker
 import requests
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -13,7 +12,6 @@ from api.security import verify_api_key
 
 router = APIRouter(prefix="/telegram", tags=["Telegram"])
 logger = logging.getLogger("argos")
-telegram_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
 
 # Singleton — think_with_context and call_lightweight are stateless (no shared history),
 # so one instance is safe across all concurrent requests.
@@ -357,15 +355,7 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
     agent = _get_telegram_agent()
 
     try:
-        raw_reply = await asyncio.to_thread(
-            telegram_breaker.call, agent.think_with_context, messages
-        )
-    except pybreaker.CircuitBreakerError:
-        return TelegramChatResponse(
-            status="ok",
-            reply="⚠️ Servizio temporaneamente non disponibile. Riprova tra un minuto.",
-            user_id=req.user_id,
-        )
+        raw_reply = await asyncio.to_thread(agent.think_with_context, messages)
     except Exception as e:
         logger.error(f"[Telegram] LLM call failed for user {req.user_id}: {e}")
         return TelegramChatResponse(
