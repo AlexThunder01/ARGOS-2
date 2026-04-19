@@ -58,7 +58,7 @@ def _build_mem0():
         config["vector_store"] = {
             "provider": "pgvector",
             "config": {
-                "dbname": _parse_dbname(database_url),
+                "connection_string": database_url,
                 "collection_name": "argos_memories",
                 "embedding_model_dims": int(os.getenv("EMBEDDING_DIM", "768")),
             },
