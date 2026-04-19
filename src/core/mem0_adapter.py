@@ -67,13 +67,6 @@ def _build_mem0():
     return Memory.from_config(config)
 
 
-def _parse_dbname(url: str) -> str:
-    try:
-        return url.split("/")[-1].split("?")[0]
-    except Exception:
-        return "argos"
-
-
 class ArgosMemory:
     """
     Thin wrapper over mem0 Memory.
