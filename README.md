@@ -1,22 +1,72 @@
 # ARGOS-2: Personal AI Agent & Automation Hub
 
-ARGOS-2 is an autonomous AI agent for Linux that connects a local CLI, a Telegram bot, a React dashboard, and an n8n automation engine — all sharing a single reasoning core.
+ARGOS-2 is an autonomous AI agent for Linux. You give it a task in natural language — via terminal, Telegram, or a web dashboard — and it plans and executes it using a library of 33 tools: web search, code execution, file management, browser automation, document parsing, finance data, and more.
+
+---
+
+## What ARGOS can do
+
+```
+You › Find the top 5 Python libraries for data validation, write a comparison table, and save it as comparison.md
+You › Read the attached invoice.pdf and tell me the total amount due
+You › Check the current BTC and ETH prices and send me a summary
+You › Go to example.com, fill in the contact form with these details, and submit it
+You › Run this script in a sandbox and show me the output
+You › Every time a new email arrives, summarize it and send it to my Telegram
+```
+
+ARGOS reasons step-by-step, picks the right tools, executes them, and returns a result — all in one shot.
+
+---
+
+## Quick Start (CLI only, no Docker)
+
+The fastest way to try ARGOS locally using SQLite and the terminal.
+
+**1. Install dependencies**
+
+```bash
+pip install -r requirements.txt
+```
+
+**2. Configure the environment**
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and set at minimum:
+
+```env
+LLM_API_KEY=your_key_here
+LLM_BASE_URL=https://api.groq.com/openai/v1   # or any OpenAI-compatible endpoint
+LLM_MODEL=llama-3.3-70b-versatile
+DB_BACKEND=sqlite
+```
+
+**3. Run**
+
+```bash
+python3 scripts/main.py
+```
+
+That's it. ARGOS starts an interactive session in your terminal. No Docker, no n8n, no Telegram required.
+
+> For persistent memory across sessions, add `--memory`. For the full stack (Telegram bot, dashboard, n8n automation), follow the [Full Setup](#full-setup) below.
 
 ---
 
 ## Prerequisites
 
-Before you begin, make sure the following are installed:
-
-| Dependency | Minimum version | Notes |
+| Dependency | Minimum version | Required for |
 |---|---|---|
-| Python | 3.12 | Required for CLI and scripts |
-| Docker & Docker Compose | 24+ | Required for the full stack |
-| Node.js + npm | 18+ | Required only for dashboard development |
+| Python | 3.12 | CLI and scripts |
+| Docker & Docker Compose | 24+ | Full stack |
+| Node.js + npm | 18+ | Dashboard development only |
 
 ---
 
-## Setup
+## Full Setup
 
 ### 1. Configure environment variables
 
@@ -24,34 +74,113 @@ Before you begin, make sure the following are installed:
 cp .env.example .env
 ```
 
-Open `.env` and fill in the required values:
+**Core LLM**
 
 | Variable | Required | Description |
 |---|---|---|
-| `LLM_API_KEY` | Yes | API key for your LLM provider (Groq, OpenAI, etc.) |
+| `LLM_API_KEY` | Yes | API key for your LLM provider (Groq, OpenAI, Mistral, etc.) |
 | `LLM_BASE_URL` | Yes | Base URL of the OpenAI-compatible endpoint |
 | `LLM_MODEL` | Yes | Model name (e.g. `llama-3.3-70b-versatile`) |
-| `LLM_LIGHTWEIGHT_MODEL` | Recommended | Model for background tasks (memory extraction). Defaults to `llama-3.1-8b-instant` |
+| `LLM_BACKEND` | No | Provider backend: `openai-compatible` (default) or `anthropic` |
+| `LLM_LIGHTWEIGHT_MODEL` | No | Model for background tasks (memory extraction). Defaults to `llama-3.1-8b-instant` |
+| `LLM_API_KEY_2` | No | Secondary LLM API key (load balancing / fallback) |
+
+**Security & API**
+
+| Variable | Required | Description |
+|---|---|---|
 | `ARGOS_API_KEY` | Yes | Secret key for the internal API and dashboard auth |
+| `ARGOS_PARANOID_MODE` | No | Set to `true` to enable LLM-based input validation on all endpoints (default: `false`) |
+| `ARGOS_PERMISSIVE_MODE` | No | Set to `true` to bypass API key auth — local dev only, never in production (default: `false`) |
+
+**Database**
+
+| Variable | Required | Description |
+|---|---|---|
 | `DB_BACKEND` | No | `sqlite` (default for local dev) or `postgres` (production with Docker) |
+| `DATABASE_URL` | For postgres | PostgreSQL connection string (e.g. `postgresql://user:pass@host:5432/db`) |
+| `POSTGRES_PASSWORD` | For postgres | PostgreSQL password (used by `docker-compose`) |
+
+**RAG Memory (Embeddings)**
+
+| Variable | Required | Description |
+|---|---|---|
 | `EMBEDDING_BASE_URL` | For RAG memory | Embeddings API endpoint (default: Groq) |
 | `EMBEDDING_API_KEY` | For RAG memory | Embeddings API key |
 | `EMBEDDING_MODEL` | For RAG memory | Embedding model name (default: `nomic-embed-text-v1.5`) |
 | `EMBEDDING_DIM` | For RAG memory | Embedding vector dimensions (default: `768`) |
+
+**Vision**
+
+| Variable | Required | Description |
+|---|---|---|
 | `VISION_BASE_URL` | For vision tools | Vision LLM endpoint (defaults to `LLM_BASE_URL`) |
 | `VISION_API_KEY` | For vision tools | Vision LLM API key (defaults to `LLM_API_KEY`) |
 | `VISION_MODEL` | For vision tools | Vision model name |
-| `TELEGRAM_BOT_TOKEN` | For Telegram | Token from [@BotFather](https://t.me/BotFather) |
-| `TELEGRAM_CHAT_ID` | For Telegram | Your Telegram user ID |
+
+**Voice / Speech-to-Text**
+
+| Variable | Required | Description |
+|---|---|---|
+| `ENABLE_VOICE` | No | Set to `true` to enable voice input in the CLI (default: `false`) |
+| `STT_BACKEND` | For voice | STT provider: `groq` (default), `openai`, or `custom` |
+| `STT_CUSTOM_URL` | For custom STT | Whisper-compatible endpoint URL |
+| `STT_CUSTOM_API_KEY` | For custom STT | API key for the custom STT endpoint |
+
+**Telegram**
+
+| Variable | Required | Description |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN` | For Telegram n8n bot | Token from [@BotFather](https://t.me/BotFather) — used by n8n workflows |
+| `TELEGRAM_CHAT_ID` | For Telegram n8n bot | Your Telegram user ID — used by n8n workflows |
+| `TELEGRAM_CHAT_BOT_TOKEN` | For Telegram chat bot | Token for the direct chat bot (separate from the n8n bot) |
+| `ADMIN_CHAT_ID` | For Telegram chat bot | Admin Telegram user ID for approval commands |
+
+**n8n & Webhooks**
+
+| Variable | Required | Description |
+|---|---|---|
+| `N8N_API_KEY` | For n8n injection | API key created in the n8n UI (Settings → API) |
 | `NGROK_AUTHTOKEN` | For webhooks | ngrok auth token for external webhook tunneling |
 | `NGROK_DOMAIN` | For webhooks | Your static ngrok domain |
-| `GOOGLE_CLIENT_ID` | For Gmail | OAuth2 client ID for Gmail workflow |
-| `GOOGLE_CLIENT_SECRET` | For Gmail | OAuth2 client secret for Gmail workflow |
+
+**Gmail (OAuth2)**
+
+| Variable | Required | Description |
+|---|---|---|
+| `GOOGLE_CLIENT_ID` | For Gmail | OAuth2 client ID |
+| `GOOGLE_CLIENT_SECRET` | For Gmail | OAuth2 client secret |
+
+**File Upload**
+
+| Variable | Required | Description |
+|---|---|---|
+| `UPLOAD_MAX_BYTES` | No | Max size per uploaded file in bytes (default: `20971520` = 20 MB) |
+| `UPLOAD_MAX_FILES` | No | Max number of attachments per message (default: `5`) |
+| `UPLOAD_TTL_HOURS` | No | Hours before uploaded files are auto-deleted; `0` = never (default: `24`) |
+
+**Rate Limiting**
+
+| Variable | Required | Description |
+|---|---|---|
+| `RATE_LIMIT_PER_HOUR` | No | Max requests per hour per user (default: `50`) |
+| `RATE_LIMIT_PER_MINUTE` | No | Max requests per minute per user (default: `5`) |
+
+**Context Management**
+
+| Variable | Required | Description |
+|---|---|---|
 | `ARGOS_ENABLE_COMPACTION` | No | Set to `1` to enable Tier-2 structured compaction (LLM-based context summarisation) |
 | `ARGOS_MC_TTL_MINUTES` | No | Minutes of idle time before a pre-emptive micro-compact fires (default: `60`) |
 | `ARGOS_MICRO_COMPACT_KEEP` | No | Number of recent compactable messages preserved by micro-compact (default: `5`) |
 | `ARGOS_SESSION_MEMORY_PATH` | No | Path for the session working-memory file (default: `.argos_session_memory.md`) |
 | `ARGOS_SESSION_MEMORY_UPDATE_EVERY` | No | Tool calls between session-memory refreshes (default: `5`) |
+
+**CLI**
+
+| Variable | Required | Description |
+|---|---|---|
+| `MAX_TOOL_LOOPS` | No | Default max reasoning steps for the CLI (default: `10`; overridable via `--max-steps`) |
 
 ### 2. Build the dashboard
 
@@ -97,8 +226,6 @@ This script automatically waits for n8n to be ready, creates credentials, and ac
 
 ### CLI
 
-Interact with ARGOS directly from the terminal:
-
 ```bash
 # Stateless — no memory between runs
 python3 scripts/main.py
@@ -108,11 +235,26 @@ python3 scripts/main.py --session
 
 # Persistent memory — uses pgvector RAG, shared with the Telegram bot
 python3 scripts/main.py --memory
+
+# One-shot mode — run a single prompt and exit
+python3 scripts/main.py "summarise today's news"
+
+# Attach files to a prompt
+python3 scripts/main.py --attach report.pdf image.png
+
+# Additional flags
+#   --max-steps N   Max reasoning steps per task (default: 10, env: MAX_TOOL_LOOPS)
+#   --user-id N     Override the auto-generated user ID
+#   --debug         Enable verbose debug logging
 ```
+
+Voice input is available when `ENABLE_VOICE=true` is set in `.env`.
 
 ### Web Dashboard
 
 After deployment, the dashboard is available at [http://localhost:8000](http://localhost:8000).
+
+It includes a chat terminal (SSE streaming), live Docker container monitor, CPU/RAM telemetry, and a security audit log.
 
 For local frontend development with hot reload:
 
@@ -232,12 +374,12 @@ Security layers:
 ## Troubleshooting
 
 **Dashboard loads but shows no data**
-The dashboard requires `ARGOS_API_KEY` to be set in `.env` and `VITE_ARGOS_API_KEY` to be set at build time. See [Setup → Build the dashboard](#2-build-the-dashboard).
+The dashboard requires `ARGOS_API_KEY` to be set in `.env` and `VITE_ARGOS_API_KEY` to be set at build time. See [Full Setup → Build the dashboard](#2-build-the-dashboard).
 
 **`inject_n8n.py` fails with connection error**
 The script includes a built-in retry loop (30 attempts × 3s). If it still fails, check that n8n is healthy: `docker ps` should show `argos-n8n` as `healthy`.
 
-**Telegram bot returns an AI error message**
+**Telegram bot returns an error message**
 Usually a transient network issue reaching the LLM provider. Check `docker logs argos-api` for the actual error. If it persists, verify `LLM_API_KEY` and `LLM_BASE_URL` in `.env`.
 
 **`N8N_API_KEY` missing / inject fails with 401**
