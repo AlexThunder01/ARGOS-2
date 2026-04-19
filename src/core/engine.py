@@ -35,7 +35,6 @@ from src.actions.base import ActionStatus
 from src.agent import ArgosAgent
 from src.config import COST_PER_TOKEN, TOOL_RAG_TOP_K
 from src.core.mem0_adapter import ArgosMemory
-from src.core.memory import EXTRACT_MIN_LENGTH
 from src.core.session_memory import SessionMemory
 from src.executor.executor import execute_with_retry
 from src.hooks.registry import HOOK_REGISTRY, HookEvent

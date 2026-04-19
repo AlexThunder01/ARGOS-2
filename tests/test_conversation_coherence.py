@@ -24,8 +24,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from src.agent import ArgosAgent, _count_tokens
-from src.core.engine import CoreAgent, _tfidf_similarity
-from src.core.memory import EXTRACT_MIN_LENGTH, should_extract_memory
+from src.core.engine import CoreAgent
 
 # ==========================================================================
 # Policy nel system prompt di ArgosAgent
@@ -109,48 +108,11 @@ class TestSystemPromptPolicies:
 
 
 # ==========================================================================
-# Session Memory — storage e retrieval
+# Session Memory — storage validation
 # ==========================================================================
 
 
 class TestSessionMemoryStorage:
-    def test_long_message_stored_in_session(self):
-        """Messaggi > EXTRACT_MIN_LENGTH devono essere salvati in session memory."""
-        agent = CoreAgent(memory_mode="session", inject_git_context=False)
-        long_message = "L'utente preferisce Python per lo sviluppo backend. " * 5
-        assert len(long_message) > EXTRACT_MIN_LENGTH
-
-        agent._maybe_extract_memories(long_message, [])
-
-        assert len(agent._session_memories) == 1
-        assert "Python" in agent._session_memories[0]["content"]
-
-    def test_short_message_not_stored_in_session(self):
-        """Messaggi corti non vengono salvati in session memory."""
-        agent = CoreAgent(memory_mode="session", inject_git_context=False)
-        short_message = "ciao"
-        assert len(short_message) <= EXTRACT_MIN_LENGTH
-
-        agent._maybe_extract_memories(short_message, [])
-
-        assert len(agent._session_memories) == 0
-
-    def test_session_memory_content_truncated_at_200(self):
-        """Il contenuto salvato viene troncato a 200 caratteri."""
-        agent = CoreAgent(memory_mode="session", inject_git_context=False)
-        very_long = "x" * 500
-
-        agent._maybe_extract_memories(very_long, [])
-
-        assert len(agent._session_memories[0]["content"]) <= 200
-
-    def test_session_memory_category_is_fact(self):
-        """La categoria default in session mode è 'fact'."""
-        agent = CoreAgent(memory_mode="session", inject_git_context=False)
-        agent._maybe_extract_memories("a" * 150, [])
-
-        assert agent._session_memories[0]["category"] == "fact"
-
     def test_session_memory_maxlen_evicts_oldest(self):
         """La deque ha maxlen=500: le memorie più vecchie vengono espulse."""
         agent = CoreAgent(memory_mode="session", inject_git_context=False)
@@ -166,43 +128,6 @@ class TestSessionMemoryStorage:
         contents = [m["content"] for m in agent._session_memories]
         assert "fact_0000" not in contents
         assert "fact_0509" in contents
-
-    def test_off_mode_does_not_store(self):
-        """In memory_mode='off', _maybe_extract_memories non deve fare nulla."""
-        agent = CoreAgent(memory_mode="off", inject_git_context=False)
-        agent._maybe_extract_memories("L'utente si chiama Alice " * 10, [])
-
-        # Non ha _session_memories in senso utile (rimane vuota)
-        assert len(agent._session_memories) == 0
-
-    def test_persistent_mode_calls_extract_for_long_message(self):
-        """In persistent mode, extract_memories_from_text deve essere chiamato."""
-        agent = CoreAgent(memory_mode="persistent", inject_git_context=False)
-        long_msg = "L'utente preferisce Python " * 10
-
-        # Le funzioni sono importate localmente dentro _maybe_extract_memories,
-        # quindi si patchano nel modulo sorgente (src.core.memory).
-        with (
-            patch("src.core.memory.should_extract_memory", return_value=True),
-            patch(
-                "src.core.memory.extract_memories_from_text", return_value=[]
-            ) as mock_extract,
-        ):
-            agent._maybe_extract_memories(long_msg, [])
-
-        mock_extract.assert_called_once()
-
-    def test_persistent_mode_skips_extract_for_short_message(self):
-        """In persistent mode, extract non viene chiamato per messaggi corti."""
-        agent = CoreAgent(memory_mode="persistent", inject_git_context=False)
-
-        with (
-            patch("src.core.memory.should_extract_memory", return_value=False),
-            patch("src.core.memory.extract_memories_from_text") as mock_extract,
-        ):
-            agent._maybe_extract_memories("ciao", [])
-
-        mock_extract.assert_not_called()
 
 
 # ==========================================================================
@@ -288,48 +213,6 @@ class TestSessionMemoryRetrieval:
         )
 
         assert len(agent2._session_memories) == 0
-
-
-# ==========================================================================
-# _tfidf_similarity() — unit test funzione standalone
-# ==========================================================================
-
-
-class TestTfidfSimilarity:
-    def test_identical_query_and_document_high_score(self):
-        """Query identica al documento deve avere score vicino a 1."""
-        text = "Python backend development"
-        scores = _tfidf_similarity(text, [text])
-        assert scores[0] > 0.9
-
-    def test_similar_documents_score_higher_than_unrelated(self):
-        """Documento rilevante deve avere score più alto di uno irrilevante."""
-        query = "Python programming"
-        docs = [
-            "Python is great for programming",  # rilevante
-            "la cucina italiana è buonissima",  # irrilevante
-        ]
-        scores = _tfidf_similarity(query, docs)
-        assert scores[0] > scores[1]
-
-    def test_empty_documents_returns_zeros(self):
-        scores = _tfidf_similarity("test query", [])
-        assert scores == []
-
-    def test_scores_between_zero_and_one(self):
-        scores = _tfidf_similarity("test", ["testo di prova", "altro testo"])
-        for s in scores:
-            assert 0.0 <= s <= 1.0
-
-    def test_returns_one_score_per_document(self):
-        docs = ["doc one", "doc two", "doc three"]
-        scores = _tfidf_similarity("query", docs)
-        assert len(scores) == len(docs)
-
-    def test_completely_unrelated_query_low_score(self):
-        """Query e documento senza parole in comune → score basso."""
-        scores = _tfidf_similarity("zzz yyy xxx", ["aaa bbb ccc"])
-        assert scores[0] < 0.1
 
 
 # ==========================================================================

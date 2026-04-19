@@ -4,25 +4,20 @@ ARGOS-2 Telegram Module — Memory System (Backward Compatibility Wrapper).
 All memory logic has been promoted to src.core.memory.
 This module re-exports everything for backward compatibility with
 existing tests, routes, and imports.
+
+Memory extraction and GC are now delegated to the mem0 adapter.
 """
 
 # Re-export all public symbols from the Core memory module
 # Re-export config values that tests depend on
 from src.config import EMBEDDING_DIM
 from src.core.memory import (
-    EXTRACT_EVERY_N,
-    EXTRACT_MIN_LENGTH,
-    GC_EVERY_N,
-    MEMORY_EXTRACTION_PROMPT,
     check_embedding_dimensions,
     deserialize_embedding,
-    extract_memories_from_text,
     get_embedding,
     retrieve_relevant_memories,
     save_extracted_memories,
     serialize_embedding,
-    should_extract_memory,
-    should_run_gc,
 )
 
 # Re-export security functions that were previously defined here
@@ -39,14 +34,7 @@ __all__ = [
     "serialize_embedding",
     "deserialize_embedding",
     "retrieve_relevant_memories",
-    "should_extract_memory",
-    "should_run_gc",
-    "extract_memories_from_text",
     "save_extracted_memories",
-    "EXTRACT_EVERY_N",
-    "EXTRACT_MIN_LENGTH",
-    "GC_EVERY_N",
-    "MEMORY_EXTRACTION_PROMPT",
     "PARANOID_JUDGE_PROMPT",
     "EMBEDDING_DIM",
     "_COMPILED_BLOCKLIST",
