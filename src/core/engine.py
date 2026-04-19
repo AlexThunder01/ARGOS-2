@@ -37,9 +37,10 @@ from src.core.memory import EXTRACT_MIN_LENGTH
 from src.core.session_memory import SessionMemory
 from src.executor.executor import execute_with_retry
 from src.hooks.registry import HOOK_REGISTRY, HookEvent
+from src.llm.client import LLMResponse
 from src.logging.otel import get_tracer
 from src.logging.tracer import log_decision, log_step
-from src.planner.planner import parse_planner_response
+from src.planner.planner import parse_litellm_response, parse_planner_response
 from src.tools.registry import REGISTRY
 from src.tools.spec import ToolSpec
 from src.world_model.state import WorldState
@@ -164,26 +165,17 @@ class TaskResult:
 
 MEMORY_MODES = ("off", "session", "persistent")
 
-# ── TF-IDF for session memory ──────────────────────────────────────────────
-try:
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine
 
-    _SKLEARN_AVAILABLE = True
-except ImportError:
-    _SKLEARN_AVAILABLE = False
-
-
-def _tfidf_similarity(query: str, documents: list[str]) -> list[float]:
-    if not _SKLEARN_AVAILABLE or not documents:
-        return [0.0] * len(documents)
-    try:
-        corpus = documents + [query]
-        vec = TfidfVectorizer(min_df=1).fit_transform(corpus)
-        scores = sklearn_cosine(vec[-1], vec[:-1]).flatten()
-        return scores.tolist()
-    except Exception:
-        return [0.0] * len(documents)
+# ── Keyword similarity for session memory ──────────────────────────────────
+def _keyword_similarity(query: str, documents: list[str]) -> list[float]:
+    """Simple keyword overlap scoring — fallback when embeddings unavailable."""
+    query_words = set(query.lower().split())
+    scores = []
+    for doc in documents:
+        doc_words = set(doc.lower().split())
+        overlap = len(query_words & doc_words)
+        scores.append(overlap / (len(query_words) + 1))
+    return scores
 
 
 # ==========================================================================
@@ -401,6 +393,58 @@ class CoreAgent:
         return task_result
 
     # ==========================================================================
+    # Parallel Tool Execution (Private)
+    # ==========================================================================
+
+    async def _execute_tool_calls_parallel(
+        self, decisions: list, state, tracer, root_span
+    ) -> list[tuple[str, str, bool]]:
+        """
+        Execute a list of PlannerDecisions concurrently via asyncio.gather.
+
+        Returns list of (tool_name, result_str, success) tuples in the same
+        order as decisions.
+        """
+
+        async def _run_one(decision) -> tuple[str, str, bool]:
+            tool_name = decision.tool
+            tool_input = decision.tool_input or {}
+
+            spec = self._available_tools.get(tool_name)
+            if not spec:
+                return tool_name, f"Unknown tool: {tool_name}", False
+
+            authorized = self._authorize_tool(tool_name, tool_input)
+            if not authorized:
+                return tool_name, f"Tool '{tool_name}' was not authorized.", False
+
+            HOOK_REGISTRY.fire(HookEvent.PRE_TOOL_USE, tool=tool_name, input=tool_input)
+
+            try:
+                result_str = await asyncio.to_thread(
+                    execute_with_retry, spec, tool_input
+                )
+                HOOK_REGISTRY.fire(
+                    HookEvent.POST_TOOL_USE,
+                    tool=tool_name,
+                    input=tool_input,
+                    output=result_str,
+                )
+                return tool_name, result_str, True
+            except Exception as exc:
+                err = str(exc)
+                HOOK_REGISTRY.fire(
+                    HookEvent.POST_TOOL_USE_FAILURE,
+                    tool=tool_name,
+                    input=tool_input,
+                    error=err,
+                )
+                return tool_name, f"Tool error: {err}", False
+
+        tasks = [_run_one(d) for d in decisions]
+        return await asyncio.gather(*tasks)
+
+    # ==========================================================================
     # Reasoning Loop (single canonical async implementation)
     # ==========================================================================
 
@@ -456,13 +500,15 @@ class CoreAgent:
         _compact_count_before = self._llm._compact_count
 
         for step_num in range(self.max_steps):
-            raw = await self._llm.think_async()
+            # ── LLM call ─────────────────────────────────────────────────────
+            llm_response: LLMResponse = await self._llm.think_async()
 
             # NEW: Extract token usage for cost tracking (ARCH-01, D-14, D-15)
-            tokens_this_call = 0
-            # Estimate tokens from response length (rough heuristic: ~4 chars per token)
-            if raw and not raw.startswith(("Error", "API Error", "Connection Error")):
-                tokens_this_call = len(raw) // 4
+            tokens_this_call = llm_response.completion_tokens
+            if tokens_this_call == 0:
+                # Fallback: estimate from response length if token count not available
+                content_len = len(llm_response.content or "")
+                tokens_this_call = content_len // 4
 
             state.tokens_used += tokens_this_call
             state.estimated_cost_usd = state.tokens_used * COST_PER_TOKEN
@@ -502,26 +548,37 @@ class CoreAgent:
                 logger.info(
                     "[CoreAgent] Post-compact cleanup: git cache + session memory reset."
                 )
-            decision = parse_planner_response(raw)
-            log_decision(
-                logger, decision.thought, decision.tool or "done", decision.confidence
+
+            # ── Parse decisions (may be multiple for parallel tool calls) ─────────
+            decisions = parse_litellm_response(llm_response)
+
+            # Track response length for diminishing returns
+            response_lengths.append(
+                sum(len(d.tool or "") + len(d.response or "") for d in decisions)
             )
 
+            # Log first decision (backward compat)
+            if decisions:
+                first = decisions[0]
+                log_decision(
+                    logger, first.thought, first.tool or "done", first.confidence
+                )
+
             # ── Diminishing returns detection ──────────────────────────────
-            response_lengths.append(len(raw))
             if (
                 len(response_lengths) == DIMINISHING_STEPS
                 and all(length < DIMINISHING_THRESHOLD for length in response_lengths)
-                and not decision.done
+                and decisions
+                and not decisions[0].done
             ):
                 logger.warning(
                     f"[CoreAgent] Diminishing returns after {step_num + 1} steps "
                     f"(lengths={list(response_lengths)}). Stopping."
                 )
-                # decision.response is None when the LLM was mid-action (done=False).
+                # decisions[0].response is None when the LLM was mid-action (done=False).
                 # Never leak the raw JSON action to the user.
-                if decision.response:
-                    final_response = decision.response
+                if decisions[0].response:
+                    final_response = decisions[0].response
                 else:
                     final_response = (
                         "Could not complete the task after several attempts. "
@@ -530,8 +587,9 @@ class CoreAgent:
                 root_span.set_attribute("stop_reason", "diminishing_returns")
                 break
 
-            if decision.done:
-                final_response = decision.response or raw
+            # ── Done check ────────────────────────────────────────────────────
+            if len(decisions) == 1 and decisions[0].done:
+                final_response = decisions[0].response or (llm_response.content or "")
                 # Guard: if think-tag stripping left an empty response, provide fallback
                 if not final_response or not final_response.strip():
                     final_response = (
@@ -542,208 +600,136 @@ class CoreAgent:
                 root_span.set_attribute("steps.total", step_num + 1)
                 break
 
-            tool_name = decision.tool
-            tool_input = decision.tool_input
-
-            # ── Repetitive tool loop detection ─────────────────────────────
-            if tool_name == "browser_navigate":
-                _consecutive_browser_nav += 1
-                _consecutive_web_search = 0
-                if _consecutive_browser_nav == _BROWSER_NAV_NUDGE_THRESHOLD:
-                    logger.warning(
-                        f"[CoreAgent] {_consecutive_browser_nav} consecutive browser_navigate "
-                        f"calls — injecting strategy nudge."
-                    )
-                    self._llm.add_message(
-                        "user",
-                        "You have been browsing many pages in a row. "
-                        "If you already have the data you need, stop browsing and use "
-                        "python_repl to compute the answer and provide FINAL ANSWER. "
-                        "If you still need data, use web_search to find specific facts faster.",
-                    )
-            elif tool_name == "web_search":
-                _consecutive_web_search += 1
-                _consecutive_browser_nav = 0
-                if _consecutive_web_search == _WEB_SEARCH_NUDGE_THRESHOLD:
-                    logger.warning(
-                        f"[CoreAgent] {_consecutive_web_search} consecutive web_search "
-                        f"calls — injecting strategy nudge."
-                    )
-                    self._llm.add_message(
-                        "user",
-                        "You have run several web searches in a row. "
-                        "If the search results are not giving you the structured data you need, "
-                        "switch to browser_navigate to visit the full Wikipedia/article page directly, "
-                        "or use python_repl to compute the answer with data you already have. "
-                        "Do not repeat the same search query.",
-                    )
-            else:
-                _consecutive_browser_nav = 0
-                _consecutive_web_search = 0
-
-            # Planner signals malformed JSON action — inject correction and retry
-            if tool_name == "__format_error__":
-                logger.warning(
-                    "[CoreAgent] Malformed JSON from LLM — injecting format correction."
-                )
-                self._llm.add_message("assistant", decision.raw)
-                self._llm.add_message(
-                    "user",
-                    "Your last response was not valid JSON. "
-                    "You MUST respond with a properly formatted JSON object matching the schema. "
-                    "Do NOT truncate the JSON. Try again.",
-                )
-                continue
-
-            if not tool_name or tool_name not in self._available_tools:
-                # Inject correction instead of aborting so LLM can recover
-                available = sorted(self._available_tools.keys())
-                logger.warning(
-                    f"[CoreAgent] LLM called unavailable tool '{tool_name}' — injecting correction."
-                )
-                self._llm.add_message("assistant", decision.raw)
-                self._llm.add_message(
-                    "user",
-                    f"Tool '{tool_name}' is not available. "
-                    f"Available tools: {', '.join(available)}. "
-                    f"Use only available tools to continue.",
-                )
-                continue
-
-            spec = self._available_tools[tool_name]
-
-            # ── PreToolUse hooks (offloaded — may do I/O) ─────────────────
-            pre_result = await asyncio.to_thread(
-                HOOK_REGISTRY.fire_pre_tool, tool_name, tool_input or {}
-            )
-            if not pre_result.allowed:
-                final_response = (
-                    f"Action '{tool_name}' blocked by hook: {pre_result.block_reason}"
-                )
-                logger.warning(f"[CoreAgent] {final_response}")
-                self._llm.add_message(
-                    "assistant",
-                    json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
-                )
-                self._llm.add_message(
-                    "user", f"ACTION BLOCKED: {pre_result.block_reason}"
-                )
-                loop_success = False
+            # ── Parallel tool execution ───────────────────────────────────────
+            tool_decisions = [d for d in decisions if not d.done and d.tool]
+            if not tool_decisions:
+                final_response = decisions[0].response or "" if decisions else ""
                 break
 
-            # ── Security gate ──────────────────────────────────────────────
-            if not self._authorize_tool(spec, tool_input):
-                final_response = f"Action '{tool_name}' denied."
-                state.record_action(tool_name, tool_input, "Denied by user.", False)
+            results = await self._execute_tool_calls_parallel(
+                tool_decisions, state, tracer, root_span
+            )
+
+            # Append all tool calls and results to history (OpenAI multi-call format)
+            tool_calls_msg = {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": f"call_{i}",
+                        "type": "function",
+                        "function": {
+                            "name": r[0],
+                            "arguments": json.dumps(tool_decisions[i].tool_input or {}),
+                        },
+                    }
+                    for i, r in enumerate(results)
+                ],
+            }
+            self._llm.history.append(tool_calls_msg)
+
+            for i, (tool_name, result_str, success) in enumerate(results):
+                self._llm.history.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": f"call_{i}",
+                        "content": result_str,
+                    }
+                )
+
+                # Handle repetitive tool loop detection per tool
+                if tool_name == "browser_navigate":
+                    _consecutive_browser_nav += 1
+                    _consecutive_web_search = 0
+                    if _consecutive_browser_nav == _BROWSER_NAV_NUDGE_THRESHOLD:
+                        logger.warning(
+                            f"[CoreAgent] {_consecutive_browser_nav} consecutive browser_navigate "
+                            f"calls — injecting strategy nudge."
+                        )
+                        self._llm.add_message(
+                            "user",
+                            "You have been browsing many pages in a row. "
+                            "If you already have the data you need, stop browsing and use "
+                            "python_repl to compute the answer and provide FINAL ANSWER. "
+                            "If you still need data, use web_search to find specific facts faster.",
+                        )
+                elif tool_name == "web_search":
+                    _consecutive_web_search += 1
+                    _consecutive_browser_nav = 0
+                    if _consecutive_web_search == _WEB_SEARCH_NUDGE_THRESHOLD:
+                        logger.warning(
+                            f"[CoreAgent] {_consecutive_web_search} consecutive web_search "
+                            f"calls — injecting strategy nudge."
+                        )
+                        self._llm.add_message(
+                            "user",
+                            "You have run several web searches in a row. "
+                            "If the search results are not giving you the structured data you need, "
+                            "switch to browser_navigate to visit the full Wikipedia/article page directly, "
+                            "or use python_repl to compute the answer with data you already have. "
+                            "Do not repeat the same search query.",
+                        )
+                else:
+                    _consecutive_browser_nav = 0
+                    _consecutive_web_search = 0
+
+                # Tool RAG hit rate logging
+                if self._current_task_filtered_registry:
+                    recommended_tools = self._current_task_filtered_registry.names()
+                    hit = tool_name in recommended_tools if recommended_tools else False
+                    miss_tools = [t for t in recommended_tools if t != tool_name]
+
+                    logger.info(
+                        f"[ToolRAG] task={self.user_id} "
+                        f"recommended={len(recommended_tools)} "
+                        f"used={tool_name} "
+                        f"hit={hit} "
+                        f"miss_tools={miss_tools}"
+                    )
+
+                # Git context refresh after filesystem mutations
+                if (
+                    success
+                    and tool_name in _FILESYSTEM_MUTATING_TOOLS
+                    and self.inject_git_context
+                ):
+                    try:
+                        self._git_context_cache = await asyncio.wait_for(
+                            asyncio.to_thread(_get_git_context), timeout=5.0
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "[CoreAgent] Git context refresh timed out — skipping."
+                        )
+                        self._git_context_cache = None
+                    if self._git_context_cache:
+                        self._llm.add_message(
+                            "system",
+                            f"WORKSPACE STATE UPDATED:\n{self._git_context_cache}",
+                        )
+
+                state.record_action(
+                    tool_name, tool_decisions[i].tool_input, result_str, success
+                )
+                log_step(logger, state, tool_name, result_str, success)
+
                 step_records.append(
                     StepRecord(
                         step=state.step_count,
                         tool=tool_name,
-                        tool_input=tool_input or {},
-                        result="Denied by user.",
-                        success=False,
+                        tool_input=tool_decisions[i].tool_input or {},
+                        result=result_str[:500],
+                        success=success,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
                     )
                 )
-                self._llm.add_message(
-                    "assistant",
-                    json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
-                )
-                self._llm.add_message("user", "ACTION DENIED BY USER. STOP.")
-                loop_success = False
-                break
 
-            # ── Execute tool ───────────────────────────────────────────────
-            with tracer.start_as_current_span(
-                "core.tool_execution",
-                attributes={"tool.name": tool_name, "tool.step": step_num + 1},
-            ) as tool_span:
-                action_result = await asyncio.to_thread(
-                    execute_with_retry, spec, tool_input
-                )
-                tool_span.set_attribute("tool.success", action_result.success)
-                tool_span.set_attribute(
-                    "tool.result_preview", action_result.message[:200]
-                )
-
-            # ── PostToolUse hooks (offloaded — may do I/O) ────────────────
-            hook_result = await asyncio.to_thread(
-                HOOK_REGISTRY.fire_post_tool,
-                tool_name,
-                tool_input or {},
-                action_result.message,
-                action_result.success,
-            )
-
-            # NEW: Apply hook transformation if returned (D-20, D-22)
-            if hook_result.transformed_result is not None:
-                logger.info(
-                    f"[Engine] Applying transformed result from hooks: {tool_name}"
-                )
-                action_result.message = hook_result.transformed_result
-
-            # ── Tool RAG hit rate logging (OBS-02) ──────────────────────────
-            if self._current_task_filtered_registry:
-                recommended_tools = self._current_task_filtered_registry.names()
-                hit = tool_name in recommended_tools if recommended_tools else False
-                miss_tools = [t for t in recommended_tools if t != tool_name]
-
-                logger.info(
-                    f"[ToolRAG] task={self.user_id} "
-                    f"recommended={len(recommended_tools)} "
-                    f"used={tool_name} "
-                    f"hit={hit} "
-                    f"miss_tools={miss_tools}"
-                )
-
-            # ── Git context refresh after filesystem mutations ──────────────
-            if (
-                action_result.success
-                and tool_name in _FILESYSTEM_MUTATING_TOOLS
-                and self.inject_git_context
-            ):
-                try:
-                    self._git_context_cache = await asyncio.wait_for(
-                        asyncio.to_thread(_get_git_context), timeout=5.0
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "[CoreAgent] Git context refresh timed out — skipping."
-                    )
-                    self._git_context_cache = None
-                if self._git_context_cache:
-                    self._llm.add_message(
-                        "system",
-                        f"WORKSPACE STATE UPDATED:\n{self._git_context_cache}",
-                    )
-
-            state.record_action(
-                tool_name, tool_input, action_result.message, action_result.success
-            )
-            log_step(
-                logger, state, tool_name, action_result.message, action_result.success
-            )
-
-            step_records.append(
-                StepRecord(
-                    step=state.step_count,
-                    tool=tool_name,
-                    tool_input=tool_input or {},
-                    result=action_result.message[:500],
-                    success=action_result.success,
-                    timestamp=state.action_history[-1].timestamp,
-                )
-            )
+            state.step_count += len(results)
 
             # Inject WorldState snapshot so the LLM has structured context
-            # about what has been done — step count, last error, recent history.
             self._llm.add_message("system", state.to_context_string())
-            self._llm.add_message(
-                "assistant",
-                json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
-            )
-            self._llm.add_message("user", f"TOOL RESULT: {action_result.message}")
 
-            # ── Session memory update (background, non-blocking) ───────────
+            # Session memory update (background, non-blocking)
             self._session_memory.record_tool_call()
             if self._session_memory.should_update():
                 history_snapshot = list(self._llm.history)
@@ -759,13 +745,12 @@ class CoreAgent:
                     # No running event loop (e.g. sync test context) — skip silently
                     pass
 
-            if not action_result.success:
-                loop_success = False
-            final_response = (
-                action_result.message
-                if action_result.success
-                else f"Step failure: {action_result.message}"
-            )
+            # Update final response and loop success from results
+            if results:
+                all_success = all(r[2] for r in results)
+                final_response = results[-1][1] if results else ""
+                if not all_success:
+                    loop_success = False
 
         # Stop the activity summary background task
         _activity_stop.set()
@@ -902,17 +887,9 @@ class CoreAgent:
             return []
         memories = list(self._session_memories)
         documents = [m["content"] for m in memories]
-        if _SKLEARN_AVAILABLE:
-            scores = _tfidf_similarity(query, documents)
-            scored = sorted(zip(scores, memories), key=lambda x: x[0], reverse=True)
-            return [m for score, m in scored[:top_k] if score > 0.05]
-        else:
-            query_words = {w for w in query.lower().split() if len(w) > 3}
-            return [
-                m
-                for m in memories
-                if any(w in m["content"].lower() for w in query_words)
-            ][:top_k]
+        scores = _keyword_similarity(query, documents)
+        scored = sorted(zip(scores, memories), key=lambda x: x[0], reverse=True)
+        return [m for score, m in scored[:top_k] if score > 0.05]
 
     def _maybe_extract_memories(
         self,
