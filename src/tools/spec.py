@@ -87,6 +87,21 @@ class ToolSpec:
         """True se il tool richiede conferma utente in modalità CLI."""
         return self.risk in ("medium", "high", "critical")
 
+    def to_openai_schema(self) -> dict:
+        """Converts this ToolSpec to an OpenAI-format function calling schema."""
+        schema = self.input_schema.model_json_schema()
+        schema.pop("title", None)
+        for prop in schema.get("properties", {}).values():
+            prop.pop("title", None)
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": schema,
+            },
+        }
+
     def validate_input(self, raw: Any) -> dict:
         """
         Valida l'input grezzo del LLM tramite lo schema Pydantic.
@@ -185,6 +200,10 @@ class ToolRegistry:
         """Nomi dei tool con dashboard_allowed=True."""
         return {name for name, spec in self._specs.items() if spec.dashboard_allowed}
 
+    def as_openai_tools(self) -> list[dict]:
+        """Returns all specs as OpenAI-format tool definitions for LiteLLM."""
+        return [spec.to_openai_schema() for spec in self._specs.values()]
+
     # Tools that must always be co-selected together.
     # If any key in a pair is selected by RAG, its companions are added automatically.
     # This prevents the agent from having read_file without list_files (exploration gap).
@@ -200,36 +219,37 @@ class ToolRegistry:
 
     def select_for_query(self, query: str, top_k: int = 12) -> "ToolRegistry":
         """
-        Returns a filtered ToolRegistry with the top_k tools most relevant to query,
-        ranked by TF-IDF cosine similarity on (name + description + category).
-        Falls back to the full registry if sklearn is unavailable or top_k >= len.
-
-        After TF-IDF selection, co-selection rules (_COSELECT_PAIRS) are applied:
-        if a tool that requires a companion (e.g. read_file needs list_files) is
-        selected, its companions are added automatically regardless of their score.
+        Returns top_k tools most relevant to query using embedding cosine similarity.
+        Falls back to full registry if embedding service is unavailable or top_k >= len.
         """
         if len(self._specs) <= top_k:
             return self
 
         try:
-            from sklearn.feature_extraction.text import TfidfVectorizer
-            from sklearn.metrics.pairwise import cosine_similarity
-        except ImportError:
-            return self
+            import numpy as np
 
-        names = list(self._specs.keys())
-        corpus = [
-            f"{s.name} {s.description} {s.category}" for s in self._specs.values()
-        ]
+            from src.core.memory import get_embedding
 
-        try:
-            all_texts = corpus + [query]
-            vec = TfidfVectorizer(min_df=1).fit_transform(all_texts)
-            scores = cosine_similarity(vec[-1], vec[:-1]).flatten()
+            names = list(self._specs.keys())
+            corpus = [
+                f"{s.name} {s.description} {s.category}" for s in self._specs.values()
+            ]
+
+            query_vec = get_embedding(query)
+            tool_vecs = np.array(
+                [get_embedding(text) for text in corpus], dtype=np.float32
+            )
+
+            # Cosine similarity
+            query_norm = query_vec / (np.linalg.norm(query_vec) + 1e-8)
+            tool_norms = tool_vecs / (
+                np.linalg.norm(tool_vecs, axis=1, keepdims=True) + 1e-8
+            )
+            scores = tool_norms @ query_norm
+
             top_indices = scores.argsort()[-top_k:][::-1]
             selected = {names[i] for i in top_indices}
 
-            # Apply co-selection: add mandatory companions that were not in top_k
             for tool_name, companions in self._COSELECT_PAIRS.items():
                 if tool_name in selected:
                     for companion in companions:
