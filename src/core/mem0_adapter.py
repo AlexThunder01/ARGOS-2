@@ -107,7 +107,7 @@ class ArgosMemory:
         if not query or not query.strip():
             return []
         try:
-            result = self._mem0.search(query, filters={"user_id": self._user_id}, limit=top_k)
+            result = self._mem0.search(query, filters={"user_id": self._user_id}, top_k=top_k)
             items = result.get("results", [])
             items.sort(key=lambda r: r.get("updated_at") or r.get("created_at") or "")
             memories = [
