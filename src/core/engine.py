@@ -215,11 +215,21 @@ class CoreAgent:
             raise ValueError(f"Invalid memory_mode '{memory_mode}'. Must be one of {MEMORY_MODES}")
 
         self.memory_mode = memory_mode
+
+        # Resolve user ID first — ArgosMemory below must key off the same identity
+        # used everywhere else (logs, session memory, hooks, profile lookup).
+        # Resolving it after ArgosMemory init previously left persistent-memory
+        # callers that don't pass user_id explicitly (e.g. the CLI's default,
+        # sha256-hash-derived id) writing all memories under a shared id=0 bucket.
+        if user_id is not None:
+            self.user_id = user_id
+        else:
+            linux_user = os.environ.get("USER", "argos")
+            self.user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)
+
         try:
             self._argos_memory: ArgosMemory | None = (
-                ArgosMemory(user_id=user_id if user_id is not None else 0)
-                if memory_mode == "persistent"
-                else None
+                ArgosMemory(user_id=self.user_id) if memory_mode == "persistent" else None
             )
         except Exception as e:
             logger.warning(f"[CoreAgent] Failed to initialize ArgosMemory: {e}")
@@ -238,13 +248,6 @@ class CoreAgent:
         self._available_tools: dict[str, ToolSpec] = {
             name: active_registry[name] for name in active_registry.names()
         }
-
-        # Resolve user ID
-        if user_id is not None:
-            self.user_id = user_id
-        else:
-            linux_user = os.environ.get("USER", "argos")
-            self.user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)
 
         # LLM provider — receives filtered registry so prompt matches available tools
         self._llm = ArgosAgent(registry=active_registry)
@@ -890,7 +893,8 @@ class CoreAgent:
             memory_context = "\n".join(memory_lines)
             self._llm.add_message(
                 "system",
-                f"THINGS YOU KNOW ABOUT THE USER (use when relevant):\n{memory_context}",
+                "THINGS YOU KNOW ABOUT THE USER (use when relevant). Ordered oldest to "
+                f"newest — if two facts conflict, trust the most recent one:\n{memory_context}",
             )
 
         # Inject session working-memory if available (bridges consecutive tasks).

@@ -96,12 +96,24 @@ class ArgosMemory:
             logger.warning(f"[Memory] mem0 add failed: {e}")
 
     def search(self, query: str, top_k: int = 5) -> list[str]:
-        """Return top_k memory strings most relevant to query."""
+        """Return top_k memory strings most relevant to query, oldest first.
+
+        mem0 orders results by relevance score only — with no temporal signal,
+        an LLM shown a superseded fact ("X is emerald green") next to its
+        replacement ("X changed to blue night") has no way to tell which is
+        current. Sorting oldest-to-newest and prefixing each with its
+        timestamp lets the model infer recency instead of guessing.
+        """
         if not query or not query.strip():
             return []
         try:
             result = self._mem0.search(query, filters={"user_id": self._user_id}, limit=top_k)
-            memories = [r["memory"] for r in result.get("results", [])]
+            items = result.get("results", [])
+            items.sort(key=lambda r: r.get("updated_at") or r.get("created_at") or "")
+            memories = [
+                f"[{(r.get('updated_at') or r.get('created_at') or '')[:16]}] {r['memory']}"
+                for r in items
+            ]
             logger.debug(f"[Memory] mem0 search {query!r}: {len(memories)} hit(s)")
             return memories
         except Exception as e:
