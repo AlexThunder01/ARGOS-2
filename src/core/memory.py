@@ -36,6 +36,14 @@ def get_embedding(text: str) -> np.ndarray:
     Raises RuntimeError if the service is unreachable, so callers can catch
     and degrade gracefully instead of propagating a raw connection error.
     """
+    return get_embeddings_batch([text])[0]
+
+
+def get_embeddings_batch(texts: list[str]) -> list[np.ndarray]:
+    """Embed multiple texts in a single API call. Returns one vector per text.
+
+    Raises RuntimeError if the service is unreachable or times out.
+    """
     headers = {"Content-Type": "application/json"}
     if EMBEDDING_API_KEY:
         headers["Authorization"] = f"Bearer {EMBEDDING_API_KEY}"
@@ -45,12 +53,13 @@ def get_embedding(text: str) -> np.ndarray:
         response = requests.post(
             url,
             headers=headers,
-            json={"model": EMBEDDING_MODEL, "input": text},
-            timeout=10,
+            json={"model": EMBEDDING_MODEL, "input": texts},
+            timeout=max(10, len(texts) * 2),
         )
         response.raise_for_status()
-        vec = response.json()["data"][0]["embedding"]
-        return np.array(vec, dtype=np.float32)
+        data = response.json()["data"]
+        data_sorted = sorted(data, key=lambda x: x.get("index", 0))
+        return [np.array(item["embedding"], dtype=np.float32) for item in data_sorted]
     except requests.exceptions.ConnectionError as e:
         raise RuntimeError(f"Embedding service unreachable at {EMBEDDING_BASE_URL}: {e}") from e
     except requests.exceptions.Timeout:

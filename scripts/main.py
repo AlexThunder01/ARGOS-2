@@ -20,6 +20,10 @@ import subprocess
 import sys
 import time
 import urllib.request
+import warnings
+
+# LiteLLM bug: LoggingWorker drops unawaited coroutines on loop teardown
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="litellm")
 
 # Project root on sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -29,7 +33,6 @@ from src.core import CoreAgent
 from src.logging.tracer import setup_tracer
 from src.logging_config import configure_json_logging
 from src.utils import print_banner
-
 
 # ==========================================================================
 # CLI Security Gate — Interactive (y/N) Prompt

@@ -144,6 +144,8 @@ class ToolRegistry:
 
     def __init__(self, specs: list[ToolSpec]) -> None:
         self._specs: dict[str, ToolSpec] = {s.name: s for s in specs}
+        self._corpus_vecs: np.ndarray | None = None  # cached tool embeddings
+        self._corpus_names: list[str] = []
 
     def __getitem__(self, name: str) -> ToolSpec:
         return self._specs[name]
@@ -224,15 +226,33 @@ class ToolRegistry:
             return self
 
         try:
+            import hashlib
+            import pathlib
+
             import numpy as np
 
-            from src.core.memory import get_embedding
+            from src.core.memory import get_embeddings_batch
 
             names = list(self._specs.keys())
             corpus = [f"{s.name} {s.description} {s.category}" for s in self._specs.values()]
+            corpus_key = hashlib.md5("|".join(corpus).encode()).hexdigest()[:16]
 
-            query_vec = get_embedding(query)
-            tool_vecs = np.array([get_embedding(text) for text in corpus], dtype=np.float32)
+            if self._corpus_vecs is None or self._corpus_names != names:
+                # Try loading from disk cache first
+                cache_path = pathlib.Path(f".cache/tool_embeddings_{corpus_key}.npz")
+                if cache_path.exists():
+                    loaded = np.load(cache_path)
+                    self._corpus_vecs = loaded["vecs"]
+                    self._corpus_names = names
+                else:
+                    all_vecs = get_embeddings_batch(corpus)
+                    self._corpus_vecs = np.array(all_vecs, dtype=np.float32)
+                    self._corpus_names = names
+                    cache_path.parent.mkdir(exist_ok=True)
+                    np.savez(cache_path, vecs=self._corpus_vecs)
+
+            query_vec = get_embeddings_batch([query])[0]
+            tool_vecs = self._corpus_vecs
 
             # Cosine similarity
             query_norm = query_vec / (np.linalg.norm(query_vec) + 1e-8)

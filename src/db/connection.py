@@ -19,6 +19,10 @@ import os
 import sqlite3
 import threading
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 logger = logging.getLogger(__name__)
 
 DB_BACKEND = os.environ.get("DB_BACKEND", "postgres")

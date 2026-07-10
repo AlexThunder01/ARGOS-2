@@ -533,7 +533,7 @@ REGISTRY = ToolRegistry(
         # ── Code ────────────────────────────────────────────────────────────
         ToolSpec(
             name="python_repl",
-            description="Executes Python in Docker sandbox. IMPORTANT: always use print() to output results, e.g. print(result). If no output, variables are auto-printed as fallback.",
+            description="Executes Python in Docker sandbox. NO NETWORK ACCESS (requests/urllib will fail) and ONLY Python stdlib is available (no bs4, no pandas, no requests). For fetching web pages use web_scrape or browser_navigate. Always use print() to output results. Use this tool only for math, parsing strings/JSON, and pure computation.",
             input_schema=PythonReplInput,
             executor=python_repl_tool,
             risk="medium",
@@ -545,7 +545,7 @@ REGISTRY = ToolRegistry(
         ),
         ToolSpec(
             name="bash_exec",
-            description="Executes Bash in Docker sandbox",
+            description="Executes Bash in Docker sandbox. NO NETWORK ACCESS (curl/wget will fail). For fetching web pages use web_scrape or browser_navigate. Useful for parsing local files (jq, awk, sed) and converting formats (ffmpeg, pdftotext if installed).",
             input_schema=BashExecInput,
             executor=bash_exec_tool,
             risk="medium",

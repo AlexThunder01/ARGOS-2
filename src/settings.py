@@ -28,6 +28,14 @@ class ArgosSettings(BaseSettings):
     llm_api_key_2: str = Field(default="")
     llm_model: str = Field(default="llama-3.3-70b-versatile")
     llm_lightweight_model: str = Field(default="llama-3.1-8b-instant")
+    llm_chat_template: str | None = Field(default=None)
+    llm_stop_tokens: str = Field(default="")  # comma-separated stop sequences
+    llm_force_collect_stream: bool = Field(
+        default=False
+    )  # force streaming+collect (for tunnels with ~100s header timeout)
+    llm_strip_think_tags: bool = Field(
+        default=True
+    )  # strip <think>...</think> from content (reasoning models)
 
     # --- Vision LLM ---
     vision_base_url: str | None = Field(default=None)

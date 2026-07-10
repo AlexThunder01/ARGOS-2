@@ -18,6 +18,7 @@ from api.security import verify_api_key
 from src.db.connection import DB_BACKEND, get_connection
 from src.logging.otel import init_otel
 from src.logging.tracer import setup_tracer
+from src.version import VERSION
 
 logger = logging.getLogger("argos")
 
@@ -103,7 +104,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="ARGOS API",
     description="Autonomous Remote Grid Operating System — REST Interface",
-    version="2.1.0",
+    version=VERSION,
     lifespan=lifespan,
 )
 

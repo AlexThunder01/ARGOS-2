@@ -136,3 +136,4 @@ eval/results/*.json
 # Internal planning & tooling docs (not for public repo)
 # =============================================================================
 docs/superpowers/
+.cache/

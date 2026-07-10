@@ -225,8 +225,21 @@ def read_excel_tool(inp):
 
     target_sheet = inp.get("sheet") if isinstance(inp, dict) else None
 
+    def _cell_color(cell) -> str | None:
+        """Return hex fill color of a cell, or None if default/transparent."""
+        try:
+            fill = cell.fill
+            if fill and fill.fill_type not in (None, "none"):
+                fg = fill.fgColor
+                if fg.type == "rgb" and fg.rgb not in ("00000000", "FFFFFFFF", "FF000000"):
+                    return fg.rgb[-6:]  # strip alpha prefix → RRGGBB
+        except Exception:
+            pass
+        return None
+
     try:
-        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        # read_only=False needed to access cell styles (fill colors)
+        wb = openpyxl.load_workbook(path, read_only=False, data_only=True)
         sheet_names = wb.sheetnames
 
         if target_sheet and target_sheet in sheet_names:
@@ -236,8 +249,17 @@ def read_excel_tool(inp):
             target_sheet = ws.title
 
         rows = []
-        for row in ws.iter_rows(max_row=max_rows + 1, values_only=True):
-            rows.append([str(cell) if cell is not None else "" for cell in row])
+        color_notes = []  # collect notable cell colors for the output footer
+        for row_idx, row in enumerate(ws.iter_rows(max_row=max_rows + 1)):
+            cells = []
+            for col_idx, cell in enumerate(row):
+                val = str(cell.value) if cell.value is not None else ""
+                color = _cell_color(cell)
+                if color and row_idx > 0:  # skip header row for color notes
+                    col_letter = cell.column_letter
+                    color_notes.append(f"  {col_letter}{cell.row}={val!r} [bg #{color}]")
+                cells.append(val)
+            rows.append(cells)
 
         wb.close()
 
@@ -254,6 +276,8 @@ def read_excel_tool(inp):
             f"{header}\n{separator}\n"
         )
         output += "\n".join(data_rows)
+        if color_notes:
+            output += "\n\nCell background colors:\n" + "\n".join(color_notes[:50])
         return output
 
     except Exception as e:

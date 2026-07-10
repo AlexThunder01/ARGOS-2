@@ -232,8 +232,9 @@ async def latency_stats():
 @router.get("/stats/config", dependencies=[Depends(verify_api_key)])
 async def config_stats():
     from src.config import LLM_MODEL
+    from src.version import VERSION
 
-    return {"model": LLM_MODEL, "version": "v2.2.0"}
+    return {"model": LLM_MODEL, "version": f"v{VERSION}"}
 
 
 @router.get("/stats/tools", dependencies=[Depends(verify_api_key)])

@@ -24,6 +24,10 @@ LLM_API_KEY = _s.llm_api_key
 LLM_API_KEY_2 = _s.llm_api_key_2
 LLM_MODEL = _s.llm_model
 LLM_LIGHTWEIGHT_MODEL = _s.llm_lightweight_model
+LLM_CHAT_TEMPLATE = _s.llm_chat_template
+LLM_STOP_TOKENS: list[str] = [t.strip() for t in _s.llm_stop_tokens.split(",") if t.strip()]
+LLM_FORCE_COLLECT_STREAM = _s.llm_force_collect_stream
+LLM_STRIP_THINK_TAGS = _s.llm_strip_think_tags
 
 # --- Vision LLM ---
 VISION_BASE_URL = _s.vision_base_url or _s.llm_base_url

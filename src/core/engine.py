@@ -67,7 +67,7 @@ _FILESYSTEM_MUTATING_TOOLS: frozenset[str] = frozenset(
 # steps, we consider the loop to be spinning and stop early.
 # Override via env: ARGOS_DIMINISHING_THRESHOLD, ARGOS_DIMINISHING_STEPS
 DIMINISHING_THRESHOLD: int = int(os.getenv("ARGOS_DIMINISHING_THRESHOLD", "80"))
-DIMINISHING_STEPS: int = int(os.getenv("ARGOS_DIMINISHING_STEPS", "5"))
+DIMINISHING_STEPS: int = int(os.getenv("ARGOS_DIMINISHING_STEPS", "7"))
 
 # ── Permission audit log ───────────────────────────────────────────────────
 _AUDIT_PATH = Path(os.getenv("ARGOS_PERMISSION_AUDIT", "logs/argos_permissions.jsonl"))
@@ -209,6 +209,7 @@ class CoreAgent:
         allowed_tools: set[str] | None = None,
         inject_git_context: bool = True,
         status_callback: Callable[[str], None] | None = None,
+        tool_result_nudge: bool = False,
     ) -> None:
         if memory_mode not in MEMORY_MODES:
             raise ValueError(f"Invalid memory_mode '{memory_mode}'. Must be one of {MEMORY_MODES}")
@@ -230,6 +231,7 @@ class CoreAgent:
         self.confirmation_callback = confirmation_callback
         self.inject_git_context = inject_git_context
         self.status_callback = status_callback
+        self.tool_result_nudge = tool_result_nudge
 
         # Build filtered or full ToolSpec registry
         active_registry = REGISTRY.filter(allowed_tools) if allowed_tools is not None else REGISTRY
@@ -473,6 +475,7 @@ class CoreAgent:
         # Loop detection counters
         _consecutive_browser_nav = 0
         _consecutive_web_search = 0
+        _empty_response_count = 0  # consecutive empty-after-think recoveries
 
         # ── Activity summary background task ──────────────────────────────
         # Every 30 seconds, emits a brief status line so long-running tasks
@@ -563,9 +566,12 @@ class CoreAgent:
             # ── Parse decisions (may be multiple for parallel tool calls) ─────────
             decisions = parse_litellm_response(llm_response)
 
-            # Track response length for diminishing returns
+            # Track reasoning length for diminishing returns.
+            # We measure `thought` (the model's reasoning) rather than tool name or response,
+            # because tool names are short (~15 chars) and would otherwise trigger false stops
+            # in multi-tool tasks where the model is making genuine progress.
             response_lengths.append(
-                sum(len(d.tool or "") + len(d.response or "") for d in decisions)
+                sum(len(d.thought or "") + len(d.response or "") for d in decisions)
             )
 
             # Log first decision (backward compat)
@@ -599,8 +605,28 @@ class CoreAgent:
             # ── Done check ────────────────────────────────────────────────────
             if len(decisions) == 1 and decisions[0].done:
                 final_response = decisions[0].response or (llm_response.content or "")
-                # Guard: if think-tag stripping left an empty response, provide fallback
+                # Guard: if think-tag stripping left an empty response mid-task,
+                # inject a recovery nudge instead of giving up (handles Qwen3
+                # thinking-mode overflow where </think> is followed by empty content).
                 if not final_response or not final_response.strip():
+                    _empty_response_count += 1
+                    if _empty_response_count <= 2:
+                        logger.warning(
+                            f"[CoreAgent] Empty response after thinking (attempt "
+                            f"{_empty_response_count}/2) — injecting recovery nudge."
+                        )
+                        self._llm.history.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Your last response was empty. You must continue working "
+                                    "on the task. Use a tool to gather more information or "
+                                    "provide your FINAL ANSWER if you have enough data."
+                                ),
+                            }
+                        )
+                        continue
+                    # Exhausted retries — use generic fallback
                     final_response = (
                         "Processed the request but produced no response. "
                         "Try rephrasing the question."
@@ -619,32 +645,49 @@ class CoreAgent:
                 tool_decisions, state, tracer, root_span
             )
 
-            # Append all tool calls and results to history (OpenAI multi-call format)
-            tool_calls_msg = {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [
-                    {
-                        "id": f"call_{i}",
-                        "type": "function",
-                        "function": {
-                            "name": r[0],
-                            "arguments": json.dumps(tool_decisions[i].tool_input or {}),
-                        },
-                    }
-                    for i, r in enumerate(results)
-                ],
-            }
-            self._llm.history.append(tool_calls_msg)
+            # Append assistant turn to history.
+            # Native tool calling (response.tool_calls non-empty): use OpenAI format.
+            # Text-based JSON planner (tools=None, response.content has JSON): preserve
+            # the original JSON text so the model sees a coherent conversation.
+            if llm_response.tool_calls:
+                tool_calls_msg = {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": f"call_{i}",
+                            "type": "function",
+                            "function": {
+                                "name": r[0],
+                                "arguments": json.dumps(tool_decisions[i].tool_input or {}),
+                            },
+                        }
+                        for i, r in enumerate(results)
+                    ],
+                }
+                self._llm.history.append(tool_calls_msg)
+            else:
+                self._llm.history.append(
+                    {"role": "assistant", "content": llm_response.content or ""}
+                )
 
             for i, (tool_name, result_str, success) in enumerate(results):
-                self._llm.history.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": f"call_{i}",
-                        "content": result_str,
-                    }
-                )
+                # Append tool result in the format matching the calling convention.
+                if llm_response.tool_calls:
+                    self._llm.history.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": f"call_{i}",
+                            "content": result_str,
+                        }
+                    )
+                else:
+                    self._llm.history.append(
+                        {
+                            "role": "user",
+                            "content": f"[Tool result: {tool_name}]\n{result_str}",
+                        }
+                    )
 
                 # Handle repetitive tool loop detection per tool
                 if tool_name == "browser_navigate":
@@ -732,6 +775,16 @@ class CoreAgent:
 
             # Inject WorldState snapshot so the LLM has structured context
             self._llm.add_message("system", state.to_context_string())
+
+            # Some models (e.g. gemma, llama variants) return empty content after
+            # receiving tool results via native tool calling. A follow-up user message
+            # restores the generation signal so the model continues reasoning.
+            if self.tool_result_nudge:
+                self._llm.add_message(
+                    "user",
+                    "Tool results received. Continue reasoning step by step. "
+                    "Call another tool if needed, or provide your FINAL ANSWER.",
+                )
 
             # Session memory update (background, non-blocking)
             self._session_memory.record_tool_call()
