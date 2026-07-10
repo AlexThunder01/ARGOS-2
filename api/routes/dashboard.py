@@ -296,7 +296,11 @@ async def sse_agent_stream(task: str, history: list[dict], user_id: int):
 
         return agent.run_task(task)
 
-    yield 'data: {"chunk": "[Pensando...]\\n"}\n\n'
+    # No "thinking" placeholder chunk here: the frontend already shows its own
+    # "Processing..." indicator (ChatTerminal, driven by isTyping) while this
+    # generator is running. Sending one as a `chunk` event previously leaked
+    # into the message content itself, since the client appends every chunk
+    # onto the same string with no way to tell a status update from real text.
 
     try:
         # Passiamo alla thread pool visto la natura bloccante

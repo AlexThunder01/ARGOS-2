@@ -7,7 +7,6 @@ già configurato dal conftest.py locale.
 Coverage:
   - Stream termina sempre con "data: [DONE]" — anche su errore LLM
   - Ogni chunk intermedio è JSON valido {"chunk": "..."}
-  - Il primo chunk è sempre "[Pensando...]"
   - Concatenando tutti i chunk si ottiene la risposta completa
   - Rate limit superato → 429 prima ancora dello stream
   - POST senza campo 'task' obbligatorio → 422
@@ -141,28 +140,23 @@ class TestSseChunkFormat:
             assert "chunk" in parsed, f"Campo 'chunk' assente in: {line}"
             assert isinstance(parsed["chunk"], str)
 
-    def test_first_chunk_is_pensando(self):
-        """Il primo chunk deve essere sempre '[Pensando...]'."""
-        with patch(
-            "src.core.engine.CoreAgent.run_task",
-            return_value=_task_result("risposta"),
-        ):
-            r = _post_stream()
-
-        _, chunks = _collect_sse(r)
-        assert len(chunks) > 0
-        assert "[Pensando...]" in chunks[0]["chunk"]
-
     def test_chunks_assemble_full_response(self):
-        """Concatenando tutti i chunk (eccetto il primo '[Pensando...]') si ottiene la risposta."""
+        """Concatenando tutti i chunk si ottiene la risposta completa.
+
+        Nessun chunk di stato "[Pensando...]" deve essere iniettato: il frontend
+        mostra già un proprio indicatore "Processing..." mentre lo stream è
+        aperto (isTyping), quindi un chunk del genere finirebbe concatenato nel
+        contenuto reale del messaggio invece di restare un indicatore separato.
+        """
         risposta = "Questa è la risposta completa dell'agente."
         with patch("src.core.engine.CoreAgent.run_task", return_value=_task_result(risposta)):
             r = _post_stream()
 
         _, chunks = _collect_sse(r)
-        # Escludi il chunk "[Pensando...]" e concatena il resto
-        word_chunks = [c["chunk"] for c in chunks if "[Pensando...]" not in c["chunk"]]
-        full = "".join(word_chunks).strip()
+        assert not any("Pensando" in c["chunk"] for c in chunks), (
+            "Chunk di stato leaked nel contenuto del messaggio"
+        )
+        full = "".join(c["chunk"] for c in chunks).strip()
         assert full == risposta
 
     def test_error_chunk_injected_on_exception(self):
