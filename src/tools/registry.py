@@ -110,6 +110,11 @@ class CryptoPriceInput(ToolInput):
         description="Coin name",
         examples=["bitcoin"],
     )
+    currency: str | None = Field(
+        default=None,
+        description="Target fiat currency code (CoinGecko vs_currency), e.g. 'usd', 'eur', 'gbp'. Defaults to EUR if not specified.",
+        examples=["usd"],
+    )
 
 
 class FinancePriceInput(ToolInput):
@@ -435,7 +440,7 @@ REGISTRY = ToolRegistry(
         # ── Finance ─────────────────────────────────────────────────────────
         ToolSpec(
             name="crypto_price",
-            description="Real-time crypto prices (CoinGecko)",
+            description="Real-time crypto prices (CoinGecko). Pass currency='usd' (or 'eur', 'gbp', etc.) to get a price in a specific fiat currency — defaults to EUR if omitted.",
             input_schema=CryptoPriceInput,
             executor=crypto_price_tool,
             risk="none",

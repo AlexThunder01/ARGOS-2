@@ -8,6 +8,14 @@ from .helpers import _get_arg
 
 logger = logging.getLogger("argos")
 
+# NOTE: DDGS search snippets sometimes lose whitespace where DuckDuckGo's HTML
+# bolded the matched terms (e.g. "is$63,820.47 USDwith"). A regex-based repair
+# was tried and reverted — real snippets contain genuinely ambiguous
+# concatenations (e.g. "USDollar", which could mean "USD" + "ollar" or "US" +
+# "Dollar") that a character-class heuristic guesses wrong on, making some
+# snippets worse instead of better. Left as an accepted upstream data-quality
+# limitation of the ddgs library, not something to paper over unreliably.
+
 
 def _ddgs_search(q: str, max_results: int = 5) -> list[dict]:
     """Attempts a DuckDuckGo search with up to 2 retries on transient failure."""
@@ -105,23 +113,32 @@ def get_weather_tool(query):
     import requests
 
     try:
-        # Step 1: Geocoding (City name -> Lat/Lon)
+        # Step 1: Geocoding (City name -> Lat/Lon).
+        # count=1 alone picks whatever the API ranks first, which is not
+        # necessarily the best-known place — e.g. "Milano" used to resolve to a
+        # ~400-person town in Texas instead of the Italian city. language=it
+        # biases matching/ranking toward Argos's default language, and sorting
+        # the top candidates by population as a tie-breaker catches cases where
+        # the language hint alone isn't enough to disambiguate.
         encoded_loc = urllib.parse.quote(location)
         geo_url = (
-            f"https://geocoding-api.open-meteo.com/v1/search?name={encoded_loc}&count=1&format=json"
+            "https://geocoding-api.open-meteo.com/v1/search"
+            f"?name={encoded_loc}&count=10&language=it&format=json"
         )
         geo_res = requests.get(geo_url, timeout=10)
         if geo_res.status_code != 200:
             return f"Geocoding error: HTTP {geo_res.status_code}"
 
         geo_data = geo_res.json()
-        if not geo_data.get("results"):
+        results = geo_data.get("results")
+        if not results:
             return f"Weather Error: Could not find geographic coordinates for '{location}'."
 
-        lat = geo_data["results"][0]["latitude"]
-        lon = geo_data["results"][0]["longitude"]
-        place_name = geo_data["results"][0].get("name", location)
-        country = geo_data["results"][0].get("country", "")
+        best = max(results, key=lambda r: r.get("population") or 0)
+        lat = best["latitude"]
+        lon = best["longitude"]
+        place_name = best.get("name", location)
+        country = best.get("country", "")
 
         # Step 2: Weather Forecast
         weather_url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"

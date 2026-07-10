@@ -4,18 +4,24 @@ import requests
 
 from .helpers import _get_arg
 
+_CURRENCY_SYMBOLS = {"usd": "$", "eur": "€", "gbp": "£", "jpy": "¥"}
 
-def crypto_price_tool(coin_id):
-    coin_id = _get_arg(coin_id, ["coin", "id", "name"])
+
+def crypto_price_tool(inp):
+    coin_id = _get_arg(inp, ["coin", "id", "name"])
     if not coin_id:
         return "Error: Please specify a coin identifier."
+    # Default stays EUR to preserve prior behavior when no currency is requested;
+    # previously this was hardcoded, so "price in USD" silently returned EUR anyway.
+    currency = (_get_arg(inp, ["currency", "vs_currency", "curr"]) or "eur").lower()
     try:
-        url = (
-            f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id.lower()}&vs_currencies=eur"
-        )
+        url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id.lower()}&vs_currencies={currency}"
         r = requests.get(url, timeout=5)
-        val = r.json().get(coin_id.lower(), {}).get("eur")
-        return f"€{val:,.2f}" if val else "Coin not found."
+        val = r.json().get(coin_id.lower(), {}).get(currency)
+        if not val:
+            return f"Coin not found (or currency '{currency}' not supported)."
+        symbol = _CURRENCY_SYMBOLS.get(currency)
+        return f"{symbol}{val:,.2f}" if symbol else f"{val:,.2f} {currency.upper()}"
     except Exception as e:
         return f"Error: Crypto API failed — {e}"
 
