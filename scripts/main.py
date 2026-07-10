@@ -13,6 +13,7 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import os
 import re
@@ -211,9 +212,7 @@ def _ensure_ollama_ready() -> None:
     # Check if the model is already pulled
     try:
         with urllib.request.urlopen(health_url, timeout=5) as resp:
-            import json as _json
-
-            data = _json.loads(resp.read())
+            data = json.loads(resp.read())
         pulled = [m.get("name", "").split(":")[0] for m in data.get("models", [])]
         model_base = EMBEDDING_MODEL.split(":")[0]
         if model_base not in pulled:
@@ -221,6 +220,22 @@ def _ensure_ollama_ready() -> None:
             subprocess.run(["ollama", "pull", EMBEDDING_MODEL], check=False)
     except Exception:
         pass
+
+    # Ollama lazy-loads a pulled model into memory on its first inference request —
+    # for bge-m3 that cold load can take well past the 10s timeout the reasoning
+    # loop allows for memory retrieval, so the *first real user message* would eat
+    # that latency and silently skip memory ("retrieval timed out"). Pay it here
+    # instead, during an explicit startup step, with a much more generous timeout.
+    print("⚙️  Warming up embedding model...", flush=True)
+    try:
+        embed_url = f"{EMBEDDING_BASE_URL.rstrip('/')}/embeddings"
+        payload = json.dumps({"model": EMBEDDING_MODEL, "input": "warmup"}).encode()
+        req = urllib.request.Request(
+            embed_url, data=payload, headers={"Content-Type": "application/json"}
+        )
+        urllib.request.urlopen(req, timeout=60)
+    except Exception as e:
+        print(f"⚠️  Embedding model warm-up failed ({e}) — first memory lookup may be slow.")
 
 
 def _format_step_preview(result: str, max_len: int = 120) -> str:
@@ -239,7 +254,16 @@ def _format_step_preview(result: str, max_len: int = 120) -> str:
 
 def main():
     args = parse_args()
-    configure_json_logging(level=logging.DEBUG if args.debug else logging.WARNING)
+    # Root JSON handler only ever catches third-party loggers (mem0, litellm, ...) —
+    # setup_tracer() below gives "argos" its own handlers with propagate=False, so
+    # nothing under that namespace reaches this one. Routed to a file, not stdout:
+    # a raw JSON error line from a dependency should not interrupt the chat transcript
+    # (this used to print e.g. mem0's rate-limit errors mid-conversation).
+    os.makedirs("logs", exist_ok=True)
+    third_party_log = open(os.path.join("logs", "argos_thirdparty.log"), "a", encoding="utf-8")
+    configure_json_logging(
+        stream=third_party_log, level=logging.DEBUG if args.debug else logging.WARNING
+    )
 
     # Determine memory mode
     if args.memory:
