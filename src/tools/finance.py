@@ -10,7 +10,9 @@ def crypto_price_tool(coin_id):
     if not coin_id:
         return "Error: Please specify a coin identifier."
     try:
-        url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id.lower()}&vs_currencies=eur"
+        url = (
+            f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id.lower()}&vs_currencies=eur"
+        )
         r = requests.get(url, timeout=5)
         val = r.json().get(coin_id.lower(), {}).get("eur")
         return f"€{val:,.2f}" if val else "Coin not found."
@@ -40,11 +42,7 @@ def finance_price_tool(asset):
     }
 
     clean_asset = (
-        asset_name.lower()
-        .strip()
-        .replace(" in euro", "")
-        .replace("_euro", "")
-        .replace(" euro", "")
+        asset_name.lower().strip().replace(" in euro", "").replace("_euro", "").replace(" euro", "")
     )
     ticker = common_symbols.get(clean_asset, asset_name.upper())
 
@@ -66,27 +64,23 @@ def finance_price_tool(asset):
             ):
                 unit_str = " per troy ounce (oz)"
 
-            output = f"{asset_name.capitalize()} (Ticker: {ticker}): {price:,.2f} {currency}{unit_str}"
+            output = (
+                f"{asset_name.capitalize()} (Ticker: {ticker}): {price:,.2f} {currency}{unit_str}"
+            )
 
             if currency == "USD":
                 try:
                     eur_usd = yf.Ticker("EURUSD=X").fast_info.last_price
                     if eur_usd:
                         price_eur = price / eur_usd
-                        output += (
-                            f" (Equivalente calcolato: {price_eur:,.2f} EUR{unit_str})"
-                        )
+                        output += f" (Equivalente calcolato: {price_eur:,.2f} EUR{unit_str})"
                         if unit_str:
                             price_gram_eur = price_eur / 31.1034768
                             output += f" -> Circa {price_gram_eur:,.2f} EUR al grammo"
                     else:
-                        output += (
-                            " (EUR conversion unavailable: exchange rate not found)"
-                        )
+                        output += " (EUR conversion unavailable: exchange rate not found)"
                 except Exception:
-                    output += (
-                        " (EUR conversion unavailable: exchange rate fetch failed)"
-                    )
+                    output += " (EUR conversion unavailable: exchange rate fetch failed)"
 
             return output
 

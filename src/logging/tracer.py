@@ -25,6 +25,7 @@ def setup_tracer(log_dir: str = "logs") -> logging.Logger:
 
     logger = logging.getLogger("argos")
     logger.setLevel(logging.DEBUG)
+    logger.propagate = False
 
     # Prevent duplicate handlers if called multiple times
     if logger.handlers:
@@ -47,9 +48,7 @@ def setup_tracer(log_dir: str = "logs") -> logging.Logger:
     return logger
 
 
-def log_step(
-    logger: logging.Logger, state: "WorldState", tool: str, result: str, success: bool
-):
+def log_step(logger: logging.Logger, state: "WorldState", tool: str, result: str, success: bool):
     """Logs a single agent execution step in structured JSON format."""
     entry = {
         "step": state.step_count,
@@ -60,9 +59,7 @@ def log_step(
     }
     logger.debug(f"STEP: {json.dumps(entry, ensure_ascii=False)}")
     if not success:
-        logger.warning(
-            f"⚠️  Step {state.step_count} failed — tool={tool} → {str(result)[:100]}"
-        )
+        logger.warning(f"⚠️  Step {state.step_count} failed — tool={tool} → {str(result)[:100]}")
 
 
 def log_decision(logger: logging.Logger, thought: str, tool: str, confidence: float):

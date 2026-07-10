@@ -7,8 +7,6 @@ Sostituisce TOOLS dict, TOOL_METADATA dict, _TOOL_INPUT_EXAMPLES e il blocco
 AVAILABLE TOOLS hardcoded in agent.py.
 """
 
-from typing import Optional
-
 from pydantic import Field
 
 from .automation import (
@@ -68,9 +66,7 @@ class CreateFileInput(ToolInput):
 class ModifyFileInput(ToolInput):
     filename: str = Field(description="Path or name of the file to modify")
     content: str = Field(default="", description="Content to write or append")
-    mode: str = Field(
-        default="write", description="'write' to overwrite, 'append' to add"
-    )
+    mode: str = Field(default="write", description="'write' to overwrite, 'append' to add")
 
 
 class RenameFileInput(ToolInput):
@@ -103,7 +99,7 @@ class DownloadFileInput(ToolInput):
         description="URL of the file to download",
         examples=["https://arxiv.org/pdf/2311.12983"],
     )
-    save_path: Optional[str] = Field(
+    save_path: str | None = Field(
         default=None,
         description="Local path to save the file (default: Desktop with auto-detected name)",
     )
@@ -134,6 +130,13 @@ class NoInput(ToolInput):
     pass
 
 
+class SearchToolsInput(ToolInput):
+    query: str = Field(
+        description="Natural language description of what you want to do",
+        examples=["read a CSV file and compute statistics"],
+    )
+
+
 class LaunchAppInput(ToolInput):
     app_name: str = Field(
         description="Application name or command to launch",
@@ -143,7 +146,7 @@ class LaunchAppInput(ToolInput):
 
 class KeyboardTypeInput(ToolInput):
     text: str = Field(description="Text to type")
-    at_element: Optional[str] = Field(
+    at_element: str | None = Field(
         default=None, description="Visual description of the target element"
     )
     press_enter: bool = Field(default=False, description="Press Enter after typing")
@@ -155,9 +158,7 @@ class VisualClickInput(ToolInput):
 
 
 class DescribeScreenInput(ToolInput):
-    question: str = Field(
-        default="What do you see?", description="Question about the screen"
-    )
+    question: str = Field(default="What do you see?", description="Question about the screen")
 
 
 class PythonReplInput(ToolInput):
@@ -195,7 +196,7 @@ class ReadExcelInput(ToolInput):
         description="Excel filename or path (.xlsx/.xls/.xlsm)",
         examples=["data.xlsx"],
     )
-    sheet: Optional[str] = Field(
+    sheet: str | None = Field(
         default=None, description="Sheet name to read (defaults to active sheet)"
     )
     rows: int = Field(default=20, description="Number of rows to read (max 100)")
@@ -206,7 +207,7 @@ class AnalyzeImageInput(ToolInput):
         description="Image file path (PNG, JPEG, GIF, BMP, WEBP, TIFF)",
         examples=["chart.png"],
     )
-    question: Optional[str] = Field(
+    question: str | None = Field(
         default=None,
         description="Question to answer about the image (default: describe in detail)",
     )
@@ -220,18 +221,12 @@ class BrowserNavigateInput(ToolInput):
 
 
 class BrowserClickInput(ToolInput):
-    text: Optional[str] = Field(
-        default=None, description="Visible text of the element to click"
-    )
-    selector: Optional[str] = Field(
-        default=None, description="CSS selector of the element to click"
-    )
+    text: str | None = Field(default=None, description="Visible text of the element to click")
+    selector: str | None = Field(default=None, description="CSS selector of the element to click")
 
 
 class BrowserTypeInput(ToolInput):
-    selector: str = Field(
-        description="CSS selector, placeholder, or aria-label of the input field"
-    )
+    selector: str = Field(description="CSS selector, placeholder, or aria-label of the input field")
     text: str = Field(description="Text to type into the field")
     press_enter: bool = Field(default=False, description="Press Enter after typing")
 
@@ -241,23 +236,23 @@ class QueryTableInput(ToolInput):
         description="CSV or Excel file path",
         examples=["data.csv", "results.xlsx"],
     )
-    filter: Optional[str] = Field(
+    filter: str | None = Field(
         default=None,
         description='Pandas query string to filter rows, e.g. "year == 2020 and value > 100"',
     )
-    select: Optional[list] = Field(
+    select: list | None = Field(
         default=None,
         description='List of columns to select, e.g. ["name", "value"]',
     )
-    aggregate: Optional[str] = Field(
+    aggregate: str | None = Field(
         default=None,
         description="Aggregation: sum, mean, count, max, min, median, std",
     )
-    group_by: Optional[str] = Field(
+    group_by: str | None = Field(
         default=None,
         description="Column name to group by before aggregating",
     )
-    sheet: Optional[str] = Field(
+    sheet: str | None = Field(
         default=None,
         description="Sheet name (Excel only)",
     )
@@ -272,6 +267,26 @@ class TranscribeAudioInput(ToolInput):
         default="en-US",
         description="BCP-47 language code, e.g. 'en-US', 'it-IT', 'fr-FR'",
     )
+
+
+# ─── search_tools executor ────────────────────────────────────────────────────
+# Uses Python late binding: REGISTRY is looked up at call time (not definition
+# time), so this function can safely reference the module-level variable even
+# though it is defined before the assignment below.
+
+
+def _search_tools_executor(inp: dict) -> str:
+    query = inp.get("query", "").strip()
+    if not query:
+        return "Provide a natural language query to search for tools."
+    top = REGISTRY.select_for_query(query, top_k=5)
+    if not top.names():
+        return "No tools found for that query."
+    lines = [f"Tools relevant to '{query}':"]
+    for name in top.names():
+        spec = top[name]
+        lines.append(f"  - {spec.name}: {spec.description}")
+    return "\n".join(lines)
 
 
 # ─── Registry ─────────────────────────────────────────────────────────────────
@@ -456,6 +471,21 @@ REGISTRY = ToolRegistry(
             group="automation",
         ),
         ToolSpec(
+            name="search_tools",
+            description=(
+                "Searches available tools by natural language query and returns the "
+                "top matches with descriptions. Use this when you think a tool exists "
+                "for a task but it was not included in your current tool list."
+            ),
+            input_schema=SearchToolsInput,
+            executor=_search_tools_executor,
+            risk="none",
+            category="system",
+            icon="🔎",
+            label="Search Tools",
+            dashboard_allowed=False,
+        ),
+        ToolSpec(
             name="launch_app",
             description="Launches a process on the host",
             input_schema=LaunchAppInput,
@@ -503,7 +533,7 @@ REGISTRY = ToolRegistry(
         # ── Code ────────────────────────────────────────────────────────────
         ToolSpec(
             name="python_repl",
-            description="Executes Python in Docker sandbox. IMPORTANT: always use print() to output results, e.g. print(result). If no output, variables are auto-printed as fallback.",
+            description="Executes Python in Docker sandbox. NO NETWORK ACCESS (requests/urllib will fail) and ONLY Python stdlib is available (no bs4, no pandas, no requests). For fetching web pages use web_scrape or browser_navigate. Always use print() to output results. Use this tool only for math, parsing strings/JSON, and pure computation.",
             input_schema=PythonReplInput,
             executor=python_repl_tool,
             risk="medium",
@@ -515,7 +545,7 @@ REGISTRY = ToolRegistry(
         ),
         ToolSpec(
             name="bash_exec",
-            description="Executes Bash in Docker sandbox",
+            description="Executes Bash in Docker sandbox. NO NETWORK ACCESS (curl/wget will fail). For fetching web pages use web_scrape or browser_navigate. Useful for parsing local files (jq, awk, sed) and converting formats (ffmpeg, pdftotext if installed).",
             input_schema=BashExecInput,
             executor=bash_exec_tool,
             risk="medium",

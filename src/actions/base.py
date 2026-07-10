@@ -5,7 +5,7 @@ Fornisce un'interfaccia consistente per il planner e il verifier.
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 
 class ActionStatus(Enum):
@@ -22,7 +22,7 @@ class ActionResult:
 
     status: ActionStatus
     message: str
-    data: Optional[Any] = None
+    data: Any | None = None
     should_retry: bool = False
 
     @property

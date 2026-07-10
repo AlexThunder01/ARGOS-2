@@ -32,9 +32,7 @@ class ArgosTrafficUser(HttpUser):
             elif response.status_code == 429:
                 response.success()  # Rate limit is a handled scenario, not an application crash!
             else:
-                response.failure(
-                    f"Got unexpected HTTP {response.status_code}: {response.text}"
-                )
+                response.failure(f"Got unexpected HTTP {response.status_code}: {response.text}")
 
     @task(4)
     def test_telegram_chat_endpoint(self):
@@ -63,11 +61,7 @@ class ArgosTrafficUser(HttpUser):
                     response.success()
                 else:
                     response.failure(f"Unexpected JSON Status: {body}")
-            elif (
-                response.status_code == 429
-            ):  # Explicit exception raise hook from FastAPI
+            elif response.status_code == 429:  # Explicit exception raise hook from FastAPI
                 response.success()
             else:
-                response.failure(
-                    f"Got unexpected HTTP {response.status_code}: {response.text}"
-                )
+                response.failure(f"Got unexpected HTTP {response.status_code}: {response.text}")

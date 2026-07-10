@@ -26,7 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
-from src.planner.planner import PlannerDecision, parse_planner_response
+from src.planner.planner import parse_planner_response
 from src.utils import extract_json
 
 # ==========================================================================
@@ -145,9 +145,7 @@ class TestPlannerEmbeddedJson:
 
     def test_json_before_trailing_text(self):
         """JSON seguito da testo dopo la chiusura della parentesi."""
-        raw = (
-            '{"thought":"ok","response":"Risposta.","done":true}\nTesto dopo ignorato.'
-        )
+        raw = '{"thought":"ok","response":"Risposta.","done":true}\nTesto dopo ignorato.'
         d = parse_planner_response(raw)
         assert d.done is True
         assert d.response == "Risposta."
@@ -467,7 +465,6 @@ class TestToolResultRoleRegression:
         import asyncio
         from unittest.mock import AsyncMock, patch
 
-        from src.actions.base import ActionResult, ActionStatus
         from src.core.engine import CoreAgent
         from src.tools.spec import ToolInput, ToolSpec
         from src.world_model.state import WorldState
@@ -505,10 +502,6 @@ class TestToolResultRoleRegression:
             }
         )
 
-        success_result = ActionResult(
-            status=ActionStatus.SUCCESS, message="risultato_echo"
-        )
-
         async def run():
             from unittest.mock import MagicMock
 
@@ -521,28 +514,34 @@ class TestToolResultRoleRegression:
             state = WorldState()
             state.current_task = "test"
 
+            from src.llm.client import LLMResponse
+
             with (
-                patch.object(
-                    agent._llm, "think_async", new_callable=AsyncMock
-                ) as mock_think,
+                patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think,
                 patch(
-                    "src.core.engine.execute_with_retry", return_value=success_result
-                ),
+                    "src.core.engine.execute_with_retry_async", new_callable=AsyncMock
+                ) as mock_exec,
             ):
-                mock_think.side_effect = [tool_response, done_response]
+                mock_think.side_effect = [
+                    LLMResponse(content=tool_response),
+                    LLMResponse(content=done_response),
+                ]
+                mock_exec.return_value = "risultato_echo"
                 await agent._reasoning_loop("test", state, tracer, MagicMock())
 
         asyncio.run(run())
 
+        # This mock simulates a text-based JSON planner response (content=..., no
+        # native tool_calls), so the engine injects the tool result as role="user"
+        # rather than the OpenAI-native role="tool" format (used only when the LLM
+        # response carries actual tool_calls).
         tool_result_msgs = [
-            m for m in agent._llm.history if "TOOL RESULT" in m.get("content", "")
+            m
+            for m in agent._llm.history
+            if m.get("role") == "user" and "Tool result" in (m.get("content") or "")
         ]
-        assert len(tool_result_msgs) >= 1, "Nessun TOOL RESULT iniettato in history"
-        for msg in tool_result_msgs:
-            assert msg["role"] == "user", (
-                f"TOOL RESULT deve avere role='user', trovato '{msg['role']}'"
-            )
-        assert any("risultato_echo" in m["content"] for m in tool_result_msgs)
+        assert len(tool_result_msgs) >= 1, "Nessun tool result iniettato in history"
+        assert any("risultato_echo" in (m.get("content") or "") for m in tool_result_msgs)
 
 
 # ==========================================================================

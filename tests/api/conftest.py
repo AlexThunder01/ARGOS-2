@@ -11,9 +11,7 @@ import os
 import sqlite3
 import sys
 
-sys.path.insert(
-    0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 os.environ["DB_BACKEND"] = "sqlite"
 os.environ["ARGOS_API_KEY"] = ""
@@ -74,7 +72,7 @@ _api_conn = _create_api_test_db()
 import unittest.mock as _mock
 
 _p1 = _mock.patch("src.db.connection.get_connection", return_value=_api_conn)
-_p2 = _mock.patch("src.telegram.db.get_connection", return_value=_api_conn)
+_p2 = _mock.patch("src.db.repository.get_connection", return_value=_api_conn)
 _p3 = _mock.patch("src.core.rate_limit.get_connection", return_value=_api_conn)
 _p1.start()
 _p2.start()
@@ -85,7 +83,7 @@ _p3.start()
 def api_db(monkeypatch):
     """Assicura che ogni test API usi il DB in-memory."""
     monkeypatch.setattr("src.db.connection.get_connection", lambda: _api_conn)
-    monkeypatch.setattr("src.telegram.db.get_connection", lambda: _api_conn)
+    monkeypatch.setattr("src.db.repository.get_connection", lambda: _api_conn)
     monkeypatch.setattr("src.core.rate_limit.get_connection", lambda: _api_conn)
     # Azzera i contatori rate limit prima di ogni test per evitare interferenze
     _api_conn.execute("DELETE FROM tg_rate_limits")

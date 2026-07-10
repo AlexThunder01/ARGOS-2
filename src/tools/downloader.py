@@ -134,17 +134,12 @@ def download_file_tool(inp: dict) -> str:
 
     # ── Security: enforce HTTPS ────────────────────────────────────────────
     if url.startswith("http://"):
-        return (
-            "Error: HTTP (non-encrypted) URLs are blocked for security. "
-            "Use HTTPS instead."
-        )
+        return "Error: HTTP (non-encrypted) URLs are blocked for security. Use HTTPS instead."
     if not url.startswith("https://"):
         url = "https://" + url
 
     # ── Resolve save path ──────────────────────────────────────────────────
-    save_path = _get_arg(
-        inp, ["save_path", "path", "filename", "destination"], default=None
-    )
+    save_path = _get_arg(inp, ["save_path", "path", "filename", "destination"], default=None)
 
     try:
         # Start the download (streaming for large files)
@@ -184,8 +179,7 @@ def download_file_tool(inp: dict) -> str:
         if _is_blocked(resolved):
             _, ext = os.path.splitext(resolved)
             return (
-                f"Error: Downloading files with extension '{ext}' is blocked "
-                f"for security reasons."
+                f"Error: Downloading files with extension '{ext}' is blocked for security reasons."
             )
 
         # ── Security: check size before downloading ────────────────────────
@@ -194,8 +188,7 @@ def download_file_tool(inp: dict) -> str:
             size_mb = int(content_length) / (1024 * 1024)
             limit_mb = MAX_DOWNLOAD_BYTES / (1024 * 1024)
             return (
-                f"Error: File is too large ({size_mb:.1f} MB). "
-                f"Maximum allowed: {limit_mb:.0f} MB."
+                f"Error: File is too large ({size_mb:.1f} MB). Maximum allowed: {limit_mb:.0f} MB."
             )
 
         # ── Download in chunks ─────────────────────────────────────────────

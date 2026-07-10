@@ -1,60 +1,124 @@
 # ARGOS-2 Configuration Guide: `config.yaml` & `.env`
 
-The configuration of ARGOS-2 is split between the dynamic `config.yaml` (behavioral) and the environment file `.env` (systemic).
+The configuration of ARGOS-2 is split between the dynamic `config.yaml` (behavioral, hot-reloadable) and the environment file `.env` (systemic, requires restart).
 
 ---
 
 ## 📁 System Configuration (`.env`)
 
-New environment variables control the global security and LLM behavior.
+Environment variables control global infrastructure and security behavior.
 
-### `ARGOS_PARANOID_MODE` (Boolean: true|false)
-- **Effect**: Master switch for the **Paranoid Judge** middleware. 
-- **Usage**: Set to `true` to enable an independent LLM audit of all incoming text to the FastAPI backend.
-- **Why**: Protects the core engine from prompt injection before the request even reaches the business logic.
+### LLM Backend
 
-### `LLM_BACKEND` (Enum: groq|openai-compatible|anthropic|ollama)
-- **Effect**: Defines the provider for the `CoreAgent`.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_BACKEND` | `openai-compatible` | Provider type: `openai-compatible` or `anthropic`. Ollama works via `openai-compatible`. |
+| `LLM_BASE_URL` | `https://api.groq.com/openai/v1` | OpenAI-compatible API endpoint |
+| `LLM_API_KEY` | *(none)* | Primary API key for the LLM provider |
+| `LLM_API_KEY_2` | *(none)* | Secondary API key (automatic rotation on rate limits) |
+| `LLM_MODEL` | `llama-3.3-70b-versatile` | Model name for the primary reasoning LLM |
+| `LLM_LIGHTWEIGHT_MODEL` | `llama-3.1-8b-instant` | Model for background tasks (memory extraction) |
+| `LLM_TIMEOUT_S` | `300` | HTTP timeout in seconds for LLM calls |
+| `ANTHROPIC_MAX_TOKENS` | `4096` | Max tokens for Anthropic API responses |
+
+### Vision
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VISION_BASE_URL` | *(falls back to `LLM_BASE_URL`)* | Vision LLM endpoint |
+| `VISION_API_KEY` | *(falls back to `LLM_API_KEY`)* | Vision LLM API key |
+| `VISION_MODEL` | `meta-llama/llama-4-scout-17b-16e-instruct` | Vision model name |
+
+### Embeddings (RAG Memory)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EMBEDDING_BASE_URL` | `https://api.groq.com/openai/v1` | Embeddings API endpoint |
+| `EMBEDDING_API_KEY` | *(none)* | Embeddings API key |
+| `EMBEDDING_MODEL` | `nomic-embed-text-v1.5` | Embedding model name |
+| `EMBEDDING_DIM` | `768` | Embedding vector dimensions. Must match the model output. |
+
+### Database
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DB_BACKEND` | `postgres` | `sqlite` for local dev or `postgres` for production |
+| `DATABASE_URL` | `postgresql://argos:argos_secret@localhost:5432/argos` | PostgreSQL connection string |
+
+### Security
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ARGOS_API_KEY` | *(none)* | Shared secret for dashboard and n8n authentication |
+| `ARGOS_PARANOID_MODE` | `false` | Enables the LLM-based Paranoid Judge middleware on all API inputs |
+| `ARGOS_PERMISSIVE_MODE` | `false` | Bypasses API key auth entirely (**local dev only**) |
+| `RATE_LIMIT_PER_HOUR` | `50` | Max API requests per user per hour |
+| `RATE_LIMIT_PER_MINUTE` | `5` | Max API requests per user per minute |
+
+### Docker Sandbox
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DOCKER_HOST` | `tcp://localhost:2375` | Docker socket proxy URL |
+| `WORKSPACE_DIR` | `./workspace` | Path to the shared workspace directory |
+| `HOST_WORKSPACE_DIR` | *(falls back to `WORKSPACE_DIR`)* | Host-side path for Docker volume mount |
+| `DOCKER_EXEC_MEM_LIMIT` | `128m` | Memory limit for sandbox containers |
+| `DOCKER_EXEC_TIMEOUT` | `30` | Execution timeout in seconds |
+
+### CoreAgent
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ARGOS_MAX_STEPS` | `20` | Maximum tool execution steps per task |
+| `MAX_HISTORY_TOKENS` | `8000` | Token budget for conversation history trimming |
 
 ---
 
 ## 📁 Behavioral Configuration (`config.yaml`)
 
-The `config.yaml` is hot-reloadable. Changes are detected in real-time.
+The `config.yaml` is hot-reloadable via `watchdog`. Changes are detected in real-time without restarting the server.
 
-### 🧠 Core Engine Settings
-The `core_agent` block defines how the brain processes tasks.
+### 💬 Telegram Chat Module (`telegram_assistant` block)
 
-- **`max_steps`**: Maximum number of tool iterations per task (default: 10).
-- **`planner_temperature`**: Creativity of the reasoning loop (default: 0.1 for precision).
+**Identity:**
+- `bot_name`: Display name for the bot
+- `persona`: System prompt personality description
+- `welcome_message`: First message to approved users
+- `unauthorized_message`: Message for unapproved users
 
----
+**Behavior:**
+- `conversation_window`: Number of recent messages to include in context (default: `20`)
+- `max_memories_retrieved`: Number of RAG memory chunks to retrieve per query (default: `3`)
+- `rag_similarity_threshold`: Minimum cosine similarity for memory retrieval (default: `0.70`). Applies to the Telegram interface only; the CLI CoreAgent uses a hardcoded `0.25` threshold in `src/core/memory.py`.
+- `max_input_length`: Maximum input message length in characters (default: `4000`)
+- `enable_memory_extraction`: If `true`, the agent extracts long-term facts after conversations (default: `true`)
 
-### 🛡️ Security Pipeline (`security` block)
+**Memory Security:**
+- `enable_poisoning_detection`: Enables the 4-layer anti-poisoning pipeline (default: `true`)
+- `risk_threshold`: Maximum risk score (0.0–1.0) before facts are blocked (default: `0.5`)
+- `suspicious_retention`: How many suspicious entries to keep in the audit log (default: `500`)
 
-- **`risk_threshold`**: (Float 0.0-1.0). The maximum acceptable score from the heuristic risk engine. If exceeded, the task is blocked by the CoreAgent.
-- **`enable_blocklist`**: If `true`, checks inputs against the regex patterns in `src/core/security.py`.
+**Admin:**
+- `auto_approve`: If `true`, new users are auto-approved (default: `false`)
+- `notify_on_new_user`: Send approval request to admin chat (default: `true`)
 
----
+**Rate Limiting:**
+- `max_messages_per_day`: Daily cap per user. `0` = unlimited.
+- `max_messages_per_hour`: Hourly cap per user. `0` = unlimited.
 
-### 💬 Unified Memory (`memory` block)
+### 📧 Gmail Assistant (`gmail_assistant` block)
 
-Since the RAG memory is now unified, these settings apply to both the Telegram assistant and the CLI (when used with `--memory`).
-
-- **`rag_similarity_threshold`**: (Float 0.0-1.0). Minimum cosine similarity required to inject a memory into the current prompt (Core: 0.70).
-- **`max_memories_retrieved`**: Number of context chunks pulled from SQLite (default: 3).
-- **`enable_memory_extraction`**: If `true`, the agent will extract long-term facts/preferences after a conversation turn.
-
----
-
-### 📧 Gmail Assistant Configuration
-
-- **`enabled`**: Master kill-switch for email processing.
-- **`min_priority`**: Sets the notification threshold (`HIGH` > `MEDIUM` > `LOW` > `SPAM`).
-- **`allowed_languages`**: Whitelist (e.g., `["it", "en"]`).
+- `enabled`: Master kill-switch for email processing
+- `min_priority`: Notification threshold (`HIGH` > `MEDIUM` > `LOW` > `SPAM`)
+- `allowed_languages`: Whitelist (e.g., `["it", "en"]`)
+- `tone_of_voice`: Style for generated draft responses
+- `custom_signature`: Appended to every drafted email
+- `auto_discard_spam`: If `true`, low-priority/spam emails are auto-discarded without HITL
 
 ---
 
 ## 🛠️ Tool Authorization (CLI Gate)
 
-Dangerous tools like `bash_exec` or `python_repl` are restricted by an interactive gate on the terminal. You cannot disable this via config for security reasons—it requires manual user confirmation for every powerful OS-level action.
+Tools with `risk` level of `medium`, `high`, or `critical` (as defined in their `ToolSpec`) are restricted by an interactive gate on the terminal. The user must confirm each execution with `(y/N)`. This cannot be disabled via config for security reasons.
+
+In API mode, these tools are auto-blocked unless a confirmation callback is provided.

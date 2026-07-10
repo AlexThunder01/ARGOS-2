@@ -10,7 +10,6 @@ Coverage:
   - _retrieve_session_memories: TF-IDF — documento rilevante score > irrilevante
   - _tfidf_similarity()       : funzione standalone (regression test)
   - Multi-turn               : la history cresce tra add_message, trim preserva recenti
-  - run_task_stream()         : yielda chunk da think_stream
 """
 
 import os
@@ -19,13 +18,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from collections import deque
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 from src.agent import ArgosAgent, _count_tokens
-from src.core.engine import CoreAgent, _tfidf_similarity
-from src.core.memory import EXTRACT_MIN_LENGTH, should_extract_memory
+from src.core.engine import CoreAgent
+from src.llm.client import LLMResponse
 
 # ==========================================================================
 # Policy nel system prompt di ArgosAgent
@@ -91,9 +88,7 @@ class TestSystemPromptPolicies:
 
     def test_response_format_with_done_true(self):
         """Il formato JSON per risposta finale deve essere nel prompt."""
-        assert "done" in self.prompt and (
-            "true" in self.prompt or "True" in self.prompt
-        )
+        assert "done" in self.prompt and ("true" in self.prompt or "True" in self.prompt)
 
     def test_execute_only_what_requested(self):
         """Argos deve eseguire SOLO quello richiesto, senza azioni extra."""
@@ -109,100 +104,24 @@ class TestSystemPromptPolicies:
 
 
 # ==========================================================================
-# Session Memory — storage e retrieval
+# Session Memory — storage validation
 # ==========================================================================
 
 
 class TestSessionMemoryStorage:
-    def test_long_message_stored_in_session(self):
-        """Messaggi > EXTRACT_MIN_LENGTH devono essere salvati in session memory."""
-        agent = CoreAgent(memory_mode="session", inject_git_context=False)
-        long_message = "L'utente preferisce Python per lo sviluppo backend. " * 5
-        assert len(long_message) > EXTRACT_MIN_LENGTH
-
-        agent._maybe_extract_memories(long_message, [])
-
-        assert len(agent._session_memories) == 1
-        assert "Python" in agent._session_memories[0]["content"]
-
-    def test_short_message_not_stored_in_session(self):
-        """Messaggi corti non vengono salvati in session memory."""
-        agent = CoreAgent(memory_mode="session", inject_git_context=False)
-        short_message = "ciao"
-        assert len(short_message) <= EXTRACT_MIN_LENGTH
-
-        agent._maybe_extract_memories(short_message, [])
-
-        assert len(agent._session_memories) == 0
-
-    def test_session_memory_content_truncated_at_200(self):
-        """Il contenuto salvato viene troncato a 200 caratteri."""
-        agent = CoreAgent(memory_mode="session", inject_git_context=False)
-        very_long = "x" * 500
-
-        agent._maybe_extract_memories(very_long, [])
-
-        assert len(agent._session_memories[0]["content"]) <= 200
-
-    def test_session_memory_category_is_fact(self):
-        """La categoria default in session mode è 'fact'."""
-        agent = CoreAgent(memory_mode="session", inject_git_context=False)
-        agent._maybe_extract_memories("a" * 150, [])
-
-        assert agent._session_memories[0]["category"] == "fact"
-
     def test_session_memory_maxlen_evicts_oldest(self):
         """La deque ha maxlen=500: le memorie più vecchie vengono espulse."""
         agent = CoreAgent(memory_mode="session", inject_git_context=False)
 
         # Riempi oltre maxlen
         for i in range(510):
-            agent._session_memories.append(
-                {"content": f"fact_{i:04d}", "category": "fact"}
-            )
+            agent._session_memories.append({"content": f"fact_{i:04d}", "category": "fact"})
 
         assert len(agent._session_memories) == 500
         # La più vecchia (fact_0000) deve essere sparita
         contents = [m["content"] for m in agent._session_memories]
         assert "fact_0000" not in contents
         assert "fact_0509" in contents
-
-    def test_off_mode_does_not_store(self):
-        """In memory_mode='off', _maybe_extract_memories non deve fare nulla."""
-        agent = CoreAgent(memory_mode="off", inject_git_context=False)
-        agent._maybe_extract_memories("L'utente si chiama Alice " * 10, [])
-
-        # Non ha _session_memories in senso utile (rimane vuota)
-        assert len(agent._session_memories) == 0
-
-    def test_persistent_mode_calls_extract_for_long_message(self):
-        """In persistent mode, extract_memories_from_text deve essere chiamato."""
-        agent = CoreAgent(memory_mode="persistent", inject_git_context=False)
-        long_msg = "L'utente preferisce Python " * 10
-
-        # Le funzioni sono importate localmente dentro _maybe_extract_memories,
-        # quindi si patchano nel modulo sorgente (src.core.memory).
-        with (
-            patch("src.core.memory.should_extract_memory", return_value=True),
-            patch(
-                "src.core.memory.extract_memories_from_text", return_value=[]
-            ) as mock_extract,
-        ):
-            agent._maybe_extract_memories(long_msg, [])
-
-        mock_extract.assert_called_once()
-
-    def test_persistent_mode_skips_extract_for_short_message(self):
-        """In persistent mode, extract non viene chiamato per messaggi corti."""
-        agent = CoreAgent(memory_mode="persistent", inject_git_context=False)
-
-        with (
-            patch("src.core.memory.should_extract_memory", return_value=False),
-            patch("src.core.memory.extract_memories_from_text") as mock_extract,
-        ):
-            agent._maybe_extract_memories("ciao", [])
-
-        mock_extract.assert_not_called()
 
 
 # ==========================================================================
@@ -259,10 +178,7 @@ class TestSessionMemoryRetrieval:
         """Il parametro top_k deve limitare il numero di risultati."""
         agent = CoreAgent(memory_mode="session", inject_git_context=False)
         agent._session_memories = deque(
-            [
-                {"content": f"Python fatto numero {i}", "category": "fact"}
-                for i in range(10)
-            ]
+            [{"content": f"Python fatto numero {i}", "category": "fact"} for i in range(10)]
         )
 
         results = agent._retrieve_session_memories("Python", top_k=2)
@@ -283,53 +199,9 @@ class TestSessionMemoryRetrieval:
         agent1 = CoreAgent(memory_mode="session", inject_git_context=False)
         agent2 = CoreAgent(memory_mode="session", inject_git_context=False)
 
-        agent1._session_memories.append(
-            {"content": "fatto agente 1", "category": "fact"}
-        )
+        agent1._session_memories.append({"content": "fatto agente 1", "category": "fact"})
 
         assert len(agent2._session_memories) == 0
-
-
-# ==========================================================================
-# _tfidf_similarity() — unit test funzione standalone
-# ==========================================================================
-
-
-class TestTfidfSimilarity:
-    def test_identical_query_and_document_high_score(self):
-        """Query identica al documento deve avere score vicino a 1."""
-        text = "Python backend development"
-        scores = _tfidf_similarity(text, [text])
-        assert scores[0] > 0.9
-
-    def test_similar_documents_score_higher_than_unrelated(self):
-        """Documento rilevante deve avere score più alto di uno irrilevante."""
-        query = "Python programming"
-        docs = [
-            "Python is great for programming",  # rilevante
-            "la cucina italiana è buonissima",  # irrilevante
-        ]
-        scores = _tfidf_similarity(query, docs)
-        assert scores[0] > scores[1]
-
-    def test_empty_documents_returns_zeros(self):
-        scores = _tfidf_similarity("test query", [])
-        assert scores == []
-
-    def test_scores_between_zero_and_one(self):
-        scores = _tfidf_similarity("test", ["testo di prova", "altro testo"])
-        for s in scores:
-            assert 0.0 <= s <= 1.0
-
-    def test_returns_one_score_per_document(self):
-        docs = ["doc one", "doc two", "doc three"]
-        scores = _tfidf_similarity("query", docs)
-        assert len(scores) == len(docs)
-
-    def test_completely_unrelated_query_low_score(self):
-        """Query e documento senza parole in comune → score basso."""
-        scores = _tfidf_similarity("zzz yyy xxx", ["aaa bbb ccc"])
-        assert scores[0] < 0.1
 
 
 # ==========================================================================
@@ -412,7 +284,7 @@ class TestMultiTurnHistory:
         _injected_history prima di ogni chiamata (come fa il CLI loop).
         """
         import asyncio
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import AsyncMock
 
         agent = CoreAgent(memory_mode="off", inject_git_context=False)
         agent._injected_history = [
@@ -421,10 +293,10 @@ class TestMultiTurnHistory:
         ]
 
         async def run():
-            with patch.object(
-                agent._llm, "think_async", new_callable=AsyncMock
-            ) as mock_think:
-                mock_think.return_value = '{"thought":"ok","response":"OK","done":true}'
+            with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think:
+                mock_think.return_value = LLMResponse(
+                    content='{"thought":"ok","response":"OK","done":true}'
+                )
                 await agent.run_task_async("task che consuma la history iniettata")
 
         asyncio.run(run())
@@ -449,88 +321,3 @@ class TestMultiTurnHistory:
         assert "Alice" in contents
         assert "jazz" in contents
         assert "Linux" in contents
-
-
-# ==========================================================================
-# run_task_stream() — streaming entry point
-# ==========================================================================
-
-
-class TestRunTaskStream:
-    @patch("src.agent.requests.post")
-    def test_run_task_stream_yields_chunks(self, mock_post):
-        """run_task_stream deve yieldare almeno un chunk."""
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.iter_lines.return_value = iter(
-            [
-                b'data: {"choices": [{"delta": {"content": "chunk1"}}]}',
-                b'data: {"choices": [{"delta": {"content": " chunk2"}}]}',
-                b"data: [DONE]",
-            ]
-        )
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_post.return_value = mock_resp
-
-        agent = CoreAgent(memory_mode="off", inject_git_context=False)
-        agent._llm.backend = "openai-compatible"
-
-        chunks = list(agent.run_task_stream("test streaming"))
-
-        assert len(chunks) >= 1
-        assert "chunk1" in "".join(chunks)
-
-    @patch("src.agent.requests.post")
-    def test_run_task_stream_reinitializes_history(self, mock_post):
-        """run_task_stream deve reinizializzare la history prima di streammare."""
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.iter_lines.return_value = iter([b"data: [DONE]"])
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_post.return_value = mock_resp
-
-        agent = CoreAgent(memory_mode="off", inject_git_context=False)
-        agent._llm.backend = "openai-compatible"
-
-        # Inquina la history
-        agent._llm.add_message("user", "vecchio messaggio")
-        agent._llm.add_message("assistant", "vecchia risposta")
-
-        list(agent.run_task_stream("nuovo task"))
-
-        # Dopo run_task_stream, la history deve contenere il nuovo task
-        user_msgs = [m for m in agent._llm.history if m["role"] == "user"]
-        assert any("nuovo task" in m["content"] for m in user_msgs)
-        # Il vecchio messaggio non deve essere nel contesto
-        assert not any("vecchio messaggio" in m["content"] for m in agent._llm.history)
-
-
-# ==========================================================================
-# should_extract_memory() — trigger debounce
-# ==========================================================================
-
-
-class TestShouldExtractMemory:
-    def test_long_message_always_triggers(self):
-        long = "a" * (EXTRACT_MIN_LENGTH + 1)
-        assert should_extract_memory(long, 1) is True
-
-    def test_short_message_at_nth_count_triggers(self):
-        from src.core.memory import EXTRACT_EVERY_N
-
-        assert should_extract_memory("ciao", EXTRACT_EVERY_N) is True
-
-    def test_short_message_not_at_nth_count_no_trigger(self):
-        assert should_extract_memory("ciao", 3) is False
-
-    def test_zero_count_no_trigger(self):
-        assert should_extract_memory("ciao", 0) is False
-
-    def test_long_message_overrides_count(self):
-        """Anche se il count non è multiplo di EXTRACT_EVERY_N, il messaggio lungo triggera."""
-        long = "x" * (EXTRACT_MIN_LENGTH + 1)
-        assert should_extract_memory(long, 1) is True
-        assert should_extract_memory(long, 3) is True
-        assert should_extract_memory(long, 7) is True

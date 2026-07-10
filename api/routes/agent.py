@@ -15,21 +15,17 @@ import logging
 import urllib.parse
 import uuid
 from threading import Lock
-from typing import List, Optional
 
-import pybreaker
 import requests
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from api.security import verify_api_key
-from src.config import LLM_BACKEND, LLM_MODEL
+from src.config import LLM_BACKEND, LLM_MODEL, WEBHOOK_TIMEOUT_SECONDS
 from src.core import CoreAgent
 
 router = APIRouter(tags=["Agent"])
 logger = logging.getLogger("argos")
-
-llm_breaker = pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)
 
 # ── Idempotency store ──────────────────────────────────────────────────────
 # Maps idempotency_key → job_id for deduplication of async requests.
@@ -51,15 +47,16 @@ def _get_agent(require_confirmation: bool, max_steps: int) -> "CoreAgent":
     key = (require_confirmation, max_steps)
     with _agent_cache_lock:
         if key not in _agent_cache:
-            if len(_agent_cache) >= _AGENT_CACHE_MAX:
-                # Evict the oldest entry (insertion-order dict, Python 3.7+)
-                oldest_key = next(iter(_agent_cache))
-                del _agent_cache[oldest_key]
             _agent_cache[key] = CoreAgent(
                 memory_mode="off",
                 require_confirmation=require_confirmation,
                 max_steps=max_steps,
             )
+            # NEW: Evict oldest if cache exceeded (not before)
+            while len(_agent_cache) > _AGENT_CACHE_MAX:
+                oldest_key = next(iter(_agent_cache))
+                del _agent_cache[oldest_key]
+                logger.debug(f"[AgentCache] Evicted {oldest_key}")
     return _agent_cache[key]
 
 
@@ -110,14 +107,14 @@ def _validate_webhook_url(url: str) -> None:
 
 
 class TaskRequest(BaseModel):
-    task: str = Field(
-        ..., description="Natural language task description to be executed"
-    )
+    task: str = Field(..., description="Natural language task description to be executed")
     require_confirmation: bool = Field(
         default=False, description="If True, halts execution on dangerous actions"
     )
-    max_steps: int = Field(
-        default=5, ge=1, le=20, description="Maximum internal step bound"
+    max_steps: int = Field(default=5, ge=1, le=20, description="Maximum internal step bound")
+    attachments: list[str] = Field(
+        default_factory=list,
+        description="Optional list of upload_id UUIDs from POST /api/upload",
     )
 
 
@@ -147,7 +144,7 @@ class TaskResponse(BaseModel):
     task: str
     steps_executed: int
     result: str
-    history: List[StepRecord]
+    history: list[StepRecord]
     backend: str
     model: str
 
@@ -190,63 +187,34 @@ async def _run_task_async_core(
     task: str, require_confirmation: bool, max_steps: int
 ) -> TaskResponse:
     """
-    Executes a task via the async CoreAgent (non-blocking httpx LLM calls).
-
-    pybreaker.CircuitBreaker.call() is sync-only; we manually honour the
-    breaker's open state and delegate success/failure tracking to it via a
-    thread so we don't block the event loop.
+    Executes a task via the async CoreAgent (non-blocking LLM calls via LiteLLM).
     """
     agent = _get_agent(require_confirmation, max_steps)
 
-    # Honour open circuit without blocking
-    if llm_breaker.current_state == pybreaker.STATE_OPEN:
-        return TaskResponse(
-            success=False,
-            task=task,
-            steps_executed=0,
-            result="LLM Service unavailable (Circuit Breaker OPEN)",
-            history=[],
-            backend=agent.backend,
-            model=agent.model,
-        )
-
     try:
         result = await agent.run_task_async(task)
-        # Record success so the breaker can close from HALF_OPEN
-        await asyncio.to_thread(llm_breaker.call, lambda: None)
-    except pybreaker.CircuitBreakerError:
-        return TaskResponse(
-            success=False,
-            task=task,
-            steps_executed=0,
-            result="LLM Service unavailable (Circuit Breaker OPEN)",
-            history=[],
-            backend=agent.backend,
-            model=agent.model,
-        )
-    except Exception:
+    except (TimeoutError, asyncio.CancelledError):
+        # Timeout or cancellation — don't treat as LLM failure
+        logger.warning("[CoreAgent] Task execution cancelled or timed out")
+        raise
+    except Exception as e:
+        # Any other exception should propagate to FastAPI's error handler
+        logger.exception(f"[CoreAgent] Unexpected error in run_task_async: {e}")
         raise
 
     return _task_result_to_response(result, agent, task)
 
 
-def _run_task_sync(
-    task: str, require_confirmation: bool, max_steps: int
-) -> TaskResponse:
+def _run_task_sync(task: str, require_confirmation: bool, max_steps: int) -> TaskResponse:
     """Sync fallback — used only by the webhook background worker."""
     agent = _get_agent(require_confirmation, max_steps)
     try:
-        result = llm_breaker.call(agent.run_task, task)
-    except pybreaker.CircuitBreakerError:
-        return TaskResponse(
-            success=False,
-            task=task,
-            steps_executed=0,
-            result="LLM Service unavailable (Circuit Breaker OPEN)",
-            history=[],
-            backend=agent.backend,
-            model=agent.model,
-        )
+        result = agent.run_task(task)
+    except Exception as e:
+        # Any exception should propagate to the async worker
+        logger.exception(f"[CoreAgent] Error in run_task_sync: {e}")
+        raise
+
     return _task_result_to_response(result, agent, task)
 
 
@@ -254,17 +222,51 @@ def _run_task_async_worker(
     job_id: str, webhook_url: str, task: str, req_conf: bool, max_steps: int
 ):
     """Background worker for asynchronous task execution."""
-    logger.info(
-        f"⏳ Async Job [{job_id}] initialized for target webhook: {webhook_url}"
-    )
+    logger.info(f"⏳ Async Job [{job_id}] initialized for target webhook: {webhook_url}")
+
+    # NEW: Re-validate webhook URL before use (defense in depth)
+    try:
+        _validate_webhook_url(webhook_url)
+    except ValueError as e:
+        logger.error(f"[SSRF] Webhook validation failed in worker: {e}")
+        return  # Fail silently, don't attempt to POST
 
     try:
         result: TaskResponse = _run_task_sync(task, req_conf, max_steps)
         payload = result.model_dump()
         payload["job_id"] = job_id
 
+        # NEW: n8n credential validation (D-02)
+        # If credential_id is present in payload and becomes None, fail immediately
+        cred_id = payload.get("n8n_credential_id")
+        if "n8n_credential_id" in payload and cred_id is None:
+            error_msg = (
+                "n8n credential creation returned None cred_id — aborting workflow activation"
+            )
+            logger.error(f"[n8n] {error_msg}")
+            raise ValueError(error_msg)
+
+        # NEW: n8n OAuth2 authorization check (D-03)
+
+        try:
+            from src.config import N8N_BASE_URL
+
+            n8n_base = N8N_BASE_URL
+            if n8n_base:  # Only check if n8n is configured
+                oauth_status_url = f"{n8n_base.rstrip('/')}/api/v1/oauth2/authorize"
+                oauth_resp = requests.get(oauth_status_url, timeout=3)
+                if oauth_resp.status_code not in (200, 204):
+                    error_msg = f"n8n OAuth2 authorization failed: HTTP {oauth_resp.status_code}"
+                    logger.error(f"[n8n] {error_msg}")
+                    raise ValueError(error_msg)
+                logger.info("[n8n] OAuth2 authorization verified")
+        except requests.RequestException as e:
+            error_msg = f"n8n OAuth2 check failed: {e}"
+            logger.error(f"[n8n] {error_msg}")
+            raise ValueError(error_msg)
+
         logger.info(f"📤 Dispatching Job result [{job_id}] to {webhook_url}")
-        resp = requests.post(webhook_url, json=payload, timeout=10)
+        resp = requests.post(webhook_url, json=payload, timeout=WEBHOOK_TIMEOUT_SECONDS)
         if resp.status_code >= 400:
             logger.error(
                 f"❌ Webhook dispatch failed for Job [{job_id}]: HTTP {resp.status_code} - {resp.text}"
@@ -273,9 +275,7 @@ def _run_task_async_worker(
             logger.info(f"✅ Webhook successfully delivered for Job [{job_id}]")
 
     except Exception as e:
-        logger.error(
-            f"❌ Critical exception caught in async job worker [{job_id}]: {e}"
-        )
+        logger.error(f"❌ Critical exception caught in async job worker [{job_id}]: {e}")
         try:
             requests.post(
                 webhook_url,
@@ -287,9 +287,7 @@ def _run_task_async_worker(
                 timeout=5,
             )
         except Exception:
-            logger.warning(
-                f"[Job {job_id}] Failed to deliver error payload to webhook."
-            )
+            logger.warning(f"[Job {job_id}] Failed to deliver error payload to webhook.")
 
 
 # ==========================================================================
@@ -307,9 +305,7 @@ async def status():
     )
 
 
-@router.post(
-    "/run", response_model=TaskResponse, dependencies=[Depends(verify_api_key)]
-)
+@router.post("/run", response_model=TaskResponse, dependencies=[Depends(verify_api_key)])
 async def run_task(req: TaskRequest):
     from src.core.rate_limit import RateLimitExceeded, check_rate_limit
 
@@ -318,10 +314,14 @@ async def run_task(req: TaskRequest):
     except RateLimitExceeded as e:
         raise HTTPException(status_code=429, detail=str(e))
 
+    task = req.task
+    if req.attachments:
+        from src.upload import build_attachment_context
+
+        task = f"{task}\n\n{build_attachment_context(req.attachments)}"
+
     try:
-        return await _run_task_async_core(
-            req.task, req.require_confirmation, req.max_steps
-        )
+        return await _run_task_async_core(task, req.require_confirmation, req.max_steps)
     except HTTPException:
         raise
     except Exception as e:
@@ -338,7 +338,7 @@ async def run_task(req: TaskRequest):
 async def run_task_async(
     req: TaskAsyncRequest,
     background_tasks: BackgroundTasks,
-    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     from src.core.rate_limit import RateLimitExceeded, check_rate_limit
 
@@ -376,11 +376,17 @@ async def run_task_async(
         with _idempotency_lock:
             _idempotency_store[idempotency_key] = job_id
 
+    async_task = req.task
+    if req.attachments:
+        from src.upload import build_attachment_context
+
+        async_task = f"{async_task}\n\n{build_attachment_context(req.attachments)}"
+
     background_tasks.add_task(
         _run_task_async_worker,
         job_id=job_id,
         webhook_url=req.webhook_url,
-        task=req.task,
+        task=async_task,
         req_conf=req.require_confirmation,
         max_steps=req.max_steps,
     )

@@ -10,67 +10,98 @@ Dependencies:
 """
 
 import atexit
-import threading
+import concurrent.futures
+import contextlib
 
 from .helpers import _get_arg
 
-_lock = threading.Lock()
+# All Playwright operations must run in the same OS thread because sync_playwright
+# uses greenlets internally and raises "Cannot switch to a different thread" when
+# called from asyncio.to_thread (which picks arbitrary pool threads).
+# A single-worker ThreadPoolExecutor guarantees all calls land in thread #1.
+_pw_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="pw")
+
 _state: dict = {"pw": None, "browser": None, "page": None}
 
 
-def _ensure_page():
-    """Lazily initialize Playwright and return (page, error_string)."""
-    with _lock:
-        if _state["page"] is not None:
-            return _state["page"], None
-        try:
-            from playwright.sync_api import sync_playwright
-        except ImportError:
-            return None, (
-                "Error: playwright not installed. "
-                "Run: pip install playwright && playwright install chromium"
+def _ensure_page_in_pw_thread():
+    """Must be called from within _pw_executor. Lazily init Playwright."""
+    if _state["page"] is not None:
+        return _state["page"], None
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return None, (
+            "Error: playwright not installed. "
+            "Run: pip install playwright && playwright install chromium"
+        )
+    try:
+        pw = sync_playwright().start()
+        browser = pw.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-dev-shm-usage"],
+        )
+        page = browser.new_page(
+            user_agent=(
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
-        try:
-            pw = sync_playwright().start()
-            browser = pw.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
-            )
-            page = browser.new_page(
-                user_agent=(
-                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                )
-            )
-            _state["pw"] = pw
-            _state["browser"] = browser
-            _state["page"] = page
-            return page, None
-        except Exception as e:
-            return None, f"Error starting browser: {e}"
+        )
+        _state["pw"] = pw
+        _state["browser"] = browser
+        _state["page"] = page
+        return page, None
+    except Exception as e:
+        return None, f"Error starting browser: {e}"
 
 
-def _cleanup():
-    with _lock:
+def _run_in_pw_thread(fn, *args, timeout=30):
+    """Submit fn(*args) to the dedicated Playwright thread and return result."""
+    future = _pw_executor.submit(fn, *args)
+    return future.result(timeout=timeout)
+
+
+def reset_browser_state():
+    """Close the current page so the next call starts fresh.
+    Use between independent tasks to avoid session pollution (e.g. one task's
+    page leaking into another's browser_get_content)."""
+
+    def _impl():
         if _state["browser"]:
-            try:
+            with contextlib.suppress(Exception):
                 _state["browser"].close()
-            except Exception:
-                pass
         if _state["pw"]:
-            try:
+            with contextlib.suppress(Exception):
                 _state["pw"].stop()
-            except Exception:
-                pass
         _state["browser"] = None
         _state["pw"] = None
         _state["page"] = None
+
+    with contextlib.suppress(Exception):
+        _run_in_pw_thread(_impl, timeout=10)
+
+
+def _cleanup():
+    def _do_cleanup():
+        if _state["browser"]:
+            with contextlib.suppress(Exception):
+                _state["browser"].close()
+        if _state["pw"]:
+            with contextlib.suppress(Exception):
+                _state["pw"].stop()
+        _state["browser"] = None
+        _state["pw"] = None
+        _state["page"] = None
+
+    with contextlib.suppress(Exception):
+        _run_in_pw_thread(_do_cleanup, timeout=10)
+    _pw_executor.shutdown(wait=False)
 
 
 atexit.register(_cleanup)
 
 
-def _page_to_text(page, max_chars: int = 12000) -> str:
+def _page_to_text(page, max_chars: int = 25000) -> str:
     """Convert current page HTML to readable markdown-ish text."""
     try:
         from html2text import html2text
@@ -82,7 +113,7 @@ def _page_to_text(page, max_chars: int = 12000) -> str:
             anchor = current_url.split("#", 1)[1]
 
         if anchor:
-            try:
+            with contextlib.suppress(Exception):
                 element = page.query_selector(f"#{anchor}, [name='{anchor}']")
                 if element:
                     # Walk siblings after the anchor, collecting text until next header
@@ -114,8 +145,6 @@ def _page_to_text(page, max_chars: int = 12000) -> str:
                         if len(combined) > max_chars:
                             combined = combined[:max_chars] + "\n... [truncated]"
                         return combined
-            except Exception:
-                pass
 
         html = page.content()
         text = html2text(html)
@@ -146,15 +175,20 @@ def browser_navigate_tool(inp):
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
 
-    page, err = _ensure_page()
-    if err:
-        return err
+    def _impl():
+        page, err = _ensure_page_in_pw_thread()
+        if err:
+            return err
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            title = page.title()
+            text = _page_to_text(page)
+            return f"Title: {title}\nURL: {page.url}\n\n{text}"
+        except Exception as e:
+            return f"Error navigating to '{url}': {e}"
 
     try:
-        page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        title = page.title()
-        text = _page_to_text(page)
-        return f"Title: {title}\nURL: {page.url}\n\n{text}"
+        return _run_in_pw_thread(_impl, timeout=40)
     except Exception as e:
         return f"Error navigating to '{url}': {e}"
 
@@ -172,25 +206,25 @@ def browser_click_tool(inp):
     if not target:
         return "Error: Specify 'text' (visible label) or 'selector' (CSS) to click."
 
-    page, err = _ensure_page()
-    if err:
-        return err
+    def _impl():
+        page, err = _ensure_page_in_pw_thread()
+        if err:
+            return err
+        try:
+            try:
+                page.click(f"text={target}", timeout=5000)
+            except Exception:
+                page.click(target, timeout=5000)
+            with contextlib.suppress(Exception):
+                page.wait_for_load_state("domcontentloaded", timeout=10000)
+            title = page.title()
+            text = _page_to_text(page)
+            return f"Clicked '{target}'.\nTitle: {title}\nURL: {page.url}\n\n{text}"
+        except Exception as e:
+            return f"Error clicking '{target}': {e}"
 
     try:
-        # Try exact/partial text match first, then CSS selector
-        try:
-            page.click(f"text={target}", timeout=5000)
-        except Exception:
-            page.click(target, timeout=5000)
-
-        try:
-            page.wait_for_load_state("domcontentloaded", timeout=10000)
-        except Exception:
-            pass
-
-        title = page.title()
-        text = _page_to_text(page)
-        return f"Clicked '{target}'.\nTitle: {title}\nURL: {page.url}\n\n{text}"
+        return _run_in_pw_thread(_impl, timeout=25)
     except Exception as e:
         return f"Error clicking '{target}': {e}"
 
@@ -210,53 +244,49 @@ def browser_type_tool(inp):
 
     press_enter = bool(inp.get("press_enter")) if isinstance(inp, dict) else False
 
-    page, err = _ensure_page()
-    if err:
-        return err
+    def _impl():
+        page, err = _ensure_page_in_pw_thread()
+        if err:
+            return err
+        try:
+            filled = False
+            with contextlib.suppress(Exception):
+                page.fill(selector, text, timeout=5000)
+                filled = True
+
+            if not filled:
+                for strategy in [
+                    lambda: page.get_by_placeholder(selector).first.fill(text, timeout=3000),
+                    lambda: page.get_by_label(selector).first.fill(text, timeout=3000),
+                    lambda: page.locator(f"[name='{selector}']").first.fill(text, timeout=3000),
+                    lambda: page.locator("input, textarea").first.fill(text, timeout=3000),
+                ]:
+                    try:
+                        strategy()
+                        filled = True
+                        break
+                    except Exception:
+                        continue
+
+            if not filled:
+                return f"Error typing into '{selector}': could not find field with any strategy."
+
+            if press_enter:
+                page.keyboard.press("Enter")
+                with contextlib.suppress(Exception):
+                    page.wait_for_load_state("domcontentloaded", timeout=10000)
+                title = page.title()
+                text_content = _page_to_text(page)
+                return (
+                    f"Typed and pressed Enter.\nTitle: {title}\nURL: {page.url}\n\n{text_content}"
+                )
+
+            return f"Typed '{text}' into '{selector}'."
+        except Exception as e:
+            return f"Error typing into '{selector}': {e}"
 
     try:
-        # Try CSS selector first, then individual fallback strategies
-        filled = False
-        try:
-            page.fill(selector, text, timeout=5000)
-            filled = True
-        except Exception:
-            pass
-
-        if not filled:
-            # Try each strategy separately to avoid CSS injection issues when selector
-            # itself contains quotes or special characters (e.g. "input[name='q']")
-            for strategy in [
-                lambda: page.get_by_placeholder(selector).first.fill(
-                    text, timeout=3000
-                ),
-                lambda: page.get_by_label(selector).first.fill(text, timeout=3000),
-                lambda: page.locator(f"[name='{selector}']").first.fill(
-                    text, timeout=3000
-                ),
-                lambda: page.locator("input, textarea").first.fill(text, timeout=3000),
-            ]:
-                try:
-                    strategy()
-                    filled = True
-                    break
-                except Exception:
-                    continue
-
-        if not filled:
-            return f"Error typing into '{selector}': could not find field with any strategy."
-
-        if press_enter:
-            page.keyboard.press("Enter")
-            try:
-                page.wait_for_load_state("domcontentloaded", timeout=10000)
-            except Exception:
-                pass
-            title = page.title()
-            text_content = _page_to_text(page)
-            return f"Typed and pressed Enter.\nTitle: {title}\nURL: {page.url}\n\n{text_content}"
-
-        return f"Typed '{text}' into '{selector}'."
+        return _run_in_pw_thread(_impl, timeout=25)
     except Exception as e:
         return f"Error typing into '{selector}': {e}"
 
@@ -268,13 +298,24 @@ def browser_get_content_tool(inp):
 
     Input: {} (no arguments needed)
     """
-    page, err = _ensure_page()
-    if err:
-        return err
+
+    def _impl():
+        page, err = _ensure_page_in_pw_thread()
+        if err:
+            return err
+        try:
+            if page.url in ("about:blank", "", "chrome-error://chromewebdata/"):
+                return (
+                    "Error: no page is currently loaded in the browser. "
+                    "Call browser_navigate with a URL first."
+                )
+            title = page.title()
+            text = _page_to_text(page)
+            return f"Title: {title}\nURL: {page.url}\n\n{text}"
+        except Exception as e:
+            return f"Error getting page content: {e}"
 
     try:
-        title = page.title()
-        text = _page_to_text(page)
-        return f"Title: {title}\nURL: {page.url}\n\n{text}"
+        return _run_in_pw_thread(_impl, timeout=20)
     except Exception as e:
         return f"Error getting page content: {e}"

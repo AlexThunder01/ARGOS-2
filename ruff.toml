@@ -1,33 +1,9 @@
-# Ruff Configuration for ARGOS-2 Project
+target-version = "py312"
+line-length = 100
 
 [lint]
-# Select the rules to run
-select = [
-    "E",   # pycodestyle errors
-    "F",   # pyflakes
-    "W",   # pycodestyle warnings
-    "I",   # isort
-]
-
-# Ignore specific rules that conflict with legacy formatting
-ignore = [
-    "E501", # Line too long
-    "E701", # Multiple statements on one line (colon)
-    "E722", # Do not use bare `except`
-    "E731", # Do not assign a lambda expression
-    "E402", # Module level import not at top of file
-    "F401", # Unused import
-    "F403", # Star imports used
-    "F405", # Name may be undefined, or defined from star imports
-    "W291", # Trailing whitespace
-    "W293", # Blank line contains whitespace
-]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501", "B008"]
 
 [lint.isort]
-known-first-party = ["src", "api", "tests"]
-
-[format]
-quote-style = "double"
-indent-style = "space"
-skip-magic-trailing-comma = false
-line-ending = "auto"
+known-first-party = ["src"]

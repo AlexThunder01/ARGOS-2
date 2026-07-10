@@ -192,9 +192,7 @@ class TestCreateGmailCredential:
         mock_resp.json.return_value = {"id": "gmail_xyz"}
 
         with patch("scripts.inject_n8n.requests.post", return_value=mock_resp):
-            result = create_gmail_credential(
-                "http://n8n/api/v1", {}, "CLIENT_ID", "SECRET"
-            )
+            result = create_gmail_credential("http://n8n/api/v1", {}, "CLIENT_ID", "SECRET")
 
         assert result == "gmail_xyz"
 

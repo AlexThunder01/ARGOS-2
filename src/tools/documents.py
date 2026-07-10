@@ -11,6 +11,7 @@ Dependencies:
   - Vision backend (for analyze_image)
 """
 
+import contextlib
 import csv
 import json
 import os
@@ -58,9 +59,7 @@ def read_pdf_tool(inp):
             try:
                 if "-" in page_spec:
                     start, end = page_spec.split("-", 1)
-                    page_range = range(
-                        max(0, int(start) - 1), min(total_pages, int(end))
-                    )
+                    page_range = range(max(0, int(start) - 1), min(total_pages, int(end)))
                 else:
                     page_idx = int(page_spec) - 1
                     if 0 <= page_idx < total_pages:
@@ -118,13 +117,11 @@ def read_csv_tool(inp):
 
     max_rows = 20
     if isinstance(inp, dict) and "rows" in inp:
-        try:
+        with contextlib.suppress(ValueError, TypeError):
             max_rows = min(int(inp["rows"]), 100)
-        except (ValueError, TypeError):
-            pass
 
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             # Detect delimiter
             sample = f.read(4096)
             f.seek(0)
@@ -177,7 +174,7 @@ def read_json_tool(inp):
         return f"Error: File '{path}' not found."
 
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
 
         formatted = json.dumps(data, indent=2, ensure_ascii=False)
@@ -223,15 +220,26 @@ def read_excel_tool(inp):
 
     max_rows = 20
     if isinstance(inp, dict) and "rows" in inp:
-        try:
+        with contextlib.suppress(ValueError, TypeError):
             max_rows = min(int(inp["rows"]), 100)
-        except (ValueError, TypeError):
-            pass
 
     target_sheet = inp.get("sheet") if isinstance(inp, dict) else None
 
+    def _cell_color(cell) -> str | None:
+        """Return hex fill color of a cell, or None if default/transparent."""
+        try:
+            fill = cell.fill
+            if fill and fill.fill_type not in (None, "none"):
+                fg = fill.fgColor
+                if fg.type == "rgb" and fg.rgb not in ("00000000", "FFFFFFFF", "FF000000"):
+                    return fg.rgb[-6:]  # strip alpha prefix → RRGGBB
+        except Exception:
+            pass
+        return None
+
     try:
-        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        # read_only=False needed to access cell styles (fill colors)
+        wb = openpyxl.load_workbook(path, read_only=False, data_only=True)
         sheet_names = wb.sheetnames
 
         if target_sheet and target_sheet in sheet_names:
@@ -241,15 +249,22 @@ def read_excel_tool(inp):
             target_sheet = ws.title
 
         rows = []
-        for row in ws.iter_rows(max_row=max_rows + 1, values_only=True):
-            rows.append([str(cell) if cell is not None else "" for cell in row])
+        color_notes = []  # collect notable cell colors for the output footer
+        for row_idx, row in enumerate(ws.iter_rows(max_row=max_rows + 1)):
+            cells = []
+            for col_idx, cell in enumerate(row):
+                val = str(cell.value) if cell.value is not None else ""
+                color = _cell_color(cell)
+                if color and row_idx > 0:  # skip header row for color notes
+                    col_letter = cell.column_letter
+                    color_notes.append(f"  {col_letter}{cell.row}={val!r} [bg #{color}]")
+                cells.append(val)
+            rows.append(cells)
 
         wb.close()
 
         if not rows:
-            return (
-                f"📊 Excel '{os.path.basename(path)}': Sheet '{target_sheet}' is empty."
-            )
+            return f"📊 Excel '{os.path.basename(path)}': Sheet '{target_sheet}' is empty."
 
         header = " | ".join(rows[0])
         separator = "-" * min(len(header), 120)
@@ -261,6 +276,8 @@ def read_excel_tool(inp):
             f"{header}\n{separator}\n"
         )
         output += "\n".join(data_rows)
+        if color_notes:
+            output += "\n\nCell background colors:\n" + "\n".join(color_notes[:50])
         return output
 
     except Exception as e:
@@ -288,7 +305,9 @@ def analyze_image_tool(inp):
     except ValueError as e:
         return f"Error: {e}"
 
-    question = "Describe this image in detail, extracting all visible text, numbers, labels, and data."
+    question = (
+        "Describe this image in detail, extracting all visible text, numbers, labels, and data."
+    )
     if isinstance(inp, dict) and inp.get("question"):
         question = inp["question"]
 
@@ -369,8 +388,7 @@ def query_table_tool(inp):
                 existing = [
                     c
                     for c in cols
-                    if c in result.index
-                    or (hasattr(result, "columns") and c in result.columns)
+                    if c in result.index or (hasattr(result, "columns") and c in result.columns)
                 ]
                 if existing and hasattr(result, "columns"):
                     result = result[existing]
@@ -383,9 +401,7 @@ def query_table_tool(inp):
         cols = inp["select"] if isinstance(inp["select"], list) else [inp["select"]]
         missing = [c for c in cols if c not in df.columns]
         if missing:
-            return (
-                f"Error: Columns not found: {missing}. Available: {df.columns.tolist()}"
-            )
+            return f"Error: Columns not found: {missing}. Available: {df.columns.tolist()}"
         df = df[cols]
 
     # Default: show head
@@ -437,9 +453,7 @@ def transcribe_audio_tool(inp):
     try:
         import speech_recognition as sr
     except ImportError:
-        return (
-            "Error: SpeechRecognition not installed. Run: pip install SpeechRecognition"
-        )
+        return "Error: SpeechRecognition not installed. Run: pip install SpeechRecognition"
 
     recognizer = sr.Recognizer()
     try:
@@ -452,7 +466,9 @@ def transcribe_audio_tool(inp):
         text = recognizer.recognize_google(audio, language=language)
         return f"🎤 Transcription of '{os.path.basename(path)}':\n\n{text}"
     except sr.UnknownValueError:
-        return f"Could not understand audio in '{os.path.basename(path)}' (speech unclear or silent)."
+        return (
+            f"Could not understand audio in '{os.path.basename(path)}' (speech unclear or silent)."
+        )
     except sr.RequestError as e:
         return f"Speech recognition service error: {e}"
     except Exception as e:

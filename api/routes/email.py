@@ -79,9 +79,7 @@ async def analyze_email(req: EmailAnalyzeRequest):
         # Strip markdown code fences if the LLM wrapped the JSON
         stripped = result_text.strip()
         if stripped.startswith("```"):
-            stripped = (
-                stripped.split("```")[-2] if "```" in stripped[3:] else stripped[3:]
-            )
+            stripped = stripped.split("```")[-2] if "```" in stripped[3:] else stripped[3:]
             stripped = stripped.lstrip("json").strip()
 
         try:
@@ -90,9 +88,7 @@ async def analyze_email(req: EmailAnalyzeRequest):
             logger.warning(
                 f"[email] Failed to parse LLM JSON response: {parse_err}. Raw: {stripped[:200]}"
             )
-            raise HTTPException(
-                status_code=502, detail="LLM returned an unparseable response."
-            )
+            raise HTTPException(status_code=502, detail="LLM returned an unparseable response.")
 
         priority_map = {"high": 4, "medium": 3, "low": 2, "spam": 1}
         email_prio_val = priority_map.get(analysis.priority, 3)
@@ -156,9 +152,7 @@ async def store_pending_email(data: dict):
     return {"status": "saved", "sender": data.get("sender", "")}
 
 
-@router.post(
-    "/pending_email/{message_id}/consume", dependencies=[Depends(verify_api_key)]
-)
+@router.post("/pending_email/{message_id}/consume", dependencies=[Depends(verify_api_key)])
 async def consume_pending_email(message_id: str):
     import json as _json
 
@@ -167,9 +161,7 @@ async def consume_pending_email(message_id: str):
         conn = get_connection()
         cursor = conn.cursor()
 
-        cursor.execute(
-            ph("SELECT payload FROM pending_emails WHERE msg_id = ?"), (message_id,)
-        )
+        cursor.execute(ph("SELECT payload FROM pending_emails WHERE msg_id = ?"), (message_id,))
         row = cursor.fetchone()
 
         if not row:

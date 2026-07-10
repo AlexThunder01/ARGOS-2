@@ -1,5 +1,4 @@
 import os
-import sys
 
 # Forziamo SQLite backend per i test locali
 os.environ["DB_BACKEND"] = "sqlite"
@@ -14,7 +13,7 @@ from src.core.memory import (
     retrieve_relevant_memories,
     save_extracted_memories,
 )
-from src.telegram.db import db_count_memories, db_get_all_memory_blobs
+from src.telegram.db import db_count_memories
 
 # User id fittizio per isolare questo test dagli altri dati
 TEST_USER_ID = 99999
@@ -68,9 +67,7 @@ class TestMemoryIntegration:
             return "SAFE"
 
         # 1. Salvataggio della memoria
-        save_extracted_memories(
-            user_id=TEST_USER_ID, facts=facts, llm_call_fn=mock_llm_judge
-        )
+        save_extracted_memories(user_id=TEST_USER_ID, facts=facts, llm_call_fn=mock_llm_judge)
 
         # Assicuriamoci sia finita nel DB
         assert db_count_memories(TEST_USER_ID) == 1

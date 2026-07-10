@@ -5,7 +5,7 @@ Viene aggiornato a ogni ciclo e alimenta il planner con contesto strutturato.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any
 
 
 @dataclass
@@ -25,16 +25,24 @@ class WorldState:
     """
     Stato esplicito del mondo percepito da ARGOS.
     Centralizza tutto il contesto necessario al planner.
+
+    Cost tracking (NEW):
+    - tokens_used: Cumulative token count for current task (rough estimate: len(response)/4)
+    - estimated_cost_usd: Computed as tokens_used * COST_PER_TOKEN from config
+    - Updated only during reasoning loop, reset per task
     """
 
     current_task: str = ""
     step_count: int = 0
-    active_windows: List[str] = field(default_factory=list)
-    last_screenshot_path: Optional[str] = None
-    action_history: List[ActionRecord] = field(default_factory=list)
-    last_error: Optional[str] = None
+    active_windows: list[str] = field(default_factory=list)
+    last_screenshot_path: str | None = None
+    action_history: list[ActionRecord] = field(default_factory=list)
+    last_error: str | None = None
     confidence: float = 1.0
     task_done: bool = False
+    # NEW: Cost tracking and observability
+    tokens_used: int = 0  # Total tokens consumed in this task (rough estimate: len(response)/4)
+    estimated_cost_usd: float = 0.0  # Cost = tokens_used * COST_PER_TOKEN (read from config)
 
     def record_action(self, tool: str, input: Any, result: str, success: bool):
         """Registra un'azione nel history e incrementa lo step counter."""
@@ -71,12 +79,15 @@ class WorldState:
             for a in recent:
                 status = "✅" if a.success else "❌"
                 result_preview = str(a.result)[:100].replace("\n", " ")
-                lines.append(
-                    f"    {status} [{a.timestamp}] {a.tool} → {result_preview}"
-                )
+                lines.append(f"    {status} [{a.timestamp}] {a.tool} → {result_preview}")
 
         if self.last_error:
             lines.append(f"  ⚠️  Last error: {self.last_error[:100]}")
+
+        # NEW: Include tokens/cost only if present (optional observability)
+        if self.tokens_used > 0:
+            lines.append(f"  Tokens used: {self.tokens_used}")
+            lines.append(f"  Estimated cost: ${self.estimated_cost_usd:.4f}")
 
         return "\n".join(lines)
 

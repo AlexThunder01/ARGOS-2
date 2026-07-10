@@ -15,7 +15,7 @@ sequenceDiagram
     participant U as User (CLI, Telegram, API)
     participant C as CoreAgent Engine
     participant LLM as LLM Provider (Groq, OpenAI, etc.)
-    participant M as RAG Memory (SQLite)
+    participant M as RAG Memory (SQLite / PostgreSQL)
     participant T as Advanced Tool Registry
 
     U->>C: POST / Task Input
@@ -52,21 +52,25 @@ sequenceDiagram
 
 ### 2.3 Local Direct Access (CLI)
 - **Direct Engine Access**: `scripts/main.py` bypasses the HTTP overhead and calls the `CoreAgent` natively.
-- **Memory Modes**: Supports `stateless`, `session` (RAM), and `persistent` (Shared SQLite).
+- **Memory Modes**: Supports `off` (stateless), `session` (RAM), and `persistent` (shared SQLite / PostgreSQL vector store).
 
 ---
 
 ## 3. Data Models & payloads
 
-### 3.1 Advanced Tool Registry (23 Tools)
+### 3.1 Advanced Tool Registry (32 Tools)
 
 | Tool Name | Input Sample | Output |
 |:---|:---|:---|
 | `python_repl` | `{"code": "print(math.sqrt(16))"}` | Subprocess stdout/stderr |
 | `web_scrape` | `{"url": "https://example.com"}` | Extracted readable markdown text |
-| `read_pdf` | `{"filename": "doc.pdf", "pages": "1-3"}` | Text extraction from PDF |
+| `read_pdf` | `{"filename": "doc.pdf"}` | Text extraction from PDF |
 | `bash_exec` | `{"command": "df -h"}` | Shell execution result |
-| `read_csv` | `{"filename": "data.csv"}` | Structured data headers & rows |
+| `read_csv` | `{"filename": "data.csv", "rows": 10}` | Structured data headers & rows |
+| `browser_navigate` | `{"url": "https://en.wikipedia.org"}` | Rendered page content (handles JS) |
+| `query_table` | `{"filename": "data.csv", "filter": "year == 2020"}` | Filtered/aggregated pandas output |
+| `download_file` | `{"url": "https://arxiv.org/pdf/2311.12983"}` | File saved to disk |
+| `analyze_image` | `{"filename": "chart.png"}` | Vision model description |
 
 ---
 
@@ -89,4 +93,4 @@ Powerful tools (`bash_exec`, `python_repl`, `read_pdf`, `delete_file`) on the CL
 All components (CLI, API, n8n) communicate via the same `argos_state.db` volume using **Write-Ahead Logging (WAL)** to prevent "database is locked" errors during high-concurrency bursts.
 
 ### 5.2 LLM Circuit Breaking
-The FastAPI backend uses the `pybreaker` pattern. If the LLM provider fails 3 consecutive times, the "circuit opens," shielding the system's thread pools from saturation for 60 seconds.
+The FastAPI API routes use `pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)`. If the LLM provider fails 3 consecutive times, the "circuit opens," shielding the system's thread pools from saturation for 60 seconds. Implemented in `api/routes/agent.py` and `api/routes/telegram.py`.

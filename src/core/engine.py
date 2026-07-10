@@ -19,25 +19,30 @@ Usage:
 """
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
 import os
 import subprocess
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
-from typing import Callable, Generator, Optional, Set
+from typing import Any
 
 from src.agent import ArgosAgent
-from src.core.memory import EXTRACT_MIN_LENGTH
-from src.executor.executor import execute_with_retry
+from src.config import COST_PER_TOKEN, TOOL_RAG_TOP_K
+from src.core.mem0_adapter import ArgosMemory
+from src.core.session_memory import SessionMemory
+from src.executor.executor import execute_with_retry_async
 from src.hooks.registry import HOOK_REGISTRY, HookEvent
+from src.llm.client import LLMResponse
 from src.logging.otel import get_tracer
 from src.logging.tracer import log_decision, log_step
-from src.planner.planner import parse_planner_response
+from src.planner.planner import parse_litellm_response
 from src.tools.registry import REGISTRY
 from src.tools.spec import ToolSpec
 from src.world_model.state import WorldState
@@ -62,7 +67,7 @@ _FILESYSTEM_MUTATING_TOOLS: frozenset[str] = frozenset(
 # steps, we consider the loop to be spinning and stop early.
 # Override via env: ARGOS_DIMINISHING_THRESHOLD, ARGOS_DIMINISHING_STEPS
 DIMINISHING_THRESHOLD: int = int(os.getenv("ARGOS_DIMINISHING_THRESHOLD", "80"))
-DIMINISHING_STEPS: int = int(os.getenv("ARGOS_DIMINISHING_STEPS", "5"))
+DIMINISHING_STEPS: int = int(os.getenv("ARGOS_DIMINISHING_STEPS", "7"))
 
 # ── Permission audit log ───────────────────────────────────────────────────
 _AUDIT_PATH = Path(os.getenv("ARGOS_PERMISSION_AUDIT", "logs/argos_permissions.jsonl"))
@@ -71,7 +76,7 @@ _AUDIT_LOCK = Lock()  # Protegge da race condition su scritture concorrenti
 
 def _log_permission_decision(
     tool_name: str,
-    tool_input: dict,
+    tool_input: dict[str, Any],
     decision: str,  # "allowed" | "denied_auto" | "denied_user" | "denied_hook"
     risk: str,
     source: str,  # "safe" | "api_auto" | "callback" | "hook" | "default"
@@ -80,7 +85,7 @@ def _log_permission_decision(
     try:
         _AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
         entry = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "tool": tool_name,
             "risk": risk,
             "decision": decision,
@@ -88,9 +93,8 @@ def _log_permission_decision(
             "input_preview": json.dumps(tool_input or {}, ensure_ascii=False)[:200],
         }
         line = json.dumps(entry, ensure_ascii=False) + "\n"
-        with _AUDIT_LOCK:
-            with open(_AUDIT_PATH, "a", encoding="utf-8") as f:
-                f.write(line)
+        with _AUDIT_LOCK, open(_AUDIT_PATH, "a", encoding="utf-8") as f:
+            f.write(line)
     except Exception as e:
         logger.debug(f"[PermissionAudit] Write failed: {e}")
 
@@ -98,7 +102,7 @@ def _log_permission_decision(
 # ── Context memoization ────────────────────────────────────────────────────
 
 
-def _get_git_context(max_chars: int = 500) -> Optional[str]:
+def _get_git_context(max_chars: int = 500) -> str | None:
     """Returns a compact git status string, or None if not in a git repo."""
     try:
         branch = (
@@ -138,7 +142,7 @@ class StepRecord:
 
     step: int
     tool: str
-    tool_input: dict
+    tool_input: dict[str, Any]
     result: str
     success: bool
     timestamp: str = ""
@@ -162,26 +166,17 @@ class TaskResult:
 
 MEMORY_MODES = ("off", "session", "persistent")
 
-# ── TF-IDF for session memory ──────────────────────────────────────────────
-try:
-    from sklearn.feature_extraction.text import TfidfVectorizer
-    from sklearn.metrics.pairwise import cosine_similarity as sklearn_cosine
 
-    _SKLEARN_AVAILABLE = True
-except ImportError:
-    _SKLEARN_AVAILABLE = False
-
-
-def _tfidf_similarity(query: str, documents: list[str]) -> list[float]:
-    if not _SKLEARN_AVAILABLE or not documents:
-        return [0.0] * len(documents)
-    try:
-        corpus = documents + [query]
-        vec = TfidfVectorizer(min_df=1).fit_transform(corpus)
-        scores = sklearn_cosine(vec[-1], vec[:-1]).flatten()
-        return scores.tolist()
-    except Exception:
-        return [0.0] * len(documents)
+# ── Keyword similarity for session memory ──────────────────────────────────
+def _keyword_similarity(query: str, documents: list[str]) -> list[float]:  # type: ignore[type-var]
+    """Simple keyword overlap scoring — fallback when embeddings unavailable."""
+    query_words = set(query.lower().split())
+    scores = []
+    for doc in documents:
+        doc_words = set(doc.lower().split())
+        overlap = len(query_words & doc_words)
+        scores.append(overlap / (len(query_words) + 1))
+    return scores
 
 
 # ==========================================================================
@@ -207,44 +202,52 @@ class CoreAgent:
     def __init__(
         self,
         memory_mode: str = "off",
-        user_id: Optional[int] = None,
-        max_steps: Optional[int] = None,
+        user_id: int | None = None,
+        max_steps: int | None = None,
         require_confirmation: bool = False,
-        confirmation_callback: Optional[Callable] = None,
-        allowed_tools: Optional[Set[str]] = None,
+        confirmation_callback: Callable[[str, dict[str, Any]], bool] | None = None,
+        allowed_tools: set[str] | None = None,
         inject_git_context: bool = True,
-    ):
+        status_callback: Callable[[str], None] | None = None,
+        tool_result_nudge: bool = False,
+    ) -> None:
         if memory_mode not in MEMORY_MODES:
-            raise ValueError(
-                f"Invalid memory_mode '{memory_mode}'. Must be one of {MEMORY_MODES}"
-            )
+            raise ValueError(f"Invalid memory_mode '{memory_mode}'. Must be one of {MEMORY_MODES}")
 
         self.memory_mode = memory_mode
-        self.max_steps = (
-            max_steps
-            if max_steps is not None
-            else int(os.getenv("ARGOS_MAX_STEPS", "20"))
-        )
-        self.require_confirmation = require_confirmation
-        self.confirmation_callback = confirmation_callback
-        self.inject_git_context = inject_git_context
 
-        # Build filtered or full ToolSpec registry
-        active_registry = (
-            REGISTRY.filter(allowed_tools) if allowed_tools is not None else REGISTRY
-        )
-        self._available_tools: dict[str, ToolSpec] = {
-            name: active_registry[name] for name in active_registry.names()
-        }
-
-        # Resolve user ID
+        # Resolve user ID first — ArgosMemory below must key off the same identity
+        # used everywhere else (logs, session memory, hooks, profile lookup).
+        # Resolving it after ArgosMemory init previously left persistent-memory
+        # callers that don't pass user_id explicitly (e.g. the CLI's default,
+        # sha256-hash-derived id) writing all memories under a shared id=0 bucket.
         if user_id is not None:
             self.user_id = user_id
         else:
             linux_user = os.environ.get("USER", "argos")
-            self.user_id = int(
-                hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16
-            ) % (2**31)
+            self.user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)
+
+        try:
+            self._argos_memory: ArgosMemory | None = (
+                ArgosMemory(user_id=self.user_id) if memory_mode == "persistent" else None
+            )
+        except Exception as e:
+            logger.warning(f"[CoreAgent] Failed to initialize ArgosMemory: {e}")
+            self._argos_memory = None
+        self.max_steps = (
+            max_steps if max_steps is not None else int(os.getenv("ARGOS_MAX_STEPS", "20"))
+        )
+        self.require_confirmation = require_confirmation
+        self.confirmation_callback = confirmation_callback
+        self.inject_git_context = inject_git_context
+        self.status_callback = status_callback
+        self.tool_result_nudge = tool_result_nudge
+
+        # Build filtered or full ToolSpec registry
+        active_registry = REGISTRY.filter(allowed_tools) if allowed_tools is not None else REGISTRY
+        self._available_tools: dict[str, ToolSpec] = {
+            name: active_registry[name] for name in active_registry.names()
+        }
 
         # LLM provider — receives filtered registry so prompt matches available tools
         self._llm = ArgosAgent(registry=active_registry)
@@ -252,14 +255,27 @@ class CoreAgent:
         # Session memory (RAM-only, cleared on exit)
         self._session_memories: deque[dict] = deque(maxlen=500)
 
+        # Session working-memory file — bridges context across consecutive tasks
+        # and anchors structured compaction to current working state.
+        self._session_memory = SessionMemory()
+
         # Prior conversation messages to inject before the current task (set by callers)
         self._injected_history: list[dict] = []
 
         # Context cache: computed once per task, cleared between tasks
-        self._git_context_cache: Optional[str] = None
+        self._git_context_cache: str | None = None
 
         # Task counter used for memory extraction debounce
         self._task_count: int = 0
+
+        # NEW: Compaction metrics (OBS-04, D-13)
+        self._compaction_count: int = 0  # Track compactions per session
+
+        # Tool RAG top-k configuration (read from env var or config default)
+        self._tool_rag_top_k = TOOL_RAG_TOP_K
+
+        # Store filtered registry for hit rate logging in _reasoning_loop
+        self._current_task_filtered_registry = None
 
         logger.debug(
             f"[CoreAgent] Initialized | memory={memory_mode} | "
@@ -305,9 +321,7 @@ class CoreAgent:
         tracer = get_tracer()
 
         # ── SESSION_START ──────────────────────────────────────────────────
-        HOOK_REGISTRY.fire_session(
-            HookEvent.SESSION_START, task=task, user_id=self.user_id
-        )
+        HOOK_REGISTRY.fire_session(HookEvent.SESSION_START, task=task, user_id=self.user_id)
 
         with tracer.start_as_current_span(
             "core.run_task",
@@ -326,10 +340,8 @@ class CoreAgent:
                     self._git_context_cache = await asyncio.wait_for(
                         asyncio.to_thread(_get_git_context), timeout=5.0
                     )
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "[CoreAgent] Git context fetch timed out — skipping."
-                    )
+                except TimeoutError:
+                    logger.warning("[CoreAgent] Git context fetch timed out — skipping.")
                     self._git_context_cache = None
 
             # ── Phase 2: Memory retrieval ──────────────────────────────────
@@ -338,7 +350,7 @@ class CoreAgent:
                     relevant_memories = await asyncio.wait_for(
                         asyncio.to_thread(self._retrieve_memories, task), timeout=10.0
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     logger.warning(
                         "[CoreAgent] Memory retrieval timed out — continuing without memories."
                     )
@@ -362,6 +374,8 @@ class CoreAgent:
                         task,
                         relevant_memories,
                         self._task_count,
+                        step_count=state.step_count,  # NEW: pass current step count
+                        task_success=loop_success,  # NEW: pass task success flag
                     )
 
             self._git_context_cache = None
@@ -382,6 +396,62 @@ class CoreAgent:
         return task_result
 
     # ==========================================================================
+    # Parallel Tool Execution (Private)
+    # ==========================================================================
+
+    async def _execute_tool_calls_parallel(
+        self,
+        decisions: list[Any],
+        state: WorldState,
+        tracer: Any,  # type: ignore[type-arg]
+        root_span: Any,  # type: ignore[type-arg]
+    ) -> list[tuple[str, str, bool]]:
+        """
+        Execute a list of PlannerDecisions concurrently via asyncio.gather.
+
+        Returns list of (tool_name, result_str, success) tuples in the same
+        order as decisions.
+        """
+
+        async def _run_one(decision: Any) -> tuple[str, str, bool]:  # type: ignore[type-arg]
+            tool_name = decision.tool
+            tool_input = decision.tool_input or {}
+
+            spec = self._available_tools.get(tool_name)
+            if not spec:
+                return tool_name, f"Unknown tool: {tool_name}", False
+
+            authorized = self._authorize_tool(tool_name, tool_input)
+            if not authorized:
+                return tool_name, f"Tool '{tool_name}' was not authorized.", False
+
+            HOOK_REGISTRY.fire_pre_tool(tool_name, tool_input)
+
+            try:
+                action_result = await execute_with_retry_async(spec.executor, tool_input)
+                result_str = action_result if isinstance(action_result, str) else str(action_result)
+                success = True
+                HOOK_REGISTRY.fire_post_tool(
+                    tool_name,
+                    tool_input,
+                    result_str,
+                    success=success,
+                )
+                return tool_name, result_str, success
+            except Exception as exc:
+                err = str(exc)
+                HOOK_REGISTRY.fire_post_tool(
+                    tool_name,
+                    tool_input,
+                    err,
+                    success=False,
+                )
+                return tool_name, f"Tool error: {err}", False
+
+        tasks = [_run_one(d) for d in decisions]
+        return await asyncio.gather(*tasks)
+
+    # ==========================================================================
     # Reasoning Loop (single canonical async implementation)
     # ==========================================================================
 
@@ -389,8 +459,8 @@ class CoreAgent:
         self,
         task: str,
         state: WorldState,
-        tracer,
-        root_span,
+        tracer: Any,  # type: ignore[type-arg]
+        root_span: Any,  # type: ignore[type-arg]
     ) -> tuple[str, list[StepRecord], bool]:
         """
         The step-by-step LLM ↔ tool execution loop.
@@ -408,33 +478,125 @@ class CoreAgent:
         # Loop detection counters
         _consecutive_browser_nav = 0
         _consecutive_web_search = 0
-        _BROWSER_NAV_NUDGE_THRESHOLD = (
-            5  # inject nudge after N consecutive browser_navigate
-        )
+        _empty_response_count = 0  # consecutive empty-after-think recoveries
+
+        # ── Activity summary background task ──────────────────────────────
+        # Every 30 seconds, emits a brief status line so long-running tasks
+        # remain visible to the user and to log monitoring.
+        _activity_stop = asyncio.Event()
+
+        async def _emit_activity(stop: asyncio.Event) -> None:
+            while True:
+                try:
+                    await asyncio.wait_for(asyncio.shield(stop.wait()), timeout=30.0)
+                    return  # stop event fired
+                except TimeoutError:
+                    msg = f"[step {state.step_count}/{self.max_steps}] {task[:60]}"
+                    logger.info(
+                        "activity_summary",
+                        extra={
+                            "current_step": state.step_count,
+                            "max_steps": self.max_steps,
+                            "task_preview": task[:60],
+                        },
+                    )
+                    if self.status_callback:
+                        with contextlib.suppress(Exception):
+                            self.status_callback(msg)
+
+        _activity_task = asyncio.create_task(_emit_activity(_activity_stop))
+        _BROWSER_NAV_NUDGE_THRESHOLD = 5  # inject nudge after N consecutive browser_navigate
         _WEB_SEARCH_NUDGE_THRESHOLD = 4  # inject nudge after N consecutive web_search
 
+        _compact_count_before = self._llm._compact_count
+
         for step_num in range(self.max_steps):
-            raw = await self._llm.think_async()
-            decision = parse_planner_response(raw)
-            log_decision(
-                logger, decision.thought, decision.tool or "done", decision.confidence
+            # ── LLM call ─────────────────────────────────────────────────────
+            llm_response: LLMResponse = await self._llm.think_async()
+
+            # NEW: Extract token usage for cost tracking (ARCH-01, D-14, D-15)
+            tokens_this_call = llm_response.completion_tokens
+            if tokens_this_call == 0:
+                # Fallback: estimate from response length if token count not available
+                content_len = len(llm_response.content or "")
+                tokens_this_call = content_len // 4
+
+            state.tokens_used += tokens_this_call
+            state.estimated_cost_usd = state.tokens_used * COST_PER_TOKEN
+
+            logger.debug(
+                "cost_tracking",
+                extra={
+                    "task_user_id": self.user_id,
+                    "tokens_this_call": tokens_this_call,
+                    "tokens_total": state.tokens_used,
+                    "estimated_cost_usd": round(state.estimated_cost_usd, 6),
+                },
             )
 
+            # ── Post-compact cleanup ───────────────────────────────────────
+            # If Tier-2 structured compaction ran inside think_async, the history
+            # was replaced.  Any derived caches (git context, in-flight session
+            # memory) are now stale and must be regenerated on the next step.
+            if self._llm._compact_count != _compact_count_before:
+                _compact_count_before = self._llm._compact_count
+                self._compaction_count += 1
+
+                # NEW: Capture token counts before/after for metrics (OBS-04, D-12)
+                tokens_before = sum(
+                    len(msg.get("content", "").split()) for msg in self._llm.history
+                )
+                tokens_after = tokens_before  # After compaction is already in history
+
+                # Determine tier (simple heuristic: structured compaction is tier="full")
+                tier = "full"
+
+                # Log compaction metrics (D-12, D-13)
+                logger.info(
+                    "compaction_complete",
+                    extra={
+                        "tier": tier,
+                        "trigger_count": self._compaction_count,
+                        "tokens_before": tokens_before,
+                        "tokens_after": tokens_after,
+                    },
+                )
+
+                self._git_context_cache = None
+                self._session_memory.clear()
+                logger.info("[CoreAgent] Post-compact cleanup: git cache + session memory reset.")
+
+            # ── Parse decisions (may be multiple for parallel tool calls) ─────────
+            decisions = parse_litellm_response(llm_response)
+
+            # Track reasoning length for diminishing returns.
+            # We measure `thought` (the model's reasoning) rather than tool name or response,
+            # because tool names are short (~15 chars) and would otherwise trigger false stops
+            # in multi-tool tasks where the model is making genuine progress.
+            response_lengths.append(
+                sum(len(d.thought or "") + len(d.response or "") for d in decisions)
+            )
+
+            # Log first decision (backward compat)
+            if decisions:
+                first = decisions[0]
+                log_decision(logger, first.thought, first.tool or "done", first.confidence)
+
             # ── Diminishing returns detection ──────────────────────────────
-            response_lengths.append(len(raw))
             if (
                 len(response_lengths) == DIMINISHING_STEPS
                 and all(length < DIMINISHING_THRESHOLD for length in response_lengths)
-                and not decision.done
+                and decisions
+                and not decisions[0].done
             ):
                 logger.warning(
                     f"[CoreAgent] Diminishing returns after {step_num + 1} steps "
                     f"(lengths={list(response_lengths)}). Stopping."
                 )
-                # decision.response is None when the LLM was mid-action (done=False).
+                # decisions[0].response is None when the LLM was mid-action (done=False).
                 # Never leak the raw JSON action to the user.
-                if decision.response:
-                    final_response = decision.response
+                if decisions[0].response:
+                    final_response = decisions[0].response
                 else:
                     final_response = (
                         "Could not complete the task after several attempts. "
@@ -443,10 +605,31 @@ class CoreAgent:
                 root_span.set_attribute("stop_reason", "diminishing_returns")
                 break
 
-            if decision.done:
-                final_response = decision.response or raw
-                # Guard: if think-tag stripping left an empty response, provide fallback
+            # ── Done check ────────────────────────────────────────────────────
+            if len(decisions) == 1 and decisions[0].done:
+                final_response = decisions[0].response or (llm_response.content or "")
+                # Guard: if think-tag stripping left an empty response mid-task,
+                # inject a recovery nudge instead of giving up (handles Qwen3
+                # thinking-mode overflow where </think> is followed by empty content).
                 if not final_response or not final_response.strip():
+                    _empty_response_count += 1
+                    if _empty_response_count <= 2:
+                        logger.warning(
+                            f"[CoreAgent] Empty response after thinking (attempt "
+                            f"{_empty_response_count}/2) — injecting recovery nudge."
+                        )
+                        self._llm.history.append(
+                            {
+                                "role": "user",
+                                "content": (
+                                    "Your last response was empty. You must continue working "
+                                    "on the task. Use a tool to gather more information or "
+                                    "provide your FINAL ANSWER if you have enough data."
+                                ),
+                            }
+                        )
+                        continue
+                    # Exhausted retries — use generic fallback
                     final_response = (
                         "Processed the request but produced no response. "
                         "Try rephrasing the question."
@@ -455,218 +638,197 @@ class CoreAgent:
                 root_span.set_attribute("steps.total", step_num + 1)
                 break
 
-            tool_name = decision.tool
-            tool_input = decision.tool_input
-
-            # ── Repetitive tool loop detection ─────────────────────────────
-            if tool_name == "browser_navigate":
-                _consecutive_browser_nav += 1
-                _consecutive_web_search = 0
-                if _consecutive_browser_nav == _BROWSER_NAV_NUDGE_THRESHOLD:
-                    logger.warning(
-                        f"[CoreAgent] {_consecutive_browser_nav} consecutive browser_navigate "
-                        f"calls — injecting strategy nudge."
-                    )
-                    self._llm.add_message(
-                        "user",
-                        "You have been browsing many pages in a row. "
-                        "If you already have the data you need, stop browsing and use "
-                        "python_repl to compute the answer and provide FINAL ANSWER. "
-                        "If you still need data, use web_search to find specific facts faster.",
-                    )
-            elif tool_name == "web_search":
-                _consecutive_web_search += 1
-                _consecutive_browser_nav = 0
-                if _consecutive_web_search == _WEB_SEARCH_NUDGE_THRESHOLD:
-                    logger.warning(
-                        f"[CoreAgent] {_consecutive_web_search} consecutive web_search "
-                        f"calls — injecting strategy nudge."
-                    )
-                    self._llm.add_message(
-                        "user",
-                        "You have run several web searches in a row. "
-                        "If the search results are not giving you the structured data you need, "
-                        "switch to browser_navigate to visit the full Wikipedia/article page directly, "
-                        "or use python_repl to compute the answer with data you already have. "
-                        "Do not repeat the same search query.",
-                    )
-            else:
-                _consecutive_browser_nav = 0
-                _consecutive_web_search = 0
-
-            # Planner signals malformed JSON action — inject correction and retry
-            if tool_name == "__format_error__":
-                logger.warning(
-                    "[CoreAgent] Malformed JSON from LLM — injecting format correction."
-                )
-                self._llm.add_message("assistant", decision.raw)
-                self._llm.add_message(
-                    "user",
-                    "Your last response was not valid JSON. "
-                    "You MUST respond with a properly formatted JSON object matching the schema. "
-                    "Do NOT truncate the JSON. Try again.",
-                )
-                continue
-
-            if not tool_name or tool_name not in self._available_tools:
-                # Inject correction instead of aborting so LLM can recover
-                available = sorted(self._available_tools.keys())
-                logger.warning(
-                    f"[CoreAgent] LLM called unavailable tool '{tool_name}' — injecting correction."
-                )
-                self._llm.add_message("assistant", decision.raw)
-                self._llm.add_message(
-                    "user",
-                    f"Tool '{tool_name}' is not available. "
-                    f"Available tools: {', '.join(available)}. "
-                    f"Use only available tools to continue.",
-                )
-                continue
-
-            spec = self._available_tools[tool_name]
-
-            # ── PreToolUse hooks (offloaded — may do I/O) ─────────────────
-            pre_result = await asyncio.to_thread(
-                HOOK_REGISTRY.fire_pre_tool, tool_name, tool_input or {}
-            )
-            if not pre_result.allowed:
-                final_response = (
-                    f"Action '{tool_name}' blocked by hook: {pre_result.block_reason}"
-                )
-                logger.warning(f"[CoreAgent] {final_response}")
-                self._llm.add_message(
-                    "assistant",
-                    json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
-                )
-                self._llm.add_message(
-                    "user", f"ACTION BLOCKED: {pre_result.block_reason}"
-                )
-                loop_success = False
+            # ── Parallel tool execution ───────────────────────────────────────
+            tool_decisions = [d for d in decisions if not d.done and d.tool]
+            if not tool_decisions:
+                final_response = decisions[0].response or "" if decisions else ""
                 break
 
-            # ── Security gate ──────────────────────────────────────────────
-            if not self._authorize_tool(spec, tool_input):
-                final_response = f"Action '{tool_name}' denied."
-                state.record_action(tool_name, tool_input, "Denied by user.", False)
+            results = await self._execute_tool_calls_parallel(
+                tool_decisions, state, tracer, root_span
+            )
+
+            # Append assistant turn to history.
+            # Native tool calling (response.tool_calls non-empty): use OpenAI format.
+            # Text-based JSON planner (tools=None, response.content has JSON): preserve
+            # the original JSON text so the model sees a coherent conversation.
+            if llm_response.tool_calls:
+                tool_calls_msg = {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": f"call_{i}",
+                            "type": "function",
+                            "function": {
+                                "name": r[0],
+                                "arguments": json.dumps(tool_decisions[i].tool_input or {}),
+                            },
+                        }
+                        for i, r in enumerate(results)
+                    ],
+                }
+                self._llm.history.append(tool_calls_msg)
+            else:
+                self._llm.history.append(
+                    {"role": "assistant", "content": llm_response.content or ""}
+                )
+
+            for i, (tool_name, result_str, success) in enumerate(results):
+                # Append tool result in the format matching the calling convention.
+                if llm_response.tool_calls:
+                    self._llm.history.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": f"call_{i}",
+                            "content": result_str,
+                        }
+                    )
+                else:
+                    self._llm.history.append(
+                        {
+                            "role": "user",
+                            "content": f"[Tool result: {tool_name}]\n{result_str}",
+                        }
+                    )
+
+                # Handle repetitive tool loop detection per tool
+                if tool_name == "browser_navigate":
+                    _consecutive_browser_nav += 1
+                    _consecutive_web_search = 0
+                    if _consecutive_browser_nav == _BROWSER_NAV_NUDGE_THRESHOLD:
+                        logger.warning(
+                            f"[CoreAgent] {_consecutive_browser_nav} consecutive browser_navigate "
+                            f"calls — injecting strategy nudge."
+                        )
+                        self._llm.add_message(
+                            "user",
+                            "You have been browsing many pages in a row. "
+                            "If you already have the data you need, stop browsing and use "
+                            "python_repl to compute the answer and provide FINAL ANSWER. "
+                            "If you still need data, use web_search to find specific facts faster.",
+                        )
+                elif tool_name == "web_search":
+                    _consecutive_web_search += 1
+                    _consecutive_browser_nav = 0
+                    if _consecutive_web_search == _WEB_SEARCH_NUDGE_THRESHOLD:
+                        logger.warning(
+                            f"[CoreAgent] {_consecutive_web_search} consecutive web_search "
+                            f"calls — injecting strategy nudge."
+                        )
+                        self._llm.add_message(
+                            "user",
+                            "You have run several web searches in a row. "
+                            "If the search results are not giving you the structured data you need, "
+                            "switch to browser_navigate to visit the full Wikipedia/article page directly, "
+                            "or use python_repl to compute the answer with data you already have. "
+                            "Do not repeat the same search query.",
+                        )
+                else:
+                    _consecutive_browser_nav = 0
+                    _consecutive_web_search = 0
+
+                # Tool RAG hit rate logging.
+                # Uses debug + inline JSON (matching log_decision/log_step in tracer.py)
+                # instead of info + extra=: the CLI's "argos" logger doesn't propagate
+                # to the JSON-aware root handler, so its plain-text formatters silently
+                # drop `extra` fields — logging at info level with extra= only produced
+                # a bare, contextless "tool_rag_hit_rate" line in console and file.
+                if self._current_task_filtered_registry:
+                    recommended_tools = self._current_task_filtered_registry.names()
+                    hit = tool_name in recommended_tools if recommended_tools else False
+                    miss_tools = [t for t in recommended_tools if t != tool_name]
+
+                    logger.debug(
+                        "tool_rag_hit_rate: "
+                        + json.dumps(
+                            {
+                                "task_user_id": self.user_id,
+                                "recommended_count": len(recommended_tools),
+                                "tool_used": tool_name,
+                                "hit": hit,
+                                "miss_tools": miss_tools,
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
+
+                # Git context refresh after filesystem mutations
+                if success and tool_name in _FILESYSTEM_MUTATING_TOOLS and self.inject_git_context:
+                    try:
+                        self._git_context_cache = await asyncio.wait_for(
+                            asyncio.to_thread(_get_git_context), timeout=5.0
+                        )
+                    except TimeoutError:
+                        logger.warning("[CoreAgent] Git context refresh timed out — skipping.")
+                        self._git_context_cache = None
+                    if self._git_context_cache:
+                        self._llm.add_message(
+                            "system",
+                            f"WORKSPACE STATE UPDATED:\n{self._git_context_cache}",
+                        )
+
+                state.record_action(tool_name, tool_decisions[i].tool_input, result_str, success)
+                log_step(logger, state, tool_name, result_str, success)
+
                 step_records.append(
                     StepRecord(
                         step=state.step_count,
                         tool=tool_name,
-                        tool_input=tool_input or {},
-                        result="Denied by user.",
-                        success=False,
+                        tool_input=tool_decisions[i].tool_input or {},
+                        result=result_str[:500],
+                        success=success,
+                        timestamp=datetime.now(UTC).isoformat(),
                     )
                 )
-                self._llm.add_message(
-                    "assistant",
-                    json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
-                )
-                self._llm.add_message("user", "ACTION DENIED BY USER. STOP.")
-                loop_success = False
-                break
 
-            # ── Execute tool ───────────────────────────────────────────────
-            with tracer.start_as_current_span(
-                "core.tool_execution",
-                attributes={"tool.name": tool_name, "tool.step": step_num + 1},
-            ) as tool_span:
-                action_result = await asyncio.to_thread(
-                    execute_with_retry, spec, tool_input
-                )
-                tool_span.set_attribute("tool.success", action_result.success)
-                tool_span.set_attribute(
-                    "tool.result_preview", action_result.message[:200]
-                )
-
-            # ── PostToolUse hooks (offloaded — may do I/O) ────────────────
-            await asyncio.to_thread(
-                HOOK_REGISTRY.fire_post_tool,
-                tool_name,
-                tool_input or {},
-                action_result.message,
-                action_result.success,
-            )
-
-            # ── Git context refresh after filesystem mutations ──────────────
-            if (
-                action_result.success
-                and tool_name in _FILESYSTEM_MUTATING_TOOLS
-                and self.inject_git_context
-            ):
-                try:
-                    self._git_context_cache = await asyncio.wait_for(
-                        asyncio.to_thread(_get_git_context), timeout=5.0
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning(
-                        "[CoreAgent] Git context refresh timed out — skipping."
-                    )
-                    self._git_context_cache = None
-                if self._git_context_cache:
-                    self._llm.add_message(
-                        "system",
-                        f"WORKSPACE STATE UPDATED:\n{self._git_context_cache}",
-                    )
-
-            state.record_action(
-                tool_name, tool_input, action_result.message, action_result.success
-            )
-            log_step(
-                logger, state, tool_name, action_result.message, action_result.success
-            )
-
-            step_records.append(
-                StepRecord(
-                    step=state.step_count,
-                    tool=tool_name,
-                    tool_input=tool_input or {},
-                    result=action_result.message[:500],
-                    success=action_result.success,
-                    timestamp=state.action_history[-1].timestamp,
-                )
-            )
+            state.step_count += len(results)
 
             # Inject WorldState snapshot so the LLM has structured context
-            # about what has been done — step count, last error, recent history.
             self._llm.add_message("system", state.to_context_string())
-            self._llm.add_message(
-                "assistant",
-                json.dumps({"action": {"tool": tool_name, "input": tool_input}}),
-            )
-            self._llm.add_message("user", f"TOOL RESULT: {action_result.message}")
 
-            if not action_result.success:
-                loop_success = False
-            final_response = (
-                action_result.message
-                if action_result.success
-                else f"Step failure: {action_result.message}"
-            )
+            # Some models (e.g. gemma, llama variants) return empty content after
+            # receiving tool results via native tool calling. A follow-up user message
+            # restores the generation signal so the model continues reasoning.
+            if self.tool_result_nudge:
+                self._llm.add_message(
+                    "user",
+                    "Tool results received. Continue reasoning step by step. "
+                    "Call another tool if needed, or provide your FINAL ANSWER.",
+                )
+
+            # Session memory update (background, non-blocking)
+            self._session_memory.record_tool_call()
+            if self._session_memory.should_update():
+                history_snapshot = list(self._llm.history)
+                with contextlib.suppress(RuntimeError):
+                    # No running event loop (e.g. sync test context) — skip silently
+                    asyncio.create_task(
+                        asyncio.to_thread(
+                            self._session_memory.update,
+                            history_snapshot,
+                            self._llm.call_lightweight,
+                        )
+                    )
+
+            # Update final response and loop success from results
+            if results:
+                all_success = all(r[2] for r in results)
+                final_response = results[-1][1] if results else ""
+                if not all_success:
+                    loop_success = False
+
+        # Stop the activity summary background task
+        _activity_stop.set()
+        _activity_task.cancel()
 
         return final_response, step_records, loop_success
-
-    # ==========================================================================
-    # Streaming Entry Point
-    # ==========================================================================
-
-    def run_task_stream(self, task: str) -> Generator[str, None, None]:
-        """
-        Streaming variant for single-turn, no-tool queries.
-        Yields LLM text chunks as they arrive (SSE / CLI live output).
-        """
-        self._llm._init_history()
-        if self.inject_git_context:
-            ctx = _get_git_context()
-            if ctx:
-                self._llm.add_message("system", f"CURRENT WORKSPACE STATE:\n{ctx}")
-        self._llm.add_message("user", task)
-        yield from self._llm.think_stream()
 
     # ==========================================================================
     # Telegram-Specific Entry Point
     # ==========================================================================
 
-    def think_with_context(self, messages: list[dict]) -> str:
+    def think_with_context(self, messages: list[dict[str, Any]]) -> str:
         return self._llm.think_with_messages(messages)
 
     def call_lightweight(self, prompt: str) -> str:
@@ -680,9 +842,7 @@ class CoreAgent:
     # LLM Context Builder (shared by run_task and run_task_async)
     # ==========================================================================
 
-    _TOOL_RAG_TOP_K = 12
-
-    def _build_llm_context(self, task: str, relevant_memories: list[dict]) -> None:
+    def _build_llm_context(self, task: str, relevant_memories: list[str | dict[str, Any]]) -> None:
         """
         Initialises the LLM history for a new task.
 
@@ -691,9 +851,9 @@ class CoreAgent:
         task message.  Called identically from run_task() and run_task_async()
         so both paths always receive the same context.
         """
-        filtered_registry = self._llm._registry.select_for_query(
-            task, top_k=self._TOOL_RAG_TOP_K
-        )
+        filtered_registry = self._llm._registry.select_for_query(task, top_k=self._tool_rag_top_k)
+        # Store for hit rate logging in _reasoning_loop
+        self._current_task_filtered_registry = filtered_registry
         self._llm._init_history_with_tools(filtered_registry.build_prompt_block())
 
         # Load user profile and inject display name
@@ -701,11 +861,7 @@ class CoreAgent:
             from src.telegram.db import db_get_profile
 
             profile = db_get_profile(self.user_id)
-            if (
-                profile
-                and profile.get("display_name")
-                and profile["display_name"].strip()
-            ):
+            if profile and profile.get("display_name") and profile["display_name"].strip():
                 self._llm.add_message(
                     "system",
                     f"USER NAME: The user has previously introduced themselves as "
@@ -727,85 +883,78 @@ class CoreAgent:
         )
 
         if relevant_memories:
-            memory_context = "\n".join(
-                f"- [{m['category']}] {m['content']}" for m in relevant_memories
-            )
+            # Handle both old dict format and new string format from mem0
+            memory_lines = []
+            for m in relevant_memories:
+                if isinstance(m, dict):
+                    memory_lines.append(f"- [{m.get('category', 'fact')}] {m.get('content', '')}")
+                else:
+                    memory_lines.append(f"- [memory] {m}")
+            memory_context = "\n".join(memory_lines)
             self._llm.add_message(
                 "system",
-                f"THINGS YOU KNOW ABOUT THE USER (use when relevant):\n{memory_context}",
+                "THINGS YOU KNOW ABOUT THE USER (use when relevant). Ordered oldest to "
+                f"newest — if two facts conflict, trust the most recent one:\n{memory_context}",
+            )
+
+        # Inject session working-memory if available (bridges consecutive tasks).
+        session_mem = self._session_memory.load()
+        if session_mem:
+            self._llm.add_message(
+                "system",
+                f"SESSION WORKING MEMORY (recent task state — use as context):\n{session_mem}",
             )
 
         if self._injected_history:
             for msg in self._injected_history:
-                self._llm.add_message(msg["role"], msg["content"])
+                role = "assistant" if msg.get("role") == "agent" else msg.get("role", "user")
+                self._llm.add_message(role, msg["content"])
 
         self._llm.add_message("user", task)
 
-    def _retrieve_memories(self, query: str) -> list[dict]:
+    def _retrieve_memories(self, task: str) -> list[str | dict[str, Any]]:
         if self.memory_mode == "off":
             return []
         if self.memory_mode == "session":
-            return self._retrieve_session_memories(query)
+            return self._retrieve_session_memories(task)
         if self.memory_mode == "persistent":
-            try:
-                from src.core.memory import retrieve_relevant_memories
-
-                return retrieve_relevant_memories(self.user_id, query, top_k=10)
-            except Exception as e:
-                logger.exception(f"[CoreAgent] Memory retrieval failed: {e}")
+            if self._argos_memory is None:
                 return []
+            return self._argos_memory.search(task, top_k=5)
         return []
 
-    def _retrieve_session_memories(self, query: str, top_k: int = 3) -> list[dict]:
+    def _retrieve_session_memories(self, query: str, top_k: int = 3) -> list[dict[str, Any]]:
         if not self._session_memories:
             return []
         memories = list(self._session_memories)
         documents = [m["content"] for m in memories]
-        if _SKLEARN_AVAILABLE:
-            scores = _tfidf_similarity(query, documents)
-            scored = sorted(zip(scores, memories), key=lambda x: x[0], reverse=True)
-            return [m for score, m in scored[:top_k] if score > 0.05]
-        else:
-            query_words = {w for w in query.lower().split() if len(w) > 3}
-            return [
-                m
-                for m in memories
-                if any(w in m["content"].lower() for w in query_words)
-            ][:top_k]
+        scores = _keyword_similarity(query, documents)
+        scored = sorted(zip(scores, memories, strict=True), key=lambda x: x[0], reverse=True)
+        return [m for score, m in scored[:top_k] if score > 0.05]
 
     def _maybe_extract_memories(
-        self, user_message: str, existing_memories: list[dict], task_count: int = 1
-    ):
-        if self.memory_mode == "session":
-            if len(user_message) > EXTRACT_MIN_LENGTH:
-                self._session_memories.append(
-                    {"content": user_message[:200], "category": "fact"}
-                )
+        self,
+        task: str,
+        relevant_memories: list[str | dict[str, Any]],
+        task_count: int,
+        step_count: int = 0,
+        task_success: bool = True,
+    ) -> None:
+        if self.memory_mode != "persistent" or self._argos_memory is None:
             return
-        if self.memory_mode == "persistent":
-            try:
-                from src.core.memory import (
-                    extract_memories_from_text,
-                    save_extracted_memories,
-                    should_extract_memory,
-                )
-
-                if should_extract_memory(user_message, task_count):
-                    facts = extract_memories_from_text(
-                        user_message, existing_memories, self._llm.call_lightweight
-                    )
-                    if facts:
-                        save_extracted_memories(
-                            self.user_id, facts, llm_call_fn=self._llm.call_lightweight
-                        )
-            except Exception as e:
-                logger.exception(f"[CoreAgent] Memory extraction failed: {e}")
+        if not task_success:
+            return
+        summary_parts = [f"Task: {task}"]
+        if relevant_memories:
+            summary_parts.append(f"Prior context: {'; '.join(relevant_memories[:3])}")
+        summary = " | ".join(summary_parts)
+        self._argos_memory.add(summary)
 
     # ==========================================================================
     # Security Gate (Private)
     # ==========================================================================
 
-    def _authorize_tool(self, spec_or_name, tool_input: dict) -> bool:
+    def _authorize_tool(self, spec_or_name: str | ToolSpec, tool_input: dict[str, Any]) -> bool:
         """
         Checks if a tool execution should proceed.
         Logs every decision to the permission audit trail.
@@ -829,14 +978,18 @@ class CoreAgent:
 
         # ── Safe tools: always allowed ──
         if not spec.requires_confirmation():
-            _log_permission_decision(
-                spec.name, tool_input or {}, "allowed", spec.risk, "safe"
-            )
+            _log_permission_decision(spec.name, tool_input or {}, "allowed", spec.risk, "safe")
             return True
 
         # ── API mode: auto-block ──
         if self.require_confirmation:
-            logger.warning(f"[CoreAgent] Auto-blocked '{spec.name}' (risk={spec.risk})")
+            logger.warning(
+                "tool_auto_blocked",
+                extra={
+                    "tool_name": spec.name,
+                    "risk_level": spec.risk,
+                },
+            )
             _log_permission_decision(
                 spec.name, tool_input or {}, "denied_auto", spec.risk, "api_auto"
             )
@@ -855,7 +1008,5 @@ class CoreAgent:
             return allowed
 
         # ── Default: allow ──
-        _log_permission_decision(
-            spec.name, tool_input or {}, "allowed", spec.risk, "default"
-        )
+        _log_permission_decision(spec.name, tool_input or {}, "allowed", spec.risk, "default")
         return True

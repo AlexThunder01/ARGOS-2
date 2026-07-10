@@ -1,8 +1,12 @@
 """Web search and system monitoring tools."""
 
+import logging
+
 import psutil
 
 from .helpers import _get_arg
+
+logger = logging.getLogger("argos")
 
 
 def _ddgs_search(q: str, max_results: int = 5) -> list[dict]:
@@ -41,8 +45,7 @@ def _tavily_search(q: str, max_results: int = 5) -> list[dict]:
     resp.raise_for_status()
     data = resp.json()
     return [
-        {"title": r.get("title", ""), "body": r.get("content", "")}
-        for r in data.get("results", [])
+        {"title": r.get("title", ""), "body": r.get("content", "")} for r in data.get("results", [])
     ]
 
 
@@ -69,8 +72,9 @@ def web_search_tool(query):
     if not results:
         try:
             results = _tavily_search(q)
-        except Exception:
-            pass  # Tavily also failed or not configured
+        except Exception as e:
+            logger.error(f"[web_search] Tavily fallback failed: {e}")
+            last_error = e
 
     if not results:
         return (
@@ -103,7 +107,9 @@ def get_weather_tool(query):
     try:
         # Step 1: Geocoding (City name -> Lat/Lon)
         encoded_loc = urllib.parse.quote(location)
-        geo_url = f"https://geocoding-api.open-meteo.com/v1/search?name={encoded_loc}&count=1&format=json"
+        geo_url = (
+            f"https://geocoding-api.open-meteo.com/v1/search?name={encoded_loc}&count=1&format=json"
+        )
         geo_res = requests.get(geo_url, timeout=10)
         if geo_res.status_code != 200:
             return f"Geocoding error: HTTP {geo_res.status_code}"
@@ -153,8 +159,6 @@ def get_weather_tool(query):
         }
         desc = wmo_map.get(code, f"Code {code}")
 
-        return (
-            f"Weather in {place_name} ({country}): {desc}, {temp}°C, Wind: {wind}km/h"
-        )
+        return f"Weather in {place_name} ({country}): {desc}, {temp}°C, Wind: {wind}km/h"
     except Exception as e:
         return f"Error: Weather API failed — {e}"

@@ -13,14 +13,15 @@ Tipi di evento:
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Callable, Optional
+from enum import StrEnum
+from typing import Any
 
 logger = logging.getLogger("argos.hooks")
 
 
-class HookEvent(str, Enum):
+class HookEvent(StrEnum):
     PRE_TOOL_USE = "pre_tool_use"
     POST_TOOL_USE = "post_tool_use"
     POST_TOOL_FAILURE = "post_tool_failure"
@@ -35,12 +36,13 @@ class HookResult:
     allowed: bool = True  # False se almeno un PreToolUse hook ha bloccato
     block_reason: str = ""  # Messaggio del hook che ha bloccato
     errors: list[str] = field(default_factory=list)  # Eccezioni non fatali
+    transformed_result: str | None = None  # NEW: Hook can return transformed result (D-20)
 
 
 @dataclass
 class _HookEntry:
     fn: Callable
-    tools: Optional[set[str]]  # None = tutti i tool
+    tools: set[str] | None  # None = tutti i tool
     event: HookEvent
     name: str
 
@@ -60,8 +62,8 @@ class HookRegistry:
         self,
         event: HookEvent,
         fn: Callable,
-        tools: Optional[list[str]] = None,
-        name: Optional[str] = None,
+        tools: list[str] | None = None,
+        name: str | None = None,
     ) -> None:
         """
         Registra un hook per un evento.
@@ -80,19 +82,16 @@ class HookRegistry:
         )
         self._hooks.append(entry)
         logger.debug(
-            f"[Hooks] Registered '{entry.name}' for {event.value} "
-            f"(tools={tools or 'all'})"
+            f"[Hooks] Registered '{entry.name}' for {event.value} (tools={tools or 'all'})"
         )
 
     def _matching(self, event: HookEvent, tool_name: str) -> list[_HookEntry]:
         """Restituisce gli hook che matchano evento e nome tool."""
         return [
-            h
-            for h in self._hooks
-            if h.event == event and (h.tools is None or tool_name in h.tools)
+            h for h in self._hooks if h.event == event and (h.tools is None or tool_name in h.tools)
         ]
 
-    # ─── Fire methods ─────────────────────────────────────────────────────
+    # === Fire methods ===
 
     def fire_pre_tool(self, tool_name: str, tool_input: dict) -> HookResult:
         """
@@ -129,17 +128,27 @@ class HookRegistry:
         """
         Esegue tutti i POST_TOOL_USE o POST_TOOL_FAILURE hook.
         Le eccezioni non sono fatali.
+        Se un hook ritorna una stringa non-None, viene usata come transformed_result.
         """
         event = HookEvent.POST_TOOL_USE if success else HookEvent.POST_TOOL_FAILURE
         hook_result = HookResult()
         for hook in self._matching(event, tool_name):
             try:
-                hook.fn(
+                # NEW: Capture return value from hook (D-20, D-21)
+                returned = hook.fn(
                     tool_name=tool_name,
                     tool_input=tool_input,
                     result=result,
                     success=success,
                 )
+
+                # NEW: If hook returns a non-None string, use it as transformed result (D-21, D-22)
+                if returned is not None and isinstance(returned, str):
+                    hook_result.transformed_result = returned
+                    # First transformation wins; other hooks see original result
+                    logger.info(
+                        f"[Hooks] POST_TOOL_USE transformation applied by hook for {tool_name}"
+                    )
             except Exception as e:
                 msg = f"Hook '{hook.name}' raised {type(e).__name__}: {e}"
                 hook_result.errors.append(msg)
@@ -152,9 +161,7 @@ class HookRegistry:
             try:
                 hook.fn(**kwargs)
             except Exception as e:
-                logger.warning(
-                    f"[Hooks] Session hook '{hook.name}' raised {type(e).__name__}: {e}"
-                )
+                logger.warning(f"[Hooks] Session hook '{hook.name}' raised {type(e).__name__}: {e}")
 
     def clear(self) -> None:
         """Rimuove tutti gli hook (utile nei test)."""
@@ -181,8 +188,8 @@ HOOK_REGISTRY = HookRegistry()
 
 def on(
     event: HookEvent,
-    tools: Optional[list[str]] = None,
-    name: Optional[str] = None,
+    tools: list[str] | None = None,
+    name: str | None = None,
 ) -> Callable:
     """
     Decorator per registrare un hook.

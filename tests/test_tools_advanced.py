@@ -1,7 +1,7 @@
 """
 Advanced tool and engine tests:
   - CoreAgent: max_steps default=20, ARGOS_MAX_STEPS env override, explicit override
-  - DIMINISHING_THRESHOLD=80, DIMINISHING_STEPS=5
+  - DIMINISHING_THRESHOLD=80, DIMINISHING_STEPS=7
   - read_excel: success (mocked openpyxl), wrong extension, missing file, sheet arg, rows arg
   - analyze_image: missing file, unsupported format, success (mocked vision)
   - query_table: filter, aggregate, group_by, select, invalid filter, missing file, Excel (mocked)
@@ -14,8 +14,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import json
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -55,8 +54,8 @@ class TestEngineConfig:
         assert DIMINISHING_THRESHOLD == 80
 
     def test_diminishing_steps_default(self):
-        """DIMINISHING_STEPS is 5 (more lenient than the old 3)."""
-        assert DIMINISHING_STEPS == 5
+        """DIMINISHING_STEPS is 7 (more lenient than the old 5, for reasoning models)."""
+        assert DIMINISHING_STEPS == 7
 
 
 # ==========================================================================
@@ -92,6 +91,23 @@ class TestReadExcel:
             result = TOOLS["read_excel"]({"filename": str(f)})
         assert "openpyxl" in result.lower()
 
+    @staticmethod
+    def _mock_row(values, row_num):
+        """Build a tuple of mock Cell objects (value/fill/column_letter/row) for one row.
+
+        read_excel_tool needs real Cell attributes (not raw values) since it now
+        also inspects cell.fill for background color notes.
+        """
+        cells = []
+        for i, value in enumerate(values):
+            cell = MagicMock()
+            cell.value = value
+            cell.column_letter = chr(ord("A") + i)
+            cell.row = row_num
+            cell.fill.fill_type = None
+            cells.append(cell)
+        return tuple(cells)
+
     def test_success_mocked(self, tmp_path):
         """read_excel returns sheet names, headers and rows (openpyxl mocked)."""
         f = tmp_path / "data.xlsx"
@@ -104,9 +120,9 @@ class TestReadExcel:
         mock_wb.sheetnames = ["Results", "Meta"]
         mock_wb.active = mock_ws
         mock_ws.iter_rows.return_value = [
-            ("country", "gdp"),
-            ("Italy", 2100),
-            ("France", 2700),
+            self._mock_row(("country", "gdp"), 1),
+            self._mock_row(("Italy", 2100), 2),
+            self._mock_row(("France", 2700), 3),
         ]
         mock_openpyxl.load_workbook.return_value = mock_wb
 
@@ -129,7 +145,10 @@ class TestReadExcel:
         mock_target_ws.title = "Q2"
         mock_wb.sheetnames = ["Q1", "Q2"]
         mock_wb.__getitem__ = lambda self, k: mock_target_ws  # wb["Q2"]
-        mock_target_ws.iter_rows.return_value = [("month", "revenue"), ("Apr", 500)]
+        mock_target_ws.iter_rows.return_value = [
+            self._mock_row(("month", "revenue"), 1),
+            self._mock_row(("Apr", 500), 2),
+        ]
         mock_openpyxl.load_workbook.return_value = mock_wb
 
         with patch.dict(sys.modules, {"openpyxl": mock_openpyxl}):
@@ -149,7 +168,9 @@ class TestReadExcel:
         mock_wb.sheetnames = ["Sheet1"]
         mock_wb.active = mock_ws
         # Provide more rows than the requested limit
-        all_rows = [("id",)] + [(str(i),) for i in range(50)]
+        all_rows = [self._mock_row(("id",), 1)] + [
+            self._mock_row((str(i),), i + 2) for i in range(50)
+        ]
         mock_ws.iter_rows.return_value = all_rows[:6]  # max_row=rows+1=6
         mock_openpyxl.load_workbook.return_value = mock_wb
 
@@ -157,7 +178,7 @@ class TestReadExcel:
             TOOLS["read_excel"]({"filename": str(f), "rows": 5})
 
         # iter_rows must have been called with max_row=6 (rows+1)
-        mock_ws.iter_rows.assert_called_with(max_row=6, values_only=True)
+        mock_ws.iter_rows.assert_called_with(max_row=6)
 
 
 # ==========================================================================
@@ -204,9 +225,7 @@ class TestAnalyzeImage:
         img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
 
         with patch("src.vision.analyze_image_file", return_value="Italy") as mock_vlm:
-            TOOLS["analyze_image"](
-                {"filename": str(img), "question": "What country is shown?"}
-            )
+            TOOLS["analyze_image"]({"filename": str(img), "question": "What country is shown?"})
 
         _, question_arg = mock_vlm.call_args[0]
         assert question_arg == "What country is shown?"
@@ -216,9 +235,7 @@ class TestAnalyzeImage:
         img = tmp_path / "diagram.jpg"
         img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)  # fake JPEG
 
-        with patch(
-            "src.vision.analyze_image_file", return_value="A diagram."
-        ) as mock_vlm:
+        with patch("src.vision.analyze_image_file", return_value="A diagram.") as mock_vlm:
             TOOLS["analyze_image"]({"filename": str(img)})
 
         _, question_arg = mock_vlm.call_args[0]
@@ -271,9 +288,7 @@ class TestQueryTable:
 
     def test_filter_rows(self, sample_csv):
         """filter= selects a subset of rows."""
-        result = TOOLS["query_table"](
-            {"filename": sample_csv, "filter": "continent == 'Europe'"}
-        )
+        result = TOOLS["query_table"]({"filename": sample_csv, "filter": "continent == 'Europe'"})
         assert "Italy" in result
         assert "Brazil" not in result
 
@@ -308,18 +323,14 @@ class TestQueryTable:
 
     def test_select_columns(self, sample_csv):
         """select= limits the columns in the output."""
-        result = TOOLS["query_table"](
-            {"filename": sample_csv, "select": ["country", "gdp"]}
-        )
+        result = TOOLS["query_table"]({"filename": sample_csv, "select": ["country", "gdp"]})
         assert "country" in result
         assert "gdp" in result
         assert "continent" not in result
 
     def test_invalid_filter(self, sample_csv):
         """A broken filter expression returns a helpful error."""
-        result = TOOLS["query_table"](
-            {"filename": sample_csv, "filter": "nonexistent_col == 42"}
-        )
+        result = TOOLS["query_table"]({"filename": sample_csv, "filter": "nonexistent_col == 42"})
         assert "error" in result.lower()
 
     def test_invalid_aggregate(self, sample_csv):
@@ -379,8 +390,6 @@ class TestTranscribeAudio:
         f = tmp_path / "speech.wav"
         f.write_bytes(b"RIFF" + b"\x00" * 36 + b"data" + b"\x00" * 4)
 
-        import speech_recognition as sr
-
         mock_recognizer = MagicMock()
         mock_audio = MagicMock()
         mock_recognizer.record.return_value = mock_audio
@@ -415,9 +424,7 @@ class TestTranscribeAudio:
             mock_audio_file.return_value.__exit__ = MagicMock(return_value=False)
             TOOLS["transcribe_audio"]({"filename": str(f), "language": "it-IT"})
 
-        mock_recognizer.recognize_google.assert_called_with(
-            mock_audio, language="it-IT"
-        )
+        mock_recognizer.recognize_google.assert_called_with(mock_audio, language="it-IT")
 
     def test_unknown_value_error(self, tmp_path):
         """When speech is unclear, tool returns a graceful message."""
@@ -477,9 +484,7 @@ def reset_browser_state():
     bm._state.update({"pw": None, "browser": None, "page": None})
 
 
-def _mock_page(
-    title="Test Page", url="https://example.com", body="Hello world from test."
-):
+def _mock_page(title="Test Page", url="https://example.com", body="Hello world from test."):
     page = MagicMock()
     page.title.return_value = title
     page.url = url
@@ -529,9 +534,7 @@ class TestBrowserNavigate:
         )
         bm._state["page"] = page
 
-        result = TOOLS["browser_navigate"](
-            {"url": "https://en.wikipedia.org/wiki/Python"}
-        )
+        result = TOOLS["browser_navigate"]({"url": "https://en.wikipedia.org/wiki/Python"})
         assert "Wikipedia: Python" in result
         page.goto.assert_called_once_with(
             "https://en.wikipedia.org/wiki/Python",
@@ -643,9 +646,7 @@ class TestBrowserType:
         page = _mock_page()
         bm._state["page"] = page
 
-        result = TOOLS["browser_type"](
-            {"selector": "input[name='q']", "text": "search query"}
-        )
+        result = TOOLS["browser_type"]({"selector": "input[name='q']", "text": "search query"})
         assert "search query" in result
         page.fill.assert_called_with("input[name='q']", "search query", timeout=5000)
 
@@ -656,9 +657,7 @@ class TestBrowserType:
         page = _mock_page(title="Search Results")
         bm._state["page"] = page
 
-        result = TOOLS["browser_type"](
-            {"selector": "input", "text": "query", "press_enter": True}
-        )
+        result = TOOLS["browser_type"]({"selector": "input", "text": "query", "press_enter": True})
         page.keyboard.press.assert_called_with("Enter")
         assert "Search Results" in result
 

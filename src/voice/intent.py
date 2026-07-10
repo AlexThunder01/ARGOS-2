@@ -13,7 +13,6 @@ questo modulo lo analizza per estrarre:
 
 import re
 from dataclasses import dataclass, field
-from typing import List
 
 
 @dataclass
@@ -26,9 +25,7 @@ class ParsedIntent:
     confidence: float = 1.0  # 0.0–1.0
     needs_confirmation: bool = False
     ambiguous: bool = False
-    alternatives: List[str] = field(
-        default_factory=list
-    )  # azioni alternative possibili
+    alternatives: list[str] = field(default_factory=list)  # azioni alternative possibili
 
 
 # Pattern di intenti comuni — regole deterministiche PRIMA dell'LLM

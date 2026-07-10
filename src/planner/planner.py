@@ -13,13 +13,30 @@ If the model produces free-form text (final response), it is treated as "done: t
 """
 
 import logging
+import re
 from dataclasses import dataclass
-from typing import Optional
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.llm.client import LLMResponse
 
 logger = logging.getLogger("argos")
 
+# Strip <analysis>...</analysis> scratchpad blocks before parsing.
+# The LLM may use this block as a chain-of-thought scratch area; it is never
+# part of the structured output and must not reach the parser or the user.
+_ANALYSIS_RE = re.compile(r"<analysis>.*?</analysis>", re.DOTALL | re.IGNORECASE)
+
 PLANNER_RESPONSE_SCHEMA = """
 MANDATORY RESPONSE FORMAT — ALWAYS use one of these two JSON structures:
+
+OPTIONAL: You may prepend an <analysis> block for complex reasoning before the JSON.
+It is stripped automatically and never shown to the user.
+
+<analysis>
+Your private chain-of-thought here. Think through the problem step by step.
+Consider which tool to use and why. This block is ignored by the parser.
+</analysis>
 
 1. To execute a tool action:
 {
@@ -36,7 +53,7 @@ MANDATORY RESPONSE FORMAT — ALWAYS use one of these two JSON structures:
   "done": true
 }
 
-NEVER write any text outside the JSON block.
+NEVER write any text outside the <analysis> block and the JSON block.
 """
 
 
@@ -51,11 +68,11 @@ class PlannerDecision:
     """
 
     thought: str
-    tool: Optional[str]
-    tool_input: Optional[dict]
+    tool: str | None
+    tool_input: dict[str, object] | None
     confidence: float
     done: bool
-    response: Optional[str]  # Final textual reply (when done=True)
+    response: str | None  # Final textual reply (when done=True)
     raw: str  # Raw model output (for debugging)
 
 
@@ -70,10 +87,27 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
     """
     text = raw_response.strip()
 
+    # Strip <analysis>...</analysis> scratchpad before any JSON extraction.
+    # The model may use this for chain-of-thought; it must never reach the parser.
+    if "<analysis>" in text:
+        text = _ANALYSIS_RE.sub("", text).strip()
+        if not text:
+            # Model returned only an <analysis> block — treat as no structured output
+            logger.debug("[Planner] Response was only <analysis> — treating as final text")
+            return PlannerDecision(
+                thought="(analysis block only, no JSON)",
+                tool=None,
+                tool_input=None,
+                confidence=1.0,
+                done=True,
+                response=raw_response,
+                raw=raw_response,
+            )
+
     # Tenta il parse diretto usando il nuovo estrattore basato sul conteggio parentesi
     from src.utils import extract_json
 
-    data = extract_json(text)
+    data = extract_json(text)  # type: ignore[no-untyped-call]
 
     if data:
         try:
@@ -84,6 +118,8 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
                 # If done=True but no response text and an action is present,
                 # the model is confused — treat it as an action, not a final answer.
                 if done and "response" not in data and "action" in data:
+                    # INTENTIONAL: Model sent done=True with only action; fallback to action handling
+                    # This handles confused LLM output gracefully without losing the user's intent
                     pass  # fall through to action handling below
                 else:
                     # Risposta finale
@@ -155,9 +191,7 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
     # inject a format-correction message and retry.
     import re as _re
 
-    _looks_like_action = text.startswith("{") and _re.search(
-        r'"(action|tool)"\s*:', text
-    )
+    _looks_like_action = text.startswith("{") and _re.search(r'"(action|tool)"\s*:', text)
     if _looks_like_action:
         # Try regex to salvage tool name even from truncated JSON
         _tool_match = _re.search(r'"tool"\s*:\s*"([^"]+)"', text)
@@ -168,9 +202,7 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
             try:
                 import json as _json
 
-                _salvaged_input = (
-                    _json.loads(_input_match.group(1)) if _input_match else {}
-                )
+                _salvaged_input = _json.loads(_input_match.group(1)) if _input_match else {}
             except Exception:
                 _salvaged_input = {}
             logger.warning(
@@ -214,6 +246,36 @@ def parse_planner_response(raw_response: str) -> PlannerDecision:
         response=text,
         raw=raw_response,
     )
+
+
+def parse_litellm_response(response: "LLMResponse") -> list[PlannerDecision]:
+    """
+    Converts a LLMResponse (from src/llm/client.py) into a list of PlannerDecisions.
+
+    Primary path: if response.tool_calls is non-empty, each call becomes a
+    PlannerDecision with done=False. Parallel calls produce multiple decisions.
+
+    Fallback path: if response.content is set (no tool calls), delegates to the
+    legacy parse_planner_response() so JSON-format responses still work.
+    """
+    if response.tool_calls:
+        return [
+            PlannerDecision(
+                thought="",
+                tool=tc.name,
+                tool_input=tc.arguments,
+                confidence=1.0,
+                done=False,
+                response=None,
+                raw=f"tool_call:{tc.id}",
+            )
+            for tc in response.tool_calls
+        ]
+
+    # No native tool calls — fall back to text/JSON planner
+    content = response.content or ""
+    decision = parse_planner_response(content)
+    return [decision]
 
 
 def build_system_prompt_suffix() -> str:

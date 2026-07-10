@@ -6,7 +6,6 @@ End-to-end refactored with OTel tracing and PostgreSQL support.
 import logging
 import os
 import sys
-import time
 from contextlib import asynccontextmanager
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -14,30 +13,44 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 
+import src.config  # noqa: F401 — loads .env before any other local module reads os.environ
 from api.security import verify_api_key
 from src.db.connection import DB_BACKEND, get_connection
 from src.logging.otel import init_otel
 from src.logging.tracer import setup_tracer
+from src.version import VERSION
 
 logger = logging.getLogger("argos")
 
 
 def init_db():
+    """Initialize database by running pending migrations.
+
+    Behavior: Fail-fast — if migrations fail, raises exception and server does not start.
+    This ensures deterministic database state at startup.
+    """
+    from src.db.migrations import run_migrations
+
+    conn = get_connection()
     try:
-        conn = get_connection()
-        if DB_BACKEND == "sqlite":
-            conn.execute("""CREATE TABLE IF NOT EXISTS pending_emails (
-                msg_id TEXT PRIMARY KEY,
-                payload TEXT
-            )""")
-            conn.commit()
-        # PostgreSQL schema is auto-initialized via docker-entrypoint-initdb.d
+        run_migrations(conn)
+        logger.info("✅ All migrations applied successfully")
     except Exception as e:
-        print(f"❌ Failed to initialize database: {e}")
+        logger.error(f"❌ Database migration failed at startup: {e}")
+        raise  # FAIL-FAST: server does not start if migrations fail
+    finally:
+        if DB_BACKEND == "postgres":
+            from src.db.connection import return_pg_connection
+
+            return_pg_connection(conn)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from src.logging_config import configure_json_logging
+
+    configure_json_logging()
+
     setup_tracer()
 
     # Initialize OpenTelemetry tracing
@@ -63,8 +76,20 @@ async def lifespan(app: FastAPI):
             logger.warning(f"🐘 Async pool init failed (sync fallback active): {e}")
             app.state.db_pool = None
 
-    logger.info("🚀 ARGOS API Server Initialized")
     init_db()
+    logger.info("🚀 ARGOS API Server Initialized")
+
+    # Clean up upload files older than TTL on startup
+    try:
+        from src.config import UPLOAD_TTL_HOURS
+        from src.upload import cleanup_expired
+
+        removed = cleanup_expired(UPLOAD_TTL_HOURS)
+        if removed:
+            logger.info(f"Upload cleanup: removed {removed} expired file(s)")
+    except Exception as e:
+        logger.warning(f"Upload cleanup failed (non-fatal): {e}")
+
     yield
 
     # Shutdown
@@ -79,32 +104,25 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="ARGOS API",
     description="Autonomous Remote Grid Operating System — REST Interface",
-    version="2.1.0",
+    version=VERSION,
     lifespan=lifespan,
 )
 
-from api.routes import admin, agent, dashboard, email, telegram
+from api.routes import admin, agent, dashboard, email, health, telegram, upload
 
 app.include_router(agent.router)
 app.include_router(email.router)
 app.include_router(telegram.router)
 app.include_router(admin.router)
 app.include_router(dashboard.router)
+app.include_router(upload.router)
+app.include_router(health.router)
 
-
-@app.get("/health", tags=["System"])
-async def health():
-    return {"status": "ok", "timestamp": time.time()}
-
-
-import os
 
 from fastapi.staticfiles import StaticFiles
 
 if os.path.isdir("dashboard/dist"):
-    app.mount(
-        "/", StaticFiles(directory="dashboard/dist", html=True), name="dashboard_ui"
-    )
+    app.mount("/", StaticFiles(directory="dashboard/dist", html=True), name="dashboard_ui")
 
 
 @app.get("/metrics", tags=["System"], dependencies=[Depends(verify_api_key)])
@@ -122,6 +140,6 @@ async def last_log():
     log_files = sorted(glob.glob("logs/argos_*.log"))
     if not log_files:
         raise HTTPException(status_code=404, detail="Nessun log disponibile.")
-    with open(log_files[-1], "r", encoding="utf-8") as f:
+    with open(log_files[-1], encoding="utf-8") as f:
         lines = f.readlines()
     return JSONResponse({"log_file": log_files[-1], "lines": lines[-100:]})

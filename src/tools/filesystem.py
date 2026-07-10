@@ -36,8 +36,44 @@ def read_file_tool(inp):
         return "File not found."
     if os.path.isdir(path):
         return "Target is a directory, use list_files instead."
+
+    ext = os.path.splitext(path)[1].lower()
+
+    if ext == ".docx":
+        try:
+            from docx import Document
+
+            doc = Document(path)
+            text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+            if len(text) > 4000:
+                text = text[:4000] + "\n... [truncated]"
+            return f"📄 CONTENT (docx):\n{text}"
+        except ImportError:
+            return "Error: python-docx not installed. Run: pip install python-docx"
+        except Exception as e:
+            return f"Error reading .docx: {e}"
+
+    if ext == ".pdf":
+        try:
+            from pypdf import PdfReader
+
+            reader = PdfReader(path)
+            parts = []
+            for i, page in enumerate(reader.pages[:10]):
+                t = page.extract_text()
+                if t and t.strip():
+                    parts.append(t.strip())
+            text = "\n\n".join(parts)
+            if len(text) > 4000:
+                text = text[:4000] + "\n... [truncated]"
+            return f"📄 CONTENT (pdf):\n{text}"
+        except ImportError:
+            pass  # fall through to text read
+        except Exception as e:
+            return f"Error reading .pdf: {e}"
+
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
+        with open(path, encoding="utf-8", errors="replace") as f:
             return f"📄 CONTENT:\n{f.read(3000)}"
     except Exception as e:
         return f"Error: {e}"

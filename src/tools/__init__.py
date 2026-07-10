@@ -6,7 +6,16 @@ da ToolSpec: un'unica sorgente di verità invece di tre dict sincronizzati a man
 """
 
 from .registry import REGISTRY
-from .spec import ToolInput, ToolRegistry, ToolSpec
+from .spec import ToolSpec
+
+__all__ = [
+    "REGISTRY",
+    "ToolSpec",
+    "TOOLS",
+    "TOOL_METADATA",
+    "DASHBOARD_TOOLS_WHITELIST",
+    "get_dashboard_tools",
+]
 
 # ── Backward-compatibility exports ──────────────────────────────────────────
 TOOLS = REGISTRY.as_tools_dict()

@@ -13,9 +13,17 @@ Usage:
 """
 
 import argparse
+import logging
 import os
 import re
+import subprocess
 import sys
+import time
+import urllib.request
+import warnings
+
+# LiteLLM bug: LoggingWorker drops unawaited coroutines on loop teardown
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="litellm")
 
 # Project root on sys.path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -23,6 +31,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.config import ENABLE_VOICE
 from src.core import CoreAgent
 from src.logging.tracer import setup_tracer
+from src.logging_config import configure_json_logging
 from src.utils import print_banner
 
 # ==========================================================================
@@ -83,10 +92,23 @@ Memory Modes:
         help="Maximum tool execution steps per task (default: 10)",
     )
     parser.add_argument(
+        "--attach",
+        "-a",
+        nargs="*",
+        default=[],
+        metavar="FILE",
+        help="File paths to attach (e.g. --attach report.pdf image.png)",
+    )
+    parser.add_argument(
         "prompt",
         nargs="*",
         default=None,
         help="Optional one-shot prompt (skips interactive loop)",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable verbose debug logging to console",
     )
     return parser.parse_args()
 
@@ -94,6 +116,111 @@ Memory Modes:
 # ==========================================================================
 # Main Loop
 # ==========================================================================
+
+
+_INLINE_ATTACH_RE = re.compile(r"@file:(\S+)")
+
+
+def _resolve_attachments(paths: list[str], user_id: int) -> tuple[list[str], str]:
+    """
+    Validate, copy (if needed) and register file paths as upload_ids.
+
+    Returns (upload_ids, context_block).  Prints an error and skips
+    files that fail validation so the rest of the task still runs.
+    """
+    from src.upload import build_attachment_context, save_upload, validate_upload
+
+    upload_ids: list[str] = []
+    for raw_path in paths:
+        path = os.path.abspath(raw_path)
+        if not os.path.isfile(path):
+            print(f"⚠️  Attachment not found, skipped: {raw_path}")
+            continue
+        filename = os.path.basename(path)
+        size = os.path.getsize(path)
+        try:
+            validate_upload(filename, size)
+        except ValueError as exc:
+            print(f"⚠️  Attachment rejected ({exc}), skipped: {raw_path}")
+            continue
+        with open(path, "rb") as fh:
+            content = fh.read()
+        uid = save_upload(user_id=user_id, filename=filename, content=content)
+        upload_ids.append(uid)
+
+    if not upload_ids:
+        return [], ""
+    return upload_ids, build_attachment_context(upload_ids)
+
+
+def _extract_inline_attachments(text: str, user_id: int) -> tuple[str, str]:
+    """
+    Extracts @file:/path/to/file tokens from the input text.
+    Returns (cleaned_text, attachment_context).
+    """
+    found_paths = _INLINE_ATTACH_RE.findall(text)
+    if not found_paths:
+        return text, ""
+    cleaned = _INLINE_ATTACH_RE.sub("", text).strip()
+    _, ctx = _resolve_attachments(found_paths, user_id)
+    return cleaned, ctx
+
+
+def _ensure_ollama_ready() -> None:
+    """Start Ollama and pull the embedding model if not already available.
+
+    Only runs when EMBEDDING_BASE_URL points to a local Ollama instance.
+    Failures are non-fatal — memory will just warn and skip embedding ops.
+    """
+    from src.config import EMBEDDING_BASE_URL, EMBEDDING_MODEL
+
+    if not EMBEDDING_BASE_URL or (
+        "localhost" not in EMBEDDING_BASE_URL and "127.0.0.1" not in EMBEDDING_BASE_URL
+    ):
+        return  # remote or unconfigured — nothing to manage
+
+    # Derive the Ollama root URL (strip /v1 suffix if present)
+    base = EMBEDDING_BASE_URL.rstrip("/")
+    if base.endswith("/v1"):
+        base = base[:-3]
+    health_url = f"{base}/api/tags"
+
+    def _is_running() -> bool:
+        try:
+            urllib.request.urlopen(health_url, timeout=2)
+            return True
+        except Exception:
+            return False
+
+    if not _is_running():
+        print("⚙️  Starting Ollama...", flush=True)
+        subprocess.Popen(
+            ["ollama", "serve"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        for _ in range(15):
+            time.sleep(1)
+            if _is_running():
+                break
+        else:
+            print("⚠️  Ollama did not start in time — memory embeddings unavailable.")
+            return
+
+    # Check if the model is already pulled
+    try:
+        with urllib.request.urlopen(health_url, timeout=5) as resp:
+            import json as _json
+
+            data = _json.loads(resp.read())
+        pulled = [m.get("name", "").split(":")[0] for m in data.get("models", [])]
+        model_base = EMBEDDING_MODEL.split(":")[0]
+        if model_base not in pulled:
+            print(f"⚙️  Pulling embedding model {EMBEDDING_MODEL} (first run)...", flush=True)
+            subprocess.run(["ollama", "pull", EMBEDDING_MODEL], check=False)
+    except Exception:
+        pass
 
 
 def _format_step_preview(result: str, max_len: int = 120) -> str:
@@ -112,6 +239,7 @@ def _format_step_preview(result: str, max_len: int = 120) -> str:
 
 def main():
     args = parse_args()
+    configure_json_logging(level=logging.DEBUG if args.debug else logging.WARNING)
 
     # Determine memory mode
     if args.memory:
@@ -123,6 +251,9 @@ def main():
 
     print_banner()
     logger = setup_tracer()
+
+    if memory_mode == "persistent":
+        _ensure_ollama_ready()
 
     # Initialize CoreAgent
     try:
@@ -148,9 +279,7 @@ def main():
 
         voice_ok = start_hybrid_listener()
         if not voice_ok:
-            logger.warning(
-                "Voice enabled but microphone unavailable, falling back to text input."
-            )
+            logger.warning("Voice enabled but microphone unavailable, falling back to text input.")
 
     # Status line
     mode_label = {
@@ -177,6 +306,10 @@ def main():
     # One-shot mode: execute prompt and exit
     if args.prompt:
         one_shot = " ".join(args.prompt)
+        if args.attach:
+            _, attach_ctx = _resolve_attachments(args.attach, agent.user_id)
+            if attach_ctx:
+                one_shot = f"{one_shot}\n\n{attach_ctx}"
         print("⏳ ...", end="\r")
         result = agent.run_task(one_shot)
         print(" " * 10, end="\r")
@@ -243,9 +376,7 @@ def main():
                     try:
                         from src.telegram.db import db_update_profile
 
-                        db_update_profile(
-                            agent.user_id, display_name=_name_m.group(1).capitalize()
-                        )
+                        db_update_profile(agent.user_id, display_name=_name_m.group(1).capitalize())
                     except Exception:
                         pass
                 elif _negation:
@@ -259,16 +390,21 @@ def main():
             # Inject prior conversation so the LLM retains context between tasks
             agent._injected_history = conversation_history[-10:]
 
+            # Handle @file: inline attachments
+            task_text, inline_ctx = _extract_inline_attachments(user_input, agent.user_id)
+            if inline_ctx:
+                task_text = f"{task_text}\n\n{inline_ctx}"
+            else:
+                task_text = user_input
+
             # Execute through CoreAgent
             print("⏳ ...", end="\r")
-            result = agent.run_task(user_input)
+            result = agent.run_task(task_text)
             print(" " * 10, end="\r")
 
             # Accumulate history for next turn (kept to last 10 messages)
             conversation_history.append({"role": "user", "content": user_input})
-            conversation_history.append(
-                {"role": "assistant", "content": result.response}
-            )
+            conversation_history.append({"role": "assistant", "content": result.response})
             if len(conversation_history) > 10:
                 conversation_history = conversation_history[-10:]
 

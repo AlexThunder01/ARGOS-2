@@ -65,9 +65,7 @@ def web_scrape_tool(inp):
         # Check content type
         content_type = response.headers.get("Content-Type", "")
         if "text/html" not in content_type and "text/plain" not in content_type:
-            return (
-                f"⚠️ URL returned non-text content: {content_type}. Cannot extract text."
-            )
+            return f"⚠️ URL returned non-text content: {content_type}. Cannot extract text."
 
         # Read with size limit
         content = response.text[:MAX_DOWNLOAD_BYTES]
@@ -96,10 +94,7 @@ def web_scrape_tool(inp):
 
         # Truncate
         if len(text) > MAX_OUTPUT_CHARS:
-            text = (
-                text[:MAX_OUTPUT_CHARS]
-                + f"\n\n... [truncated, {len(text)} total chars]"
-            )
+            text = text[:MAX_OUTPUT_CHARS] + f"\n\n... [truncated, {len(text)} total chars]"
 
         return f"🌐 Content from '{url}':\n\n{text}"
 
