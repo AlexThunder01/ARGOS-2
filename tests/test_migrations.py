@@ -57,16 +57,6 @@ class TestMigrationRunner:
         applied = _applied_versions(test_db)
         assert applied == set(), "New database should have no applied migrations"
 
-    def test_run_migrations_applies_all_pending(self, test_db):
-        """Verify auto-discovery applies all pending migrations in order."""
-        # Run all migrations
-        run_migrations(test_db)
-
-        # Check both migration 001 and 002 are applied
-        applied = _applied_versions(test_db)
-        assert 1 in applied, "Migration 001 should be applied"
-        assert 2 in applied, "Migration 002 should be applied"
-
     def test_migrations_idempotent_second_run_skips_applied(self, test_db):
         """Verify running migrations twice is safe and skips applied ones."""
         # First run

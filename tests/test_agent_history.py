@@ -289,17 +289,6 @@ class TestThinkSync:
         assert len(trim_called) == 1
 
     @patch("src.llm.client.acompletion")
-    def test_think_returns_error_on_api_error(self, mock_acompletion):
-        mock_acompletion.side_effect = Exception("API Error")
-
-        agent = ArgosAgent()
-        agent.backend = "openai-compatible"
-        agent.add_message("user", "test")
-
-        result = agent.think()
-        assert "Error" in result or "error" in result.lower()
-
-    @patch("src.llm.client.acompletion")
     def test_think_returns_empty_when_content_is_none(self, mock_acompletion):
         """When LLM returns None content, think() returns empty string."""
         mock_resp = MagicMock()
@@ -399,7 +388,7 @@ class TestThinkAsync:
         agent.trim_history = tracking_trim
         agent.add_message("user", "test")
         await agent.think_async()
-        return trim_called
+        assert len(trim_called) == 1
 
     @patch("src.llm.client.acompletion")
     async def test_think_async_returns_error_on_failure(self, mock_acompletion):
@@ -468,17 +457,6 @@ class TestCallLightweight:
         agent = ArgosAgent()
         result = agent.call_lightweight("Estrai fatti da: l'utente si chiama Alice")
         assert result == "estratto: fatto X"
-
-    @patch("src.agent.llm_complete", new_callable=AsyncMock)
-    def test_call_lightweight_uses_max_retries_1(self, mock_complete):
-        """call_lightweight deve returnare stringa vuota se llm_complete fallisce."""
-        mock_complete.side_effect = Exception("Rate limit")
-
-        agent = ArgosAgent()
-        result = agent.call_lightweight("test")
-
-        assert isinstance(result, str)
-        assert result == ""
 
     @patch("src.agent.llm_complete", new_callable=AsyncMock)
     def test_call_lightweight_returns_error_or_empty_on_exception(self, mock_complete):

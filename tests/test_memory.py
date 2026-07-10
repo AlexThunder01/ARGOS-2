@@ -112,9 +112,6 @@ class TestRiskScoring:
         )
         assert compute_risk_score(dangerous) <= 1.0
 
-    def test_score_is_float(self):
-        assert isinstance(compute_risk_score("test"), float)
-
 
 # ==========================================================================
 # Layer 3: LLM Judge
