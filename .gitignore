@@ -106,6 +106,9 @@ data/
 workspace/
 /tmp/
 
+# Session working-memory file (ephemeral per-session, not for VCS)
+.argos_session_memory.md
+
 # Large local TTS/ML models
 Qwen3-TTS-12Hz-1.7B-VoiceDesign/
 Qwen3-TTS-local/
@@ -122,3 +125,15 @@ Qwen3-TTS-local/
 !package-lock.json
 !tsconfig*.json
 !eslint.config.js
+.planning/
+
+# =============================================================================
+# Evaluation results
+# =============================================================================
+eval/results/*.json
+
+# =============================================================================
+# Internal planning & tooling docs (not for public repo)
+# =============================================================================
+docs/superpowers/
+.cache/
