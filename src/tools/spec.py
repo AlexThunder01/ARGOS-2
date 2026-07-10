@@ -7,10 +7,13 @@ testo AVAILABLE TOOLS nel system prompt.
 """
 
 import json
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from pydantic import BaseModel
+
+logger = logging.getLogger("argos")
 
 
 class ToolInput(BaseModel):
@@ -269,7 +272,12 @@ class ToolRegistry:
                             selected.add(companion)
 
             return self.filter(selected)
-        except Exception:
+        except Exception as e:
+            # Fails open to the full registry (better an unfiltered tool list than
+            # none), but this is silent otherwise — e.g. the embedding service being
+            # unreachable looks identical to "every tool is relevant" in the logs
+            # unless this is logged explicitly.
+            logger.warning(f"[ToolRAG] select_for_query fell back to full registry: {e}")
             return self
 
     def build_prompt_block(self, group: str | None = None) -> str:

@@ -117,6 +117,7 @@ class TestReadExcel:
         mock_wb = MagicMock()
         mock_ws = MagicMock()
         mock_ws.title = "Results"
+        mock_ws.max_row = 3
         mock_wb.sheetnames = ["Results", "Meta"]
         mock_wb.active = mock_ws
         mock_ws.iter_rows.return_value = [
@@ -143,6 +144,7 @@ class TestReadExcel:
         mock_wb = MagicMock()
         mock_target_ws = MagicMock()
         mock_target_ws.title = "Q2"
+        mock_target_ws.max_row = 2
         mock_wb.sheetnames = ["Q1", "Q2"]
         mock_wb.__getitem__ = lambda self, k: mock_target_ws  # wb["Q2"]
         mock_target_ws.iter_rows.return_value = [
@@ -165,6 +167,7 @@ class TestReadExcel:
         mock_wb = MagicMock()
         mock_ws = MagicMock()
         mock_ws.title = "Sheet1"
+        mock_ws.max_row = 51  # 1 header + 50 data rows — larger than the requested cap
         mock_wb.sheetnames = ["Sheet1"]
         mock_wb.active = mock_ws
         # Provide more rows than the requested limit

@@ -250,7 +250,11 @@ def read_excel_tool(inp):
 
         rows = []
         color_notes = []  # collect notable cell colors for the output footer
-        for row_idx, row in enumerate(ws.iter_rows(max_row=max_rows + 1)):
+        # ws.max_row reflects the sheet's real bounds; iter_rows(max_row=N) with an
+        # explicit N beyond that yields phantom empty Cell objects up to N rather
+        # than stopping at the actual data, so N must be clamped first.
+        row_limit = min(max_rows + 1, ws.max_row)
+        for row_idx, row in enumerate(ws.iter_rows(max_row=row_limit)):
             cells = []
             for col_idx, cell in enumerate(row):
                 val = str(cell.value) if cell.value is not None else ""
