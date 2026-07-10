@@ -1,7 +1,7 @@
 """
 Advanced tool and engine tests:
   - CoreAgent: max_steps default=20, ARGOS_MAX_STEPS env override, explicit override
-  - DIMINISHING_THRESHOLD=80, DIMINISHING_STEPS=5
+  - DIMINISHING_THRESHOLD=80, DIMINISHING_STEPS=7
   - read_excel: success (mocked openpyxl), wrong extension, missing file, sheet arg, rows arg
   - analyze_image: missing file, unsupported format, success (mocked vision)
   - query_table: filter, aggregate, group_by, select, invalid filter, missing file, Excel (mocked)
@@ -54,8 +54,8 @@ class TestEngineConfig:
         assert DIMINISHING_THRESHOLD == 80
 
     def test_diminishing_steps_default(self):
-        """DIMINISHING_STEPS is 5 (more lenient than the old 3)."""
-        assert DIMINISHING_STEPS == 5
+        """DIMINISHING_STEPS is 7 (more lenient than the old 5, for reasoning models)."""
+        assert DIMINISHING_STEPS == 7
 
 
 # ==========================================================================
@@ -91,6 +91,23 @@ class TestReadExcel:
             result = TOOLS["read_excel"]({"filename": str(f)})
         assert "openpyxl" in result.lower()
 
+    @staticmethod
+    def _mock_row(values, row_num):
+        """Build a tuple of mock Cell objects (value/fill/column_letter/row) for one row.
+
+        read_excel_tool needs real Cell attributes (not raw values) since it now
+        also inspects cell.fill for background color notes.
+        """
+        cells = []
+        for i, value in enumerate(values):
+            cell = MagicMock()
+            cell.value = value
+            cell.column_letter = chr(ord("A") + i)
+            cell.row = row_num
+            cell.fill.fill_type = None
+            cells.append(cell)
+        return tuple(cells)
+
     def test_success_mocked(self, tmp_path):
         """read_excel returns sheet names, headers and rows (openpyxl mocked)."""
         f = tmp_path / "data.xlsx"
@@ -103,9 +120,9 @@ class TestReadExcel:
         mock_wb.sheetnames = ["Results", "Meta"]
         mock_wb.active = mock_ws
         mock_ws.iter_rows.return_value = [
-            ("country", "gdp"),
-            ("Italy", 2100),
-            ("France", 2700),
+            self._mock_row(("country", "gdp"), 1),
+            self._mock_row(("Italy", 2100), 2),
+            self._mock_row(("France", 2700), 3),
         ]
         mock_openpyxl.load_workbook.return_value = mock_wb
 
@@ -128,7 +145,10 @@ class TestReadExcel:
         mock_target_ws.title = "Q2"
         mock_wb.sheetnames = ["Q1", "Q2"]
         mock_wb.__getitem__ = lambda self, k: mock_target_ws  # wb["Q2"]
-        mock_target_ws.iter_rows.return_value = [("month", "revenue"), ("Apr", 500)]
+        mock_target_ws.iter_rows.return_value = [
+            self._mock_row(("month", "revenue"), 1),
+            self._mock_row(("Apr", 500), 2),
+        ]
         mock_openpyxl.load_workbook.return_value = mock_wb
 
         with patch.dict(sys.modules, {"openpyxl": mock_openpyxl}):
@@ -148,7 +168,9 @@ class TestReadExcel:
         mock_wb.sheetnames = ["Sheet1"]
         mock_wb.active = mock_ws
         # Provide more rows than the requested limit
-        all_rows = [("id",)] + [(str(i),) for i in range(50)]
+        all_rows = [self._mock_row(("id",), 1)] + [
+            self._mock_row((str(i),), i + 2) for i in range(50)
+        ]
         mock_ws.iter_rows.return_value = all_rows[:6]  # max_row=rows+1=6
         mock_openpyxl.load_workbook.return_value = mock_wb
 
@@ -156,7 +178,7 @@ class TestReadExcel:
             TOOLS["read_excel"]({"filename": str(f), "rows": 5})
 
         # iter_rows must have been called with max_row=6 (rows+1)
-        mock_ws.iter_rows.assert_called_with(max_row=6, values_only=True)
+        mock_ws.iter_rows.assert_called_with(max_row=6)
 
 
 # ==========================================================================

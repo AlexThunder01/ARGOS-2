@@ -10,7 +10,6 @@ Coverage:
   - _retrieve_session_memories: TF-IDF — documento rilevante score > irrilevante
   - _tfidf_similarity()       : funzione standalone (regression test)
   - Multi-turn               : la history cresce tra add_message, trim preserva recenti
-  - run_task_stream()         : yielda chunk da think_stream
 """
 
 import os
@@ -19,10 +18,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from collections import deque
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from src.agent import ArgosAgent, _count_tokens
 from src.core.engine import CoreAgent
+from src.llm.client import LLMResponse
 
 # ==========================================================================
 # Policy nel system prompt di ArgosAgent
@@ -284,7 +284,7 @@ class TestMultiTurnHistory:
         _injected_history prima di ogni chiamata (come fa il CLI loop).
         """
         import asyncio
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import AsyncMock
 
         agent = CoreAgent(memory_mode="off", inject_git_context=False)
         agent._injected_history = [
@@ -294,7 +294,9 @@ class TestMultiTurnHistory:
 
         async def run():
             with patch.object(agent._llm, "think_async", new_callable=AsyncMock) as mock_think:
-                mock_think.return_value = '{"thought":"ok","response":"OK","done":true}'
+                mock_think.return_value = LLMResponse(
+                    content='{"thought":"ok","response":"OK","done":true}'
+                )
                 await agent.run_task_async("task che consuma la history iniettata")
 
         asyncio.run(run())
@@ -319,59 +321,3 @@ class TestMultiTurnHistory:
         assert "Alice" in contents
         assert "jazz" in contents
         assert "Linux" in contents
-
-
-# ==========================================================================
-# run_task_stream() — streaming entry point
-# ==========================================================================
-
-
-class TestRunTaskStream:
-    @patch("src.agent.requests.post")
-    def test_run_task_stream_yields_chunks(self, mock_post):
-        """run_task_stream deve yieldare almeno un chunk."""
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.iter_lines.return_value = iter(
-            [
-                b'data: {"choices": [{"delta": {"content": "chunk1"}}]}',
-                b'data: {"choices": [{"delta": {"content": " chunk2"}}]}',
-                b"data: [DONE]",
-            ]
-        )
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_post.return_value = mock_resp
-
-        agent = CoreAgent(memory_mode="off", inject_git_context=False)
-        agent._llm.backend = "openai-compatible"
-
-        chunks = list(agent.run_task_stream("test streaming"))
-
-        assert len(chunks) >= 1
-        assert "chunk1" in "".join(chunks)
-
-    @patch("src.agent.requests.post")
-    def test_run_task_stream_reinitializes_history(self, mock_post):
-        """run_task_stream deve reinizializzare la history prima di streammare."""
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.iter_lines.return_value = iter([b"data: [DONE]"])
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
-        mock_post.return_value = mock_resp
-
-        agent = CoreAgent(memory_mode="off", inject_git_context=False)
-        agent._llm.backend = "openai-compatible"
-
-        # Inquina la history
-        agent._llm.add_message("user", "vecchio messaggio")
-        agent._llm.add_message("assistant", "vecchia risposta")
-
-        list(agent.run_task_stream("nuovo task"))
-
-        # Dopo run_task_stream, la history deve contenere il nuovo task
-        user_msgs = [m for m in agent._llm.history if m["role"] == "user"]
-        assert any("nuovo task" in m["content"] for m in user_msgs)
-        # Il vecchio messaggio non deve essere nel contesto
-        assert not any("vecchio messaggio" in m["content"] for m in agent._llm.history)

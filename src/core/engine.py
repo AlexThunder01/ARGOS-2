@@ -26,7 +26,7 @@ import logging
 import os
 import subprocess
 from collections import deque
-from collections.abc import Callable, Generator
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -812,23 +812,6 @@ class CoreAgent:
         _activity_task.cancel()
 
         return final_response, step_records, loop_success
-
-    # ==========================================================================
-    # Streaming Entry Point
-    # ==========================================================================
-
-    def run_task_stream(self, task: str) -> Generator[str, None, None]:  # type: ignore[type-arg]
-        """
-        Streaming variant for single-turn, no-tool queries.
-        Yields LLM text chunks as they arrive (SSE / CLI live output).
-        """
-        self._llm._init_history()
-        if self.inject_git_context:
-            ctx = _get_git_context()
-            if ctx:
-                self._llm.add_message("system", f"CURRENT WORKSPACE STATE:\n{ctx}")
-        self._llm.add_message("user", task)
-        yield from self._llm.think_stream()
 
     # ==========================================================================
     # Telegram-Specific Entry Point

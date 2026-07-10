@@ -8,7 +8,6 @@ Architecture:
 - System prompt AVAILABLE TOOLS section generated from ToolRegistry (single source of truth).
 - trim_history() enforces a real token budget instead of a raw message count.
 - think_async() returns LLMResponse with tool_calls or content via LiteLLM.
-- think_stream() yields tokens progressively for end-to-end streaming via LiteLLM.
 - think_with_messages() and call_lightweight() use asyncio.run() for sync contexts (Telegram).
 """
 
@@ -21,7 +20,6 @@ from typing import TYPE_CHECKING, Optional
 
 from src.llm.client import LLMResponse
 from src.llm.client import complete as llm_complete
-from src.llm.client import stream as llm_stream
 from src.planner.planner import build_system_prompt_suffix
 
 from .config import (
@@ -355,27 +353,6 @@ class ArgosAgent:
         except Exception as e:
             logger.error(f"[LLM] think_async failed: {e}")
             return LLMResponse(content=f"LLM Error: {e}", tool_calls=[])
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Streaming inference (sync generator — SSE / CLI)
-    # ──────────────────────────────────────────────────────────────────────
-
-    async def think_stream(self):
-        """Streaming LLM call. Async generator yielding text chunks."""
-        self._check_time_based_mc()
-        self.trim_history()
-        self._last_llm_call_time = time.monotonic()
-
-        from src.config import LLM_API_KEY, LLM_BASE_URL
-
-        async for chunk in llm_stream(
-            messages=self.history,
-            model=self.model,
-            temperature=0.0,
-            api_key=LLM_API_KEY or None,
-            api_base=LLM_BASE_URL or None,
-        ):
-            yield chunk
 
     # ──────────────────────────────────────────────────────────────────────
     # External History Methods (Telegram Chat Module)

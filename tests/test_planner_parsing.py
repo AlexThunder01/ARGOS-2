@@ -531,8 +531,15 @@ class TestToolResultRoleRegression:
 
         asyncio.run(run())
 
-        # Engine now uses OpenAI native tool format: role="tool" with tool_call_id
-        tool_result_msgs = [m for m in agent._llm.history if m.get("role") == "tool"]
+        # This mock simulates a text-based JSON planner response (content=..., no
+        # native tool_calls), so the engine injects the tool result as role="user"
+        # rather than the OpenAI-native role="tool" format (used only when the LLM
+        # response carries actual tool_calls).
+        tool_result_msgs = [
+            m
+            for m in agent._llm.history
+            if m.get("role") == "user" and "Tool result" in (m.get("content") or "")
+        ]
         assert len(tool_result_msgs) >= 1, "Nessun tool result iniettato in history"
         assert any("risultato_echo" in (m.get("content") or "") for m in tool_result_msgs)
 
