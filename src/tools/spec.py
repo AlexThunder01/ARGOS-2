@@ -277,7 +277,11 @@ class ToolRegistry:
             # none), but this is silent otherwise — e.g. the embedding service being
             # unreachable looks identical to "every tool is relevant" in the logs
             # unless this is logged explicitly.
-            logger.warning(f"[ToolRAG] select_for_query fell back to full registry: {e}")
+            # debug, not warning: this is the CLI's default steady state (Ollama
+            # only auto-starts under --memory), so it fires on nearly every query
+            # in plain CLI mode — warning level would print it to the interactive
+            # console (tracer.py's console handler shows INFO+) on every message.
+            logger.debug(f"[ToolRAG] select_for_query fell back to full registry: {e}")
             return self
 
     def build_prompt_block(self, group: str | None = None) -> str:
