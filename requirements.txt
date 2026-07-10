@@ -15,7 +15,7 @@ pytesseract==0.3.13
 psutil==7.2.2
 
 # --- AI & Search Tools ---
-ddgs==9.12.1
+ddgs==9.14.4
 yfinance==1.2.0
 
 # --- Document Parsing (Advanced) ---
