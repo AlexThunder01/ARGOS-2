@@ -86,7 +86,12 @@ class ArgosMemory:
         if not text or not text.strip():
             return
         try:
-            self._mem0.add(text, user_id=self._user_id)
+            result = self._mem0.add(text, user_id=self._user_id)
+            events = [(r.get("event"), r.get("memory")) for r in (result or {}).get("results", [])]
+            # No exception but zero events means the extraction LLM decided there was
+            # nothing worth remembering — distinct from an actual failure, but easy to
+            # mistake for one without this line since add() returns None either way.
+            logger.debug(f"[Memory] mem0 add: {len(events)} event(s) — {events}")
         except Exception as e:
             logger.warning(f"[Memory] mem0 add failed: {e}")
 
@@ -96,7 +101,9 @@ class ArgosMemory:
             return []
         try:
             result = self._mem0.search(query, filters={"user_id": self._user_id}, limit=top_k)
-            return [r["memory"] for r in result.get("results", [])]
+            memories = [r["memory"] for r in result.get("results", [])]
+            logger.debug(f"[Memory] mem0 search {query!r}: {len(memories)} hit(s)")
+            return memories
         except Exception as e:
             logger.warning(f"[Memory] mem0 search failed: {e}")
             return []
@@ -105,7 +112,9 @@ class ArgosMemory:
         """Return all stored memory strings for this user."""
         try:
             result = self._mem0.get_all(filters={"user_id": self._user_id})
-            return [r["memory"] for r in result.get("results", [])]
+            memories = [r["memory"] for r in result.get("results", [])]
+            logger.debug(f"[Memory] mem0 get_all: {len(memories)} memories")
+            return memories
         except Exception as e:
             logger.warning(f"[Memory] mem0 get_all failed: {e}")
             return []

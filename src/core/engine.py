@@ -725,21 +725,29 @@ class CoreAgent:
                     _consecutive_browser_nav = 0
                     _consecutive_web_search = 0
 
-                # Tool RAG hit rate logging
+                # Tool RAG hit rate logging.
+                # Uses debug + inline JSON (matching log_decision/log_step in tracer.py)
+                # instead of info + extra=: the CLI's "argos" logger doesn't propagate
+                # to the JSON-aware root handler, so its plain-text formatters silently
+                # drop `extra` fields — logging at info level with extra= only produced
+                # a bare, contextless "tool_rag_hit_rate" line in console and file.
                 if self._current_task_filtered_registry:
                     recommended_tools = self._current_task_filtered_registry.names()
                     hit = tool_name in recommended_tools if recommended_tools else False
                     miss_tools = [t for t in recommended_tools if t != tool_name]
 
-                    logger.info(
-                        "tool_rag_hit_rate",
-                        extra={
-                            "task_user_id": self.user_id,
-                            "recommended_count": len(recommended_tools),
-                            "tool_used": tool_name,
-                            "hit": hit,
-                            "miss_tools": miss_tools,
-                        },
+                    logger.debug(
+                        "tool_rag_hit_rate: "
+                        + json.dumps(
+                            {
+                                "task_user_id": self.user_id,
+                                "recommended_count": len(recommended_tools),
+                                "tool_used": tool_name,
+                                "hit": hit,
+                                "miss_tools": miss_tools,
+                            },
+                            ensure_ascii=False,
+                        )
                     )
 
                 # Git context refresh after filesystem mutations
