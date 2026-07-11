@@ -140,7 +140,9 @@ cp .env.example .env
 
 | Variable | Required | Description |
 |---|---|---|
-| `N8N_API_KEY` | For n8n injection | API key created in the n8n UI (Settings → API) |
+| `N8N_API_KEY` | For n8n injection | API key created in the n8n UI (Settings → API). Used by `scripts/inject_n8n.py`/`clear_n8n.py`, which run on the host |
+| `N8N_HOST` / `N8N_PORT` | For n8n injection | Where those same scripts reach n8n from the host (default: `localhost` / `5678`) |
+| `N8N_BASE_URL` | For the running app | Read by `/health` and `/run_async`'s webhook delivery — these run *inside* the `argos-api` container, so this must be the docker-compose service name (`http://n8n:5678`), not `localhost`. Leave empty to disable the integration |
 | `NGROK_AUTHTOKEN` | For webhooks | ngrok auth token for external webhook tunneling |
 | `NGROK_DOMAIN` | For webhooks | Your static ngrok domain |
 
@@ -330,7 +332,7 @@ ARGOS uses a three-tier pipeline to keep the conversation context within the LLM
 Additional context features:
 - **Time-based micro-compact**: if >`ARGOS_MC_TTL_MINUTES` of idle time pass since the last LLM call (cache TTL likely expired), micro-compact fires pre-emptively before the next call.
 - **Session working memory**: every `ARGOS_SESSION_MEMORY_UPDATE_EVERY` tool calls, a background task writes a compact task-state summary to `.argos_session_memory.md` via the lightweight model. Injected into the next task's context to bridge consecutive sessions.
-- **Tool RAG**: at the start of each task, only the top-12 most relevant tools (TF-IDF cosine similarity) are injected into the system prompt. The `search_tools` tool lets the model discover additional tools at runtime if it suspects it needs one not in its current context.
+- **Tool RAG**: at the start of each task, only the top `TOOL_RAG_TOP_K` most relevant tools (default 12; embedding cosine similarity, via `EMBEDDING_BASE_URL`) are injected into the system prompt. The `search_tools` tool lets the model discover additional tools at runtime if it suspects it needs one not in its current context. **Fails open**: if the embedding service is unreachable, all 33 tools are injected instead — the CLI's default mode (no `--memory`) never starts the embedding backend, so this is its normal steady state, not an edge case.
 - **`<analysis>` scratchpad**: the planner schema allows the model to prepend an `<analysis>` block for chain-of-thought reasoning. It is stripped automatically before parsing and never reaches the user.
 - **Post-compact cleanup**: after a structured compaction, git context cache and session memory are reset so stale derived state is not carried into the compacted history.
 
@@ -367,7 +369,7 @@ Security layers:
 5. **Rate Limiting** — atomic sliding-window quotas via PostgreSQL (no Redis required)
 6. **Docker Sandbox** — code execution isolated in ephemeral containers via `docker-socket-proxy` (read-only workspace, no network, 128 MB RAM)
 7. **Non-Root Container** — the API container runs as a restricted `argos` user
-8. **Circuit Breaker** — `pybreaker` on API routes prevents thread pool saturation when LLM is down
+8. **LLM Retry** — exponential backoff (`tenacity`) around LLM calls absorbs transient failures. (A `CircuitBreaker` class exists in `src/resilience/` but isn't wired into any route yet — treat it as available for future work, not an active protection.)
 
 ---
 
