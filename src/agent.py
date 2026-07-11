@@ -318,15 +318,6 @@ class ArgosAgent:
         self.history = [system_msg] + list(reversed(kept))
 
     # ──────────────────────────────────────────────────────────────────────
-    # Synchronous inference (CLI / Telegram)
-    # ──────────────────────────────────────────────────────────────────────
-
-    def think(self) -> str:
-        """Sync wrapper for CLI use. Returns text content of the LLM response."""
-        response = asyncio.run(self.think_async())
-        return response.content or ""
-
-    # ──────────────────────────────────────────────────────────────────────
     # Async inference (FastAPI — non-blocking)
     # ──────────────────────────────────────────────────────────────────────
 

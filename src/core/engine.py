@@ -25,6 +25,7 @@ import json
 import logging
 import os
 import subprocess
+import uuid
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -319,6 +320,12 @@ class CoreAgent:
         via asyncio.to_thread so the FastAPI event loop is never blocked.
         """
         tracer = get_tracer()
+
+        # Correlate every log line emitted during this task (ContextVar, so
+        # concurrent tasks on the same event loop each keep their own value).
+        from src.logging_config import set_trace_id
+
+        set_trace_id(uuid.uuid4().hex[:12])
 
         # ── SESSION_START ──────────────────────────────────────────────────
         HOOK_REGISTRY.fire_session(HookEvent.SESSION_START, task=task, user_id=self.user_id)

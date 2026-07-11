@@ -167,17 +167,6 @@ class HookRegistry:
         """Rimuove tutti gli hook (utile nei test)."""
         self._hooks.clear()
 
-    def list_hooks(self) -> list[dict]:
-        """Restituisce un sommario degli hook registrati (per il dashboard)."""
-        return [
-            {
-                "name": h.name,
-                "event": h.event.value,
-                "tools": sorted(h.tools) if h.tools else "all",
-            }
-            for h in self._hooks
-        ]
-
 
 # ── Istanza globale ────────────────────────────────────────────────────────
 HOOK_REGISTRY = HookRegistry()
