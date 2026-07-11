@@ -67,6 +67,12 @@ Memory Modes:
   (default)     Stateless — each command is isolated
   --session     Ephemeral — RAM-only memory for the current session
   --memory      Persistent — full RAG memory saved to database
+
+--memory requires --chat ID or --new-chat: each chat is its own isolated
+memory bucket, so separate conversations never mix each other's facts.
+  python3 scripts/main.py --memory --new-chat        # start a new chat
+  python3 scripts/main.py --memory --chat 3          # resume chat 3
+  python3 scripts/main.py --list-chats               # see existing chats
         """,
     )
     memory_group = parser.add_mutually_exclusive_group()
@@ -84,7 +90,27 @@ Memory Modes:
         "--user-id",
         type=int,
         default=None,
-        help="Override the auto-generated user ID (default: sha256 hash of $USER)",
+        help="Override the auto-generated user ID (default: sha256 hash of $USER). "
+        "Ignored with --memory if --chat/--new-chat is also given.",
+    )
+    chat_group = parser.add_mutually_exclusive_group()
+    chat_group.add_argument(
+        "--chat",
+        type=int,
+        default=None,
+        metavar="ID",
+        help="Resume an existing chat by id (requires --memory). Each chat is an "
+        "isolated persistent-memory bucket — see --list-chats.",
+    )
+    chat_group.add_argument(
+        "--new-chat",
+        action="store_true",
+        help="Create a new isolated chat and use it (requires --memory).",
+    )
+    parser.add_argument(
+        "--list-chats",
+        action="store_true",
+        help="List existing chats (id, created, last used) and exit.",
     )
     parser.add_argument(
         "--max-steps",
@@ -265,6 +291,26 @@ def main():
         stream=third_party_log, level=logging.DEBUG if args.debug else logging.WARNING
     )
 
+    # Ensure the schema is current — only the API server's lifespan runs
+    # migrations otherwise, so a CLI-only setup would never get new tables
+    # (like argos_chats below) created.
+    from src.db.connection import get_connection
+    from src.db.migrations import run_migrations
+
+    run_migrations(get_connection())
+
+    if args.list_chats:
+        from src.core.chats import list_chats
+
+        chats = list_chats()
+        if not chats:
+            print("Nessuna chat salvata. Usa --memory --new-chat per crearne una.")
+        else:
+            print(f"{'ID':<6}{'Creata':<22}{'Ultimo uso':<22}")
+            for c in chats:
+                print(f"{c['id']:<6}{str(c['created_at']):<22}{str(c['last_used_at']):<22}")
+        return
+
     # Determine memory mode
     if args.memory:
         memory_mode = "persistent"
@@ -272,6 +318,33 @@ def main():
         memory_mode = "session"
     else:
         memory_mode = "off"
+
+    # Each --memory chat is its own isolated persistent-memory bucket (its id
+    # becomes the CoreAgent user_id) — required explicitly so unrelated
+    # conversations never silently mix each other's facts, which used to
+    # happen because every --memory invocation shared one $USER-derived id.
+    resolved_user_id = args.user_id
+    if memory_mode == "persistent":
+        from src.core.chats import chat_exists, create_chat, touch_chat
+
+        if args.new_chat:
+            resolved_user_id = create_chat()
+            print(f"🆕 Nuova chat creata: #{resolved_user_id}")
+        elif args.chat is not None:
+            if not chat_exists(args.chat):
+                print(f"❌ Chat #{args.chat} non trovata.")
+                print(
+                    "   Usa --list-chats per vedere le chat esistenti, o --new-chat per crearne una."
+                )
+                return
+            touch_chat(args.chat)
+            resolved_user_id = args.chat
+        else:
+            print(
+                "❌ --memory richiede --chat ID (per riprendere una chat) o --new-chat (per crearne una)."
+            )
+            print("   Usa --list-chats per vedere le chat esistenti.")
+            return
 
     print_banner()
     logger = setup_tracer()
@@ -283,7 +356,7 @@ def main():
     try:
         agent = CoreAgent(
             memory_mode=memory_mode,
-            user_id=args.user_id,
+            user_id=resolved_user_id,
             max_steps=args.max_steps,
             confirmation_callback=cli_confirmation_callback,
         )
