@@ -266,6 +266,30 @@ async def tools_stats():
     }
 
 
+@router.post("/chats", dependencies=[Depends(verify_api_key)])
+async def create_chat_route():
+    from src.core.chats import create_chat, get_chat
+
+    chat_id = await asyncio.to_thread(create_chat)
+    return await asyncio.to_thread(get_chat, chat_id)
+
+
+@router.get("/chats", dependencies=[Depends(verify_api_key)])
+async def list_chats_route():
+    from src.core.chats import list_chats
+
+    return await asyncio.to_thread(list_chats)
+
+
+@router.get("/chats/{chat_id}/messages", dependencies=[Depends(verify_api_key)])
+async def get_chat_messages_route(chat_id: int):
+    from src.core.chats import chat_exists, get_messages
+
+    if not await asyncio.to_thread(chat_exists, chat_id):
+        raise HTTPException(status_code=404, detail="Chat not found")
+    return await asyncio.to_thread(get_messages, chat_id)
+
+
 from pydantic import BaseModel
 
 

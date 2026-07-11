@@ -140,3 +140,47 @@ class TestDashboardStats:
         data = r.json()
         assert "model" in data
         assert "version" in data
+
+
+class TestChatRoutes:
+    def test_create_chat_returns_metadata_with_null_title(self, patch_db):
+        from src.db.migrations import run_migrations
+
+        run_migrations(patch_db)
+
+        r = client.post("/api/chats")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["title"] is None
+        assert "id" in data
+        assert "created_at" in data
+        assert "last_used_at" in data
+
+    def test_list_chats_includes_created_chat(self, patch_db):
+        from src.db.migrations import run_migrations
+
+        run_migrations(patch_db)
+
+        created = client.post("/api/chats").json()
+        r = client.get("/api/chats")
+        assert r.status_code == 200
+        ids = [c["id"] for c in r.json()]
+        assert created["id"] in ids
+
+    def test_get_messages_empty_for_new_chat(self, patch_db):
+        from src.db.migrations import run_migrations
+
+        run_migrations(patch_db)
+
+        created = client.post("/api/chats").json()
+        r = client.get(f"/api/chats/{created['id']}/messages")
+        assert r.status_code == 200
+        assert r.json() == []
+
+    def test_get_messages_404s_for_nonexistent_chat(self, patch_db):
+        from src.db.migrations import run_migrations
+
+        run_migrations(patch_db)
+
+        r = client.get("/api/chats/999999/messages")
+        assert r.status_code == 404
