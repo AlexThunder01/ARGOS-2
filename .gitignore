@@ -1,7 +1,8 @@
 # =============================================================================
-# Superpowers brainstorming (visual companion mockups)
+# Superpowers brainstorming (visual companion mockups) & git worktrees
 # =============================================================================
 .superpowers/
+.worktrees/
 
 # =============================================================================
 # Python
