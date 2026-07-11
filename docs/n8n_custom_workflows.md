@@ -2,7 +2,7 @@
 
 ## Overview
 
-n8n serves as an **OAuth2 credential manager and webhook router** for ARGOS result delivery. n8n does NOT orchestrate agent reasoning, make LLM calls, or invoke tools directly. ARGOS maintains full task execution autonomy.
+n8n serves as a **credential manager and webhook router** for ARGOS result delivery. n8n does NOT orchestrate agent reasoning, make LLM calls, or invoke tools directly. ARGOS maintains full task execution autonomy.
 
 ---
 
@@ -37,9 +37,7 @@ Task Complete
 ```
 Task Result (JSON)
     ↓
-ARGOS Credential Validation (cred_id must not be None)
-    ↓
-ARGOS OAuth2 Check (verify authorization)
+ARGOS n8n Reachability Check (only if N8N_BASE_URL is set)
     ↓
 HTTP POST to n8n Webhook URL
     ↓
@@ -55,47 +53,22 @@ Downstream Action (Send email, update database, etc.)
 - **No agent loop feedback**: n8n cannot request ARGOS to continue a task or provide additional steps
 - **No mid-flight modification**: n8n cannot modify task execution while it's running
 - **Async webhook delivery**: Result delivery is fire-and-forget; if webhook delivery fails, result is not retried
-- **Credential immutability**: Once a task starts executing, credential changes don't affect the execution
 
 ---
 
-## Credential Creation Flow (with Validation)
+## Provisioning n8n Workflows (`scripts/inject_n8n.py`)
 
-This workflow demonstrates how credentials are safely created and validated:
-
-### 1. User Creates Credential in n8n Dashboard
-
-User logs into n8n, navigates to **Credentials**, and creates an OAuth credential:
-- Credentials are stored in n8n's database
-- n8n returns a `cred_id` (unique identifier)
-
-### 2. ARGOS Validates Credential
-
-When `POST /run_async` is called with a webhook URL that requires credentials:
-
-1. **Credential ID Check**: ARGOS validates that `cred_id is not None`
-   - If `cred_id` is None after creation, workflow activation fails immediately
-   - Explicit error message: "n8n credential creation returned None cred_id — aborting workflow activation"
-   - This prevents silent failures where credentials silently fail to initialize
-
-2. **OAuth2 Authorization Check**: ARGOS verifies authorization status
-   - GET request to `{N8N_BASE_URL}/api/v1/oauth2/authorize`
-   - If authorization status is not 200 or 204, workflow activation fails
-   - Explicit error message: "n8n OAuth2 authorization failed: HTTP {status_code}"
-
-3. **Webhook Delivery**: Only after both checks pass, ARGOS POSTs result to the webhook URL
-
-### 3. Error Handling
-
-All credential and OAuth checks use the `[n8n]` logger prefix for easy filtering:
+Credential creation (`create_telegram_credential`, `create_gmail_credential`) is a separate,
+one-time **setup** step — it patches a workflow JSON template with a freshly created n8n
+credential ID and imports it via n8n's API. It runs standalone (`python3 scripts/inject_n8n.py`),
+authenticated with `N8N_API_KEY`/`N8N_HOST`/`N8N_PORT`, and is unrelated to the `/run_async`
+request path: nothing produced there flows into a running task's webhook payload, and
+`/run_async` performs no credential validation of its own — only the reachability check below.
 
 ```
-logger.error("[n8n] n8n credential creation returned None cred_id — aborting workflow activation")
-logger.error("[n8n] n8n OAuth2 authorization failed: HTTP 401")
-logger.info("[n8n] OAuth2 authorization verified")
+logger.error("[n8n] n8n unreachable: HTTP 503")
+logger.info("[n8n] Reachability verified")
 ```
-
-Errors are logged before webhook delivery, preventing async failures from going unnoticed.
 
 ---
 
@@ -216,8 +189,8 @@ This is a typical n8n workflow using ARGOS:
 
 | Issue | Cause | Solution |
 |-------|-------|----------|
-| "n8n credential creation returned None cred_id" | Credential creation failed in n8n | Verify credential was saved in n8n dashboard; check n8n logs |
-| "n8n OAuth2 authorization failed: HTTP 401" | OAuth token is expired or invalid | Re-authenticate in n8n; verify `N8N_BASE_URL` is correct |
+| `inject_n8n.py` fails to create a credential | Credential creation rejected by n8n | Verify `N8N_API_KEY` is valid and not expired; check n8n logs |
+| "n8n unreachable: HTTP xxx" | n8n instance down or `N8N_BASE_URL` wrong | Verify n8n is running and `N8N_BASE_URL` points to it |
 | Webhook delivery timeout | Webhook URL is unreachable or slow | Verify webhook URL is publicly accessible; check n8n webhook listener is running |
 | "N8N_BASE_URL is empty" | n8n is not configured | Set `N8N_BASE_URL` in `.env` and restart server |
 

@@ -121,8 +121,10 @@ def _check_n8n() -> str:
         return "unconfigured"
 
     try:
+        # /healthz is n8n's actual health endpoint — /api/v1/health doesn't
+        # exist (404) on any n8n instance, it was never a real n8n API path.
         resp = requests.get(
-            f"{N8N_BASE_URL.rstrip('/')}/api/v1/health",
+            f"{N8N_BASE_URL.rstrip('/')}/healthz",
             timeout=N8N_CHECK_TIMEOUT,
         )
         if resp.status_code < 400:
