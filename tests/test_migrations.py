@@ -75,8 +75,8 @@ class TestMigrationRunner:
         run_migrations(test_db)
         applied = _applied_versions(test_db)
 
-        # Should have versions 1, 2, and 3
-        assert applied == {1, 2, 3}, f"Expected {{1, 2, 3}}, got {applied}"
+        # Should have versions 1, 2, 3, and 4
+        assert applied == {1, 2, 3, 4}, f"Expected {{1, 2, 3, 4}}, got {applied}"
 
 
 class TestFeatureParity:
