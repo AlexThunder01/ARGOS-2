@@ -70,18 +70,6 @@ class WorkflowsConfig:
         return self._data.get("telegram_assistant", {})
 
     @property
-    def telegram_bot_name(self) -> str:
-        return (
-            self._data.get("telegram_assistant", {})
-            .get("identity", {})
-            .get("bot_name", "AI Assistant")
-        )
-
-    @property
-    def telegram_persona(self) -> str:
-        return self._data.get("telegram_assistant", {}).get("identity", {}).get("persona", "")
-
-    @property
     def telegram_welcome_message(self) -> str:
         return (
             self._data.get("telegram_assistant", {})

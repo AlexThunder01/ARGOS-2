@@ -7,62 +7,8 @@ breve per gestire le conversazioni vocali multi-turno.
 
 import os
 import subprocess
-from dataclasses import dataclass, field
 
 import requests
-
-
-@dataclass
-class VoiceContext:
-    """
-    Buffer di contesto breve per interazioni vocali.
-    Mantiene le ultime N interazioni per gestire follow-up.
-    """
-
-    max_turns: int = 3
-    history: list[dict] = field(default_factory=list)
-
-    def add_turn(self, user_text: str, agent_response: str):
-        self.history.append({"user": user_text, "agent": agent_response})
-        if len(self.history) > self.max_turns:
-            self.history = self.history[-self.max_turns :]
-
-    def get_context_string(self) -> str:
-        if not self.history:
-            return ""
-        lines = ["[Contesto vocale recente]"]
-        for turn in self.history:
-            lines.append(f"  User: {turn['user']}")
-            lines.append(f"  Argos: {turn['agent'][:100]}")
-        return "\n".join(lines)
-
-    def clear(self):
-        self.history = []
-
-
-def init_stt():
-    """Inizializza il motore Speech-to-Text. Ritorna (recognizer, is_active)."""
-    try:
-        from src.utils import no_alsa_err
-
-        with no_alsa_err():
-            import speech_recognition as sr
-
-            recognizer = sr.Recognizer()
-            # Ritornato al default (0.8) per essere scattante
-            recognizer.pause_threshold = 0.8
-            # Assolutamente fondamentale per evitare che il mic resti acceso per 15s credendo che il rumore di fondo sia voce
-            recognizer.dynamic_energy_threshold = True
-            try:
-                with sr.Microphone():
-                    pass
-                return recognizer, True
-            except Exception:
-                print("⚠️  Microfono non rilevato.")
-                return recognizer, False
-    except ImportError:
-        print("❌ Mancano librerie voce (SpeechRecognition).")
-        return None, False
 
 
 def _transcribe_audio(temp_filename: str, language: str) -> str | None:

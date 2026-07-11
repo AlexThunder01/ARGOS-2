@@ -2,16 +2,8 @@ import contextlib
 import json
 import os
 import platform
-import shutil
 import sys
 import time
-
-from .config import ENABLE_VOICE, LLM_BACKEND
-
-
-def check_system_deps():
-    if ENABLE_VOICE and not shutil.which("mpg123"):
-        print("⚠️  WARNING: 'mpg123' not found. Audio playback will be unavailable.")
 
 
 @contextlib.contextmanager
@@ -88,18 +80,6 @@ def extract_json(text):
                 except json.JSONDecodeError:
                     return None
     return None
-
-
-def normalize_path(path):
-    # Usato solo per visualizzazione log, la logica vera è in tools.py
-    if not path:
-        return ""
-    return os.path.basename(str(path).strip().replace("\\", "/"))
-
-
-def detect_backend():
-    """Rileva backend attivo."""
-    return LLM_BACKEND
 
 
 def print_banner():
