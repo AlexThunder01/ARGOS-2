@@ -380,6 +380,12 @@ class CoreAgent:
 
             self._git_context_cache = None
             self._injected_history = []
+            # Close any browser session left open by this task so it can't leak
+            # into the next one (e.g. a stale page answering browser_get_content
+            # for an unrelated later task). No-op if the browser was never used.
+            from src.tools.browser import reset_browser_state
+
+            await asyncio.to_thread(reset_browser_state)
             root_span.set_attribute("result.success", loop_success)
 
             task_result = TaskResult(

@@ -22,7 +22,29 @@ from tenacity import (
     wait_exponential,
 )
 
+from src.resilience.circuit_breaker import CircuitBreaker
+
 logger = logging.getLogger("argos")
+
+# Sits above the per-call tenacity retry below: each call to complete() already
+# retries internally (3 attempts), so a "failure" here means a whole retry
+# sequence was exhausted. After enough of those, fail fast instead of tying up
+# the API's worker (uvicorn runs with --workers 1) retrying a provider that's
+# clearly down.
+_llm_breaker: CircuitBreaker | None = None
+
+
+def _get_llm_breaker() -> CircuitBreaker:
+    global _llm_breaker
+    if _llm_breaker is None:
+        from src.config import CIRCUIT_BREAKER_FAILURE_THRESHOLD, CIRCUIT_BREAKER_TIMEOUT_SECONDS
+
+        _llm_breaker = CircuitBreaker(
+            failure_threshold=CIRCUIT_BREAKER_FAILURE_THRESHOLD,
+            timeout_seconds=CIRCUIT_BREAKER_TIMEOUT_SECONDS,
+        )
+    return _llm_breaker
+
 
 _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 _THINK_OPEN_RE = re.compile(r"<think>.*$", re.DOTALL)
@@ -179,12 +201,6 @@ async def _collect_stream(kwargs: dict[str, object]) -> LLMResponse:
     )
 
 
-@retry(
-    retry=retry_if_exception_type(Exception),
-    wait=wait_exponential(multiplier=1, min=2, max=30),
-    stop=stop_after_attempt(3),
-    reraise=True,
-)
 async def complete(
     messages: list[dict[str, object]],
     tools: list[dict[str, object]] | None = None,
@@ -193,7 +209,33 @@ async def complete(
     api_key: str | None = None,
     api_base: str | None = None,
 ) -> LLMResponse:
-    """Single async LLM completion call via LiteLLM with automatic retry."""
+    """Single async LLM completion call via LiteLLM, with retry and circuit breaker."""
+    return await _get_llm_breaker().async_call(
+        _complete_impl,
+        messages,
+        tools=tools,
+        model=model,
+        temperature=temperature,
+        api_key=api_key,
+        api_base=api_base,
+    )
+
+
+@retry(
+    retry=retry_if_exception_type(Exception),
+    wait=wait_exponential(multiplier=1, min=2, max=30),
+    stop=stop_after_attempt(3),
+    reraise=True,
+)
+async def _complete_impl(
+    messages: list[dict[str, object]],
+    tools: list[dict[str, object]] | None = None,
+    model: str | None = None,
+    temperature: float = 0.0,
+    api_key: str | None = None,
+    api_base: str | None = None,
+) -> LLMResponse:
+    """Retried implementation behind complete()'s circuit breaker."""
     from src.config import (
         LLM_API_KEY,
         LLM_BASE_URL,

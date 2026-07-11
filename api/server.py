@@ -98,6 +98,14 @@ async def lifespan(app: FastAPI):
 
         await close_async_pool(app.state.db_pool)
 
+    # Sync connections (SQLite / sync pg pool) are also atexit-registered as a
+    # safety net, but that only fires at interpreter exit — close them here too
+    # so a graceful lifespan shutdown (reload, redeploy) doesn't leave them open
+    # longer than necessary.
+    from src.db.connection import close_all
+
+    close_all()
+
     logger.info("🛑 ARGOS API Server Shutdown")
 
 

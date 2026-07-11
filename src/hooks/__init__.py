@@ -19,9 +19,6 @@ Utilizzo base:
 
 Registrazione programmatica (senza decorator):
     HOOK_REGISTRY.register(HookEvent.POST_TOOL_USE, my_fn, tools=["bash_exec"])
-
-Hook built-in:
-    from src.hooks.builtin import register_audit_log, register_telegram_alerts
 """
 
 from .registry import HOOK_REGISTRY, HookEvent, HookResult, on
