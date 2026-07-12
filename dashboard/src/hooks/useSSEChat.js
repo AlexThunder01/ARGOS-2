@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { ArgosAPI } from '../api/argos';
 
 export function useSSEChat() {
@@ -7,9 +7,6 @@ export function useSSEChat() {
   const [error, setError] = useState(null);
   const [chats, setChats] = useState([]);
   const [currentChatId, setCurrentChatId] = useState(null);
-
-  const messagesRef = useRef([]);
-  useEffect(() => { messagesRef.current = messages; }, [messages]);
 
   const refreshChats = useCallback(async () => {
     const list = await ArgosAPI.listChats();
@@ -47,15 +44,24 @@ export function useSSEChat() {
   const switchChat = useCallback(async (chatId) => {
     setError(null);
     setCurrentChatId(chatId);
-    await loadChatMessages(chatId);
+    try {
+      await loadChatMessages(chatId);
+    } catch (e) {
+      setError(e.message || "Failed to load chat messages");
+    }
   }, [loadChatMessages]);
 
   const startNewChat = useCallback(async () => {
-    const created = await ArgosAPI.createChat();
-    setChats(prev => [created, ...prev]);
-    setCurrentChatId(created.id);
-    setMessages([]);
-    return created;
+    setError(null);
+    try {
+      const created = await ArgosAPI.createChat();
+      setChats(prev => [created, ...prev]);
+      setCurrentChatId(created.id);
+      setMessages([]);
+      return created;
+    } catch (e) {
+      setError(e.message || "Failed to create new chat");
+    }
   }, []);
 
   const sendMessage = useCallback(async (prompt, attachments = [], fileNames = []) => {
@@ -91,7 +97,9 @@ export function useSSEChat() {
         setIsTyping(false);
         // Picks up the server-generated title (and reordering by last_used_at)
         // after the first turn of a new chat completes.
-        refreshChats();
+        refreshChats().catch((e) => {
+          console.error("Failed to refresh chats after message:", e);
+        });
       }
     );
   }, [currentChatId, refreshChats]);
