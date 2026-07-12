@@ -32,6 +32,7 @@ logger = logging.getLogger("argos")
 
 def _check_db() -> str:
     """Check database connectivity. Returns 'ok' or 'error'."""
+    conn = None
     try:
         conn = get_connection()
         if DB_BACKEND == "postgres":
@@ -44,6 +45,14 @@ def _check_db() -> str:
     except Exception as e:
         logger.error(f"[DB] Health check failed: {e}")
         return "error"
+    finally:
+        # Docker polls /health every 10s (docker-compose.yml healthcheck) —
+        # never returning this connection permanently leaks one pool slot
+        # per poll, exhausting the pool (max_size=10) within ~100s.
+        if DB_BACKEND == "postgres" and conn:
+            from src.db.connection import return_pg_connection
+
+            return_pg_connection(conn)
 
 
 def _check_llm() -> str:
@@ -82,6 +91,7 @@ def _check_migrations() -> str:
     Compare COUNT(*) FROM schema_migrations vs .py files in migrations dir.
     Returns 'applied', 'pending', or 'error'.
     """
+    conn = None
     try:
         conn = get_connection()
 
@@ -90,7 +100,14 @@ def _check_migrations() -> str:
             cursor = conn.cursor()
             cursor.execute("SELECT COUNT(*) FROM schema_migrations")
             row = cursor.fetchone()
-            applied_count = row[0] if row else 0
+            # The real pooled connection uses a dict_row factory (see
+            # src/db/connection.py) — row[0] raises KeyError there.
+            if row is None:
+                applied_count = 0
+            elif isinstance(row, dict):
+                applied_count = next(iter(row.values()))
+            else:
+                applied_count = row[0]
         else:
             cursor = conn.execute("SELECT COUNT(*) FROM schema_migrations")
             applied_count = cursor.fetchone()[0]
@@ -109,6 +126,11 @@ def _check_migrations() -> str:
     except Exception as e:
         logger.error(f"[Migrations] Health check failed: {e}")
         return "error"
+    finally:
+        if DB_BACKEND == "postgres" and conn:
+            from src.db.connection import return_pg_connection
+
+            return_pg_connection(conn)
 
 
 def _check_n8n() -> str:
