@@ -312,6 +312,8 @@ async def sse_agent_stream(task: str, chat_id: int, user_message: str):
     from src.core.chats import generate_title_if_needed, get_messages, save_message
     from src.tools import DASHBOARD_TOOLS_WHITELIST
 
+    # Fetch history before save_message() below — get_messages() would otherwise
+    # include the current turn, duplicating it in the agent's injected history.
     prior_history = [
         {"role": m["role"], "content": m["content"]}
         for m in await asyncio.to_thread(get_messages, chat_id)
