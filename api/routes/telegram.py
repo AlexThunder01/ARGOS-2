@@ -267,7 +267,7 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
     from src.core.rate_limit import RateLimitExceeded, check_rate_limit
 
     try:
-        check_rate_limit(req.user_id)
+        await asyncio.to_thread(check_rate_limit, req.user_id)
     except RateLimitExceeded as e:
         return TelegramChatResponse(
             status="error",
@@ -275,12 +275,12 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
             user_id=req.user_id,
         )
 
-    user = db_get_user(req.user_id)
+    user = await asyncio.to_thread(db_get_user, req.user_id)
 
     if user is None:
-        db_register_user(req.user_id, req.first_name, req.username)
+        await asyncio.to_thread(db_register_user, req.user_id, req.first_name, req.username)
         if config.telegram_auto_approve:
-            db_approve_user(req.user_id)
+            await asyncio.to_thread(db_approve_user, req.user_id)
         else:
             if config.telegram_notify_on_new_user:
                 background_tasks.add_task(
@@ -292,7 +292,7 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
                 user_id=req.user_id,
                 is_new_user=True,
             )
-        user = db_get_user(req.user_id)
+        user = await asyncio.to_thread(db_get_user, req.user_id)
 
     elif user["status"] == "pending":
         return TelegramChatResponse(
@@ -305,24 +305,25 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
         logger.info(f"[Telegram] Message from banned user {req.user_id} — silenced.")
         return TelegramChatResponse(status="banned", reply="", user_id=req.user_id)
 
-    cmd_response = _handle_telegram_command(req.text, req.user_id, config)
+    cmd_response = await asyncio.to_thread(_handle_telegram_command, req.text, req.user_id, config)
     if cmd_response is not None:
         return TelegramChatResponse(status="ok", reply=cmd_response, user_id=req.user_id)
 
-    db_increment_msg_count(req.user_id)
+    await asyncio.to_thread(db_increment_msg_count, req.user_id)
     msg_count = (user.get("msg_count_total", 0) or 0) + 1
 
-    user_profile = db_get_profile(req.user_id)
-    recent_history = db_get_conversation_window(
-        req.user_id, limit=config.telegram_conversation_window
+    user_profile = await asyncio.to_thread(db_get_profile, req.user_id)
+    recent_history = await asyncio.to_thread(
+        db_get_conversation_window, req.user_id, limit=config.telegram_conversation_window
     )
-    relevant_memories = retrieve_relevant_memories(
+    relevant_memories = await asyncio.to_thread(
+        retrieve_relevant_memories,
         req.user_id,
         req.text,
         top_k=config.telegram_max_memories,
         min_similarity=config.telegram_rag_threshold,
     )
-    open_tasks = db_get_open_tasks(req.user_id)
+    open_tasks = await asyncio.to_thread(db_get_open_tasks, req.user_id)
 
     system_prompt = build_telegram_system_prompt(
         bot_config=config.telegram_config,

@@ -116,13 +116,8 @@ async def analyze_email(req: EmailAnalyzeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/pending_email", dependencies=[Depends(verify_api_key)])
-async def store_pending_email(data: dict):
-    import json as _json
-
-    msg_id = data.get("messageId", "default")
-    payload_str = _json.dumps(data, ensure_ascii=False)
-
+def _store_pending_email_sync(msg_id: str, payload_str: str) -> None:
+    """Blocking DB work for store_pending_email() — run via asyncio.to_thread."""
     conn = None
     try:
         conn = get_connection()
@@ -141,19 +136,35 @@ async def store_pending_email(data: dict):
                 (msg_id, payload_str),
             )
         conn.commit()
-    except Exception as e:
-        logger.error(f"DB Write Error: {e}")
-        return {"status": "error", "reason": "database_write_error"}
     finally:
         if DB_BACKEND == "postgres" and conn:
             return_pg_connection(conn)
+
+
+@router.post("/pending_email", dependencies=[Depends(verify_api_key)])
+async def store_pending_email(data: dict):
+    import json as _json
+
+    msg_id = data.get("messageId", "default")
+    payload_str = _json.dumps(data, ensure_ascii=False)
+
+    try:
+        await asyncio.to_thread(_store_pending_email_sync, msg_id, payload_str)
+    except Exception as e:
+        logger.error(f"DB Write Error: {e}")
+        return {"status": "error", "reason": "database_write_error"}
 
     logger.info(f"📧 Active Context Queued: ID {msg_id}")
     return {"status": "saved", "sender": data.get("sender", "")}
 
 
-@router.post("/pending_email/{message_id}/consume", dependencies=[Depends(verify_api_key)])
-async def consume_pending_email(message_id: str):
+class _PendingEmailNotFound(Exception):
+    pass
+
+
+def _consume_pending_email_sync(message_id: str) -> dict:
+    """Blocking DB work for consume_pending_email() — run via asyncio.to_thread.
+    Raises _PendingEmailNotFound if there's no row for message_id."""
     import json as _json
 
     conn = None
@@ -165,22 +176,25 @@ async def consume_pending_email(message_id: str):
         row = cursor.fetchone()
 
         if not row:
-            raise HTTPException(
-                status_code=404, detail="Email context not found or already consumed."
-            )
+            raise _PendingEmailNotFound()
 
         payload = row[0] if not isinstance(row, dict) else row["payload"]
         data = _json.loads(payload)
         cursor.execute(ph("DELETE FROM pending_emails WHERE msg_id = ?"), (message_id,))
         conn.commit()
-
-        return {**data, "status": "deleted_and_consumed"}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"DB Read/Delete Error: {e}")
-        raise HTTPException(status_code=500, detail="State architecture failure")
+        return data
     finally:
         if DB_BACKEND == "postgres" and conn:
             return_pg_connection(conn)
+
+
+@router.post("/pending_email/{message_id}/consume", dependencies=[Depends(verify_api_key)])
+async def consume_pending_email(message_id: str):
+    try:
+        data = await asyncio.to_thread(_consume_pending_email_sync, message_id)
+        return {**data, "status": "deleted_and_consumed"}
+    except _PendingEmailNotFound:
+        raise HTTPException(status_code=404, detail="Email context not found or already consumed.")
+    except Exception as e:
+        logger.error(f"DB Read/Delete Error: {e}")
+        raise HTTPException(status_code=500, detail="State architecture failure")

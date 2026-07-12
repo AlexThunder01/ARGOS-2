@@ -185,7 +185,7 @@ async def health_check():
         "db": await asyncio.to_thread(_check_db),
         "llm": await asyncio.to_thread(_check_llm),
         "migrations": await asyncio.to_thread(_check_migrations),
-        "n8n": _check_n8n(),
+        "n8n": await asyncio.to_thread(_check_n8n),
     }
 
     # Status is "degraded" if any check is "error"

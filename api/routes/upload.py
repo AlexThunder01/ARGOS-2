@@ -10,6 +10,8 @@ no per-user sessions on the REST API side).  Telegram uploads go through
 POST /telegram/attach which supplies the real Telegram user_id.
 """
 
+import asyncio
+
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from api.security import verify_api_key
@@ -32,7 +34,8 @@ async def upload_file(file: UploadFile = File(...)):
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
-    upload_id = save_upload(
+    upload_id = await asyncio.to_thread(
+        save_upload,
         user_id=_API_USER_ID,
         filename=file.filename or "upload",
         content=content,

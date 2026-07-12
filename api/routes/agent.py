@@ -306,7 +306,7 @@ async def run_task(req: TaskRequest):
     from src.core.rate_limit import RateLimitExceeded, check_rate_limit
 
     try:
-        check_rate_limit(0)  # 0 is standard for REST API access
+        await asyncio.to_thread(check_rate_limit, 0)  # 0 is standard for REST API access
     except RateLimitExceeded as e:
         raise HTTPException(status_code=429, detail=str(e))
 
@@ -339,7 +339,7 @@ async def run_task_async(
     from src.core.rate_limit import RateLimitExceeded, check_rate_limit
 
     try:
-        check_rate_limit(0)
+        await asyncio.to_thread(check_rate_limit, 0)
     except RateLimitExceeded as e:
         raise HTTPException(status_code=429, detail=str(e))
 
