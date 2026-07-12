@@ -228,7 +228,6 @@ async def telegram_attach(req: TelegramAttachRequest):
 async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTasks):
     from src.telegram.db import (
         db_approve_user,
-        db_gc_memories,
         db_get_conversation_window,
         db_get_open_tasks,
         db_get_profile,
@@ -237,13 +236,7 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
         db_register_user,
         db_save_conversation_turn,
     )
-    from src.telegram.memory import (
-        extract_memories_from_text,
-        retrieve_relevant_memories,
-        save_extracted_memories,
-        should_extract_memory,
-        should_run_gc,
-    )
+    from src.telegram.memory import retrieve_relevant_memories
     from src.telegram.prompt import build_telegram_system_prompt
     from src.workflows_config import get_workflows_config
 
@@ -310,7 +303,6 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
         return TelegramChatResponse(status="ok", reply=cmd_response, user_id=req.user_id)
 
     await asyncio.to_thread(db_increment_msg_count, req.user_id)
-    msg_count = (user.get("msg_count_total", 0) or 0) + 1
 
     user_profile = await asyncio.to_thread(db_get_profile, req.user_id)
     recent_history = await asyncio.to_thread(
@@ -355,33 +347,20 @@ async def telegram_chat(req: TelegramChatRequest, background_tasks: BackgroundTa
 
     background_tasks.add_task(db_save_conversation_turn, req.user_id, req.text, raw_reply)
 
-    if should_extract_memory(req.text, msg_count):
-        tg_cfg = getattr(config, "telegram_config", {})
-        beh_cfg = tg_cfg.get("behavior", {}) if isinstance(tg_cfg, dict) else {}
-        mem_cfg = beh_cfg.get("memory", {})
-        _poisoning_on = mem_cfg.get("enable_poisoning_detection", True)
-        _risk_thresh = mem_cfg.get("risk_threshold", 0.5)
-        _susp_ret = mem_cfg.get("suspicious_retention", 500)
-
-        def _do_extraction():
-            existing = [
-                {"content": m["content"], "category": m["category"]} for m in relevant_memories
-            ]
-            facts = extract_memories_from_text(req.text, existing, agent.call_lightweight)
-            if facts:
-                save_extracted_memories(
-                    req.user_id,
-                    facts,
-                    llm_call_fn=agent.call_lightweight,
-                    poisoning_enabled=_poisoning_on,
-                    risk_threshold=_risk_thresh,
-                    suspicious_retention=_susp_ret,
-                )
-
-        background_tasks.add_task(_do_extraction)
-
-    if should_run_gc(msg_count):
-        background_tasks.add_task(db_gc_memories, req.user_id)
+    # NOTE: fact-extraction-from-this-turn and periodic memory GC are
+    # currently disabled here. They depended on extract_memories_from_text,
+    # should_extract_memory, and should_run_gc — three functions that no
+    # longer exist anywhere in the codebase (dropped during the memory
+    # promotion to src/core/memory.py, which left this route calling
+    # functions that don't exist — confirmed via direct import check, not
+    # merely a rename). This route was silently broken (every real message
+    # raised ImportError) until this fix; it was never caught because no
+    # webhook had ever been registered for this bot before. Restoring real
+    # extraction requires a design decision (most likely wiring this route
+    # through mem0, like CoreAgent already does elsewhere) rather than
+    # guessing a reimplementation here — reading memories still works
+    # (retrieve_relevant_memories, above), only writing new ones from
+    # Telegram turns is paused.
 
     clean_reply = _strip_markdown(raw_reply)
 
