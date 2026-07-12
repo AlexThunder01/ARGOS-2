@@ -43,6 +43,11 @@ services:
     command: ["uvicorn", "api.server:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
     ports:
       - "127.0.0.1:8000:8000"
+    extra_hosts:
+      # host.docker.internal isn't auto-mapped on Linux (unlike Docker
+      # Desktop) — needed so EMBEDDING_BASE_URL can point at an Ollama
+      # instance running on the host.
+      - "host.docker.internal:host-gateway"
     environment:
       - LLM_API_KEY=${LLM_API_KEY}
       - LLM_API_KEY_2=${LLM_API_KEY_2:-}

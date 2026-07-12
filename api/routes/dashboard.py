@@ -44,27 +44,10 @@ async def docker_stats():
         return {"status": "error", "message": str(e), "containers": {}}
 
 
-@router.get("/stats/rate_limits", dependencies=[Depends(verify_api_key)])
-async def rate_limits():
-    """
-    Ritorna il monitoraggio base del rate limit per l'interfaccia.
-    """
-    from datetime import datetime
-
-    from src.config import RATE_LIMIT_PER_HOUR, RATE_LIMIT_PER_MINUTE
-
-    now = datetime.now(UTC)
-    minute_win = now.strftime("%Y-%m-%dT%H:%M:00Z")
-    hour_win = now.strftime("%Y-%m-%dT%H:00:00Z")
-
+def _fetch_rate_limit_usage(user_id: int, minute_win: str, hour_win: str) -> tuple[int, int]:
+    """Blocking DB work for rate_limits() — run via asyncio.to_thread."""
     conn = None
     try:
-        import hashlib
-        import os
-
-        linux_user = os.environ.get("USER", "argos")
-        user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)
-
         conn = get_connection()
         cursor = conn.cursor()
 
@@ -94,17 +77,47 @@ async def rate_limits():
         row = cursor.fetchone()
         hr_used = row.get("hit_count", 0) if isinstance(row, dict) else (row[0] if row else 0)
 
+        return min_used, hr_used
+    finally:
+        if DB_BACKEND == "postgres" and conn:
+            from src.db.connection import return_pg_connection
+
+            return_pg_connection(conn)
+
+
+@router.get("/stats/rate_limits", dependencies=[Depends(verify_api_key)])
+async def rate_limits():
+    """
+    Ritorna il monitoraggio base del rate limit per l'interfaccia.
+    """
+    from datetime import datetime
+
+    from src.config import RATE_LIMIT_PER_HOUR, RATE_LIMIT_PER_MINUTE
+
+    now = datetime.now(UTC)
+    minute_win = now.strftime("%Y-%m-%dT%H:%M:00Z")
+    hour_win = now.strftime("%Y-%m-%dT%H:00:00Z")
+
+    try:
+        import hashlib
+        import os
+
+        linux_user = os.environ.get("USER", "argos")
+        user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)
+
+        # Blocking psycopg pool call — must run off the event loop, or it
+        # freezes the entire single-worker server for its duration (this
+        # endpoint is polled every 15s by the dashboard's RateLimitWidget).
+        min_used, hr_used = await asyncio.to_thread(
+            _fetch_rate_limit_usage, user_id, minute_win, hour_win
+        )
+
         return {
             "minute": {"used": min_used, "max": RATE_LIMIT_PER_MINUTE},
             "hour": {"used": hr_used, "max": RATE_LIMIT_PER_HOUR},
         }
     except Exception as e:
         return {"error": str(e)}
-    finally:
-        if DB_BACKEND == "postgres" and conn:
-            from src.db.connection import return_pg_connection
-
-            return_pg_connection(conn)
 
 
 @router.get("/stats/system", dependencies=[Depends(verify_api_key)])
@@ -140,23 +153,13 @@ async def system_stats():
     }
 
 
-@router.get("/stats/security", dependencies=[Depends(verify_api_key)])
-async def security_stats():
-    """Ritorna stat live sui blocchi per attività sospette."""
-    from datetime import datetime
-
-    now = datetime.now(UTC)
-    today = now.strftime("%Y-%m-%d")
-
-    blocked_count = 0
-    avg_score = 0.0
-
+def _fetch_security_stats(today: str) -> tuple[int, float]:
+    """Blocking DB work for security_stats() — run via asyncio.to_thread."""
     conn = None
     try:
         conn = get_connection()
         cursor = conn.cursor()
 
-        # Blocked today
         if DB_BACKEND == "postgres":
             cursor.execute(
                 "SELECT COUNT(*) as c, AVG(risk_score) as a FROM tg_suspicious_memories WHERE DATE(created_at) = %s",
@@ -169,10 +172,32 @@ async def security_stats():
             )
 
         row = cursor.fetchone()
+        blocked_count = 0
+        avg_score = 0.0
         if row:
             blocked_count = row.get("c", 0) if isinstance(row, dict) else row[0]
             score = row.get("a", 0.0) if isinstance(row, dict) else row[1]
             avg_score = float(score) if score is not None else 0.0
+        return blocked_count, avg_score
+    finally:
+        if DB_BACKEND == "postgres" and conn:
+            from src.db.connection import return_pg_connection
+
+            return_pg_connection(conn)
+
+
+@router.get("/stats/security", dependencies=[Depends(verify_api_key)])
+async def security_stats():
+    """Ritorna stat live sui blocchi per attività sospette."""
+    from datetime import datetime
+
+    now = datetime.now(UTC)
+    today = now.strftime("%Y-%m-%d")
+
+    try:
+        # Blocking psycopg pool call — must run off the event loop, same
+        # reasoning as rate_limits() above.
+        blocked_count, avg_score = await asyncio.to_thread(_fetch_security_stats, today)
 
         return {
             "paranoid_judge": True,
@@ -182,6 +207,15 @@ async def security_stats():
     except Exception as e:
         logger.error(f"Errore caricamento security stats: {e}")
         return {"paranoid_judge": True, "blocked_today": 0, "risk_score_avg": 0.0}
+
+
+def _ping_db() -> None:
+    """Blocking DB work for latency_stats() — run via asyncio.to_thread."""
+    conn = None
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1")
     finally:
         if DB_BACKEND == "postgres" and conn:
             from src.db.connection import return_pg_connection
@@ -199,18 +233,12 @@ async def latency_stats():
 
     # 2. DB Query #1
     t0 = time.perf_counter()
-    conn = None
     try:
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1")
+        # Blocking psycopg pool call — must run off the event loop, same
+        # reasoning as rate_limits() above.
+        await asyncio.to_thread(_ping_db)
     except Exception as e:
         logger.warning(f"[Dashboard] DB latency check failed: {e}")
-    finally:
-        if DB_BACKEND == "postgres" and conn:
-            from src.db.connection import return_pg_connection
-
-            return_pg_connection(conn)
     t1 = time.perf_counter()
     db_ms = int((t1 - t0) * 1000)
 
@@ -382,7 +410,10 @@ async def chat_stream(req: ChatRequest):
     await asyncio.to_thread(touch_chat, req.chat_id)
 
     try:
-        check_rate_limit(req.chat_id)
+        # Blocking psycopg pool call — must run off the event loop, or it
+        # freezes the entire single-worker server for its duration (uvicorn
+        # runs with --workers 1), not just this request.
+        await asyncio.to_thread(check_rate_limit, req.chat_id)
     except RateLimitExceeded as e:
         raise HTTPException(status_code=429, detail=str(e))
 
@@ -429,7 +460,11 @@ async def chat_stream(req: ChatRequest):
         try:
             from src.telegram.db import db_update_profile
 
-            db_update_profile(req.chat_id, display_name=name_match.group(1).capitalize())
+            # Same reasoning as check_rate_limit above: this is a blocking
+            # DB call and must not run directly on the event loop.
+            await asyncio.to_thread(
+                db_update_profile, req.chat_id, display_name=name_match.group(1).capitalize()
+            )
         except Exception:
             pass
     elif negation_match:
@@ -437,7 +472,7 @@ async def chat_stream(req: ChatRequest):
         try:
             from src.telegram.db import db_update_profile
 
-            db_update_profile(req.chat_id, display_name="")
+            await asyncio.to_thread(db_update_profile, req.chat_id, display_name="")
         except Exception:
             pass
 
