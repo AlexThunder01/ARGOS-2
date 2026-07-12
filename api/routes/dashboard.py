@@ -329,8 +329,6 @@ async def sse_agent_stream(task: str, chat_id: int, user_message: str):
         agent._injected_history = prior_history[-10:] if prior_history else []
         return agent.run_task(task)
 
-    await asyncio.to_thread(save_message, chat_id, "user", user_message)
-
     # No "thinking" placeholder chunk here: the frontend already shows its own
     # "Processing..." indicator (ChatTerminal, driven by isTyping) while this
     # generator is running. Sending one as a `chunk` event previously leaked
@@ -338,6 +336,13 @@ async def sse_agent_stream(task: str, chat_id: int, user_message: str):
     # onto the same string with no way to tell a status update from real text.
 
     try:
+        # Everything that can fail — including persisting the user's own turn —
+        # must stay inside this block. A DB error here previously escaped the
+        # generator entirely, so the client never received [DONE] and its
+        # "Processing..." indicator hung forever (observed live: SQLite
+        # "database is locked" under concurrent writers).
+        await asyncio.to_thread(save_message, chat_id, "user", user_message)
+
         # Passiamo alla thread pool visto la natura bloccante
         result_obj = await asyncio.to_thread(_run_agent)
 

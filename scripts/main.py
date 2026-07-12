@@ -309,7 +309,9 @@ def main():
             print(f"{'ID':<6}{'Titolo':<30}{'Creata':<22}{'Ultimo uso':<22}")
             for c in chats:
                 title = c["title"] or f"Chat #{c['id']}"
-                print(f"{c['id']:<6}{title:<30}{str(c['created_at']):<22}{str(c['last_used_at']):<22}")
+                print(
+                    f"{c['id']:<6}{title:<30}{str(c['created_at']):<22}{str(c['last_used_at']):<22}"
+                )
         return
 
     # Determine memory mode

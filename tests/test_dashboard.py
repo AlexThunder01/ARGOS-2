@@ -198,8 +198,8 @@ class TestChatRoutes:
         from src.db.migrations import run_migrations
 
         run_migrations(patch_db)
-        from src.core.chats import create_chat, get_messages
         from api.routes.dashboard import sse_agent_stream
+        from src.core.chats import create_chat, get_messages
 
         chat_id = create_chat()
 
@@ -219,10 +219,33 @@ class TestChatRoutes:
         ):
             chunks = [c async for c in sse_agent_stream("ciao", chat_id, "ciao")]
 
-        combined = "".join(json.loads(c.removeprefix("data: ").strip())["chunk"] for c in chunks if c.startswith("data: {"))
+        combined = "".join(
+            json.loads(c.removeprefix("data: ").strip())["chunk"]
+            for c in chunks
+            if c.startswith("data: {")
+        )
         assert "risposta di test" in combined
 
         messages = get_messages(chat_id)
         assert [m["role"] for m in messages] == ["user", "agent"]
         assert messages[0]["content"] == "ciao"
         assert messages[1]["content"] == "risposta di test"
+
+    async def test_sse_agent_stream_still_terminates_if_saving_user_turn_fails(self, patch_db):
+        """A DB error while persisting the user's own turn (e.g. 'database is
+        locked' under concurrent writers) must not hang the stream forever —
+        the client needs [DONE] no matter what, or its "Processing..."
+        indicator never clears."""
+        from src.db.migrations import run_migrations
+
+        run_migrations(patch_db)
+        from api.routes.dashboard import sse_agent_stream
+        from src.core.chats import create_chat
+
+        chat_id = create_chat()
+
+        with patch("src.core.chats.save_message", side_effect=RuntimeError("database is locked")):
+            chunks = [c async for c in sse_agent_stream("ciao", chat_id, "ciao")]
+
+        assert chunks[-1] == "data: [DONE]\n\n"
+        assert any("ERRORE" in c or "database is locked" in c for c in chunks[:-1])

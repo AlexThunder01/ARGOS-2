@@ -61,8 +61,7 @@ def list_chats() -> list[dict]:
     """Returns all chats, most recently used first."""
     with _db() as db:
         cur = db.execute(
-            "SELECT id, title, created_at, last_used_at FROM argos_chats "
-            "ORDER BY last_used_at DESC"
+            "SELECT id, title, created_at, last_used_at FROM argos_chats ORDER BY last_used_at DESC"
         )
         return [dict(row) for row in cur.fetchall()]
 
