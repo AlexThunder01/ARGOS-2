@@ -88,7 +88,9 @@ async def analyze_email(req: EmailAnalyzeRequest):
             logger.warning(
                 f"[email] Failed to parse LLM JSON response: {parse_err}. Raw: {stripped[:200]}"
             )
-            raise HTTPException(status_code=502, detail="LLM returned an unparseable response.")
+            raise HTTPException(
+                status_code=502, detail="LLM returned an unparseable response."
+            ) from parse_err
 
         priority_map = {"high": 4, "medium": 3, "low": 2, "spam": 1}
         email_prio_val = priority_map.get(analysis.priority, 3)
@@ -113,7 +115,7 @@ async def analyze_email(req: EmailAnalyzeRequest):
         raise
     except Exception as e:
         logger.error(f"Error in /analyze_email: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 def _store_pending_email_sync(msg_id: str, payload_str: str) -> None:
@@ -194,7 +196,9 @@ async def consume_pending_email(message_id: str):
         data = await asyncio.to_thread(_consume_pending_email_sync, message_id)
         return {**data, "status": "deleted_and_consumed"}
     except _PendingEmailNotFound:
-        raise HTTPException(status_code=404, detail="Email context not found or already consumed.")
+        raise HTTPException(
+            status_code=404, detail="Email context not found or already consumed."
+        ) from None
     except Exception as e:
         logger.error(f"DB Read/Delete Error: {e}")
-        raise HTTPException(status_code=500, detail="State architecture failure")
+        raise HTTPException(status_code=500, detail="State architecture failure") from e

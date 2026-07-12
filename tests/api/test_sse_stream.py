@@ -16,6 +16,7 @@ Coverage:
   - max_steps rispettato (non esplode con valori al limite: 1 e 20)
 """
 
+import contextlib
 import json
 import os
 import sys
@@ -65,10 +66,8 @@ def _collect_sse(response) -> tuple[list[str], list[dict]]:
         raw_lines.append(payload)
         if payload == "[DONE]":
             continue
-        try:
+        with contextlib.suppress(json.JSONDecodeError):
             chunks.append(json.loads(payload))
-        except json.JSONDecodeError:
-            pass
     return raw_lines, chunks
 
 

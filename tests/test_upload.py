@@ -80,7 +80,8 @@ def test_save_upload_file_exists_on_disk(tmp_path):
     uid = save_upload(user_id=1, filename="data.csv", content=b"a,b,c\n1,2,3")
     path = resolve_upload_id(uid)
     assert os.path.isfile(path)
-    assert open(path, "rb").read() == b"a,b,c\n1,2,3"
+    with open(path, "rb") as f:
+        assert f.read() == b"a,b,c\n1,2,3"
 
 
 def test_save_upload_in_correct_directory(tmp_path):

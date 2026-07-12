@@ -36,13 +36,15 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr("src.db.connection.get_connection", lambda: fake_conn)
     monkeypatch.setattr("src.db.connection.DB_BACKEND", "sqlite")
 
-    with _mock.patch("src.logging.otel.init_otel", return_value=None):
-        with _mock.patch("src.logging.tracer.setup_tracer", return_value=None):
-            from fastapi.testclient import TestClient
+    with (
+        _mock.patch("src.logging.otel.init_otel", return_value=None),
+        _mock.patch("src.logging.tracer.setup_tracer", return_value=None),
+    ):
+        from fastapi.testclient import TestClient
 
-            from api.server import app
+        from api.server import app
 
-            yield TestClient(app, raise_server_exceptions=True)
+        yield TestClient(app, raise_server_exceptions=True)
 
 
 # ── POST /telegram/attach ──────────────────────────────────────────────────
@@ -97,7 +99,6 @@ class TestTelegramAttach:
         from unittest.mock import AsyncMock, MagicMock, patch
 
         fake_content = b"MZ payload"
-        call_count = {"n": 0}
 
         async def _mock_get(url, **kwargs):
             resp = MagicMock()

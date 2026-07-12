@@ -5,6 +5,7 @@ from datetime import UTC
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from api.security import verify_api_key
 from src.config import DOCKER_HOST
@@ -318,9 +319,6 @@ async def get_chat_messages_route(chat_id: int):
     return await asyncio.to_thread(get_messages, chat_id)
 
 
-from pydantic import BaseModel
-
-
 class ChatRequest(BaseModel):
     task: str
     chat_id: int
@@ -415,7 +413,7 @@ async def chat_stream(req: ChatRequest):
         # runs with --workers 1), not just this request.
         await asyncio.to_thread(check_rate_limit, req.chat_id)
     except RateLimitExceeded as e:
-        raise HTTPException(status_code=429, detail=str(e))
+        raise HTTPException(status_code=429, detail=str(e)) from e
 
     # Detect and persist user name if mentioned in this message
     import re

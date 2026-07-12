@@ -59,7 +59,7 @@ def read_file_tool(inp):
 
             reader = PdfReader(path)
             parts = []
-            for i, page in enumerate(reader.pages[:10]):
+            for page in reader.pages[:10]:
                 t = page.extract_text()
                 if t and t.strip():
                     parts.append(t.strip())

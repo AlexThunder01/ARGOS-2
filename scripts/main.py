@@ -48,9 +48,7 @@ def cli_confirmation_callback(tool_name: str, tool_input: dict) -> bool:
     print(f"   Data:   {tool_input}")
     print(f"{'=' * 40}")
     choice = input("👉 Authorize execution? (y/N): ").lower().strip()
-    if choice != "y":
-        return False
-    return True
+    return choice == "y"
 
 
 # ==========================================================================
@@ -286,7 +284,11 @@ def main():
     # a raw JSON error line from a dependency should not interrupt the chat transcript
     # (this used to print e.g. mem0's rate-limit errors mid-conversation).
     os.makedirs("logs", exist_ok=True)
-    third_party_log = open(os.path.join("logs", "argos_thirdparty.log"), "a", encoding="utf-8")
+    # Kept open for the process lifetime (handed to the logger below) — a
+    # `with` block would close it immediately, breaking third-party logging.
+    third_party_log = open(  # noqa: SIM115
+        os.path.join("logs", "argos_thirdparty.log"), "a", encoding="utf-8"
+    )
     configure_json_logging(
         stream=third_party_log, level=logging.DEBUG if args.debug else logging.WARNING
     )
@@ -498,10 +500,7 @@ def main():
 
             # Handle @file: inline attachments
             task_text, inline_ctx = _extract_inline_attachments(user_input, agent.user_id)
-            if inline_ctx:
-                task_text = f"{task_text}\n\n{inline_ctx}"
-            else:
-                task_text = user_input
+            task_text = f"{task_text}\n\n{inline_ctx}" if inline_ctx else user_input
 
             # Execute through CoreAgent
             print("⏳ ...", end="\r")

@@ -7,3 +7,15 @@ ignore = ["E501", "B008"]
 
 [lint.isort]
 known-first-party = ["src"]
+
+[lint.per-file-ignores]
+# E402 (import not at top) is a deliberate ordering in these files, not an
+# oversight: setup code (sys.path, env vars, load_dotenv(), mock patches)
+# must run before the import that follows it, or the import would pick up
+# the wrong config/behavior.
+"api/server.py" = ["E402"]
+"scripts/main.py" = ["E402"]
+"src/config.py" = ["E402"]
+"tests/conftest.py" = ["E402"]
+"tests/api/conftest.py" = ["E402"]
+"tests/test_dashboard.py" = ["E402"]

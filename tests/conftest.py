@@ -8,6 +8,7 @@ Dual-backend support: Tests can be parametrized to run against both SQLite
 and PostgreSQL backends by using the db_backend fixture.
 """
 
+import contextlib
 import json as json_module
 import logging
 import os
@@ -235,10 +236,8 @@ def test_db(db_backend) -> object:
 
     yield conn
 
-    try:
+    with contextlib.suppress(Exception):
         conn.close()
-    except Exception:
-        pass
 
 
 @pytest.fixture(autouse=True)
@@ -259,3 +258,22 @@ def patch_db(monkeypatch):
 
     yield conn
     conn.close()
+
+
+@pytest.fixture(autouse=True)
+def reset_llm_circuit_breaker():
+    """
+    src.llm.client._llm_breaker is a module-level singleton shared by every
+    call to complete() across the whole process. Any test that makes an LLM
+    call fail (to test retry/error-handling) counts as one failure against
+    it — with enough such tests in one pytest run, the shared breaker trips
+    (CIRCUIT_BREAKER_FAILURE_THRESHOLD, default 5) and every later test that
+    expects a normal completion fails with "Circuit breaker is open" instead,
+    regardless of what it actually tests. Reset it before every test so
+    failures never leak across test boundaries.
+    """
+    import src.llm.client as llm_client_module
+
+    llm_client_module._llm_breaker = None
+    yield
+    llm_client_module._llm_breaker = None

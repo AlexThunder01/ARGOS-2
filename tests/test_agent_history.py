@@ -554,7 +554,7 @@ class TestTrimHistoryTiered:
         agent.token_budget = system_tokens + 200  # comfortable
 
         # Add enough tool results to exceed 80% of the extra budget
-        for i in range(15):
+        for _ in range(15):
             agent.history.append({"role": "user", "content": f"TOOL RESULT: {'x' * 50}"})
 
         original_len = len(agent.history)

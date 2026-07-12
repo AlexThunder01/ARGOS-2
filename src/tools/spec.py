@@ -11,6 +11,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 
+import numpy as np
 from pydantic import BaseModel
 
 logger = logging.getLogger("argos")

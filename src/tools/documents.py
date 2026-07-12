@@ -256,7 +256,7 @@ def read_excel_tool(inp):
         row_limit = min(max_rows + 1, ws.max_row)
         for row_idx, row in enumerate(ws.iter_rows(max_row=row_limit)):
             cells = []
-            for col_idx, cell in enumerate(row):
+            for cell in row:
                 val = str(cell.value) if cell.value is not None else ""
                 color = _cell_color(cell)
                 if color and row_idx > 0:  # skip header row for color notes

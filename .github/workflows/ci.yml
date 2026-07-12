@@ -28,8 +28,10 @@ jobs:
           ruff format --check .
 
   # 2. SQLITE TEST JOB (Fast Feedback)
+  # Runs independently of lint — a style nit shouldn't hide whether the
+  # actual test suite passes (previously `needs: lint` meant this job
+  # silently never ran for months while lint was red).
   test-sqlite:
-    needs: lint
     runs-on: ubuntu-latest
     env:
       DB_BACKEND: sqlite
@@ -54,8 +56,8 @@ jobs:
           pytest tests/ -v
 
   # 3. POSTGRESQL TEST JOB (Data Layer Validation)
+  # Also independent of lint — see test-sqlite comment above.
   test-postgres:
-    needs: lint
     runs-on: ubuntu-latest
     services:
       postgres:

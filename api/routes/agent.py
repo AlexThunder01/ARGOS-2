@@ -259,7 +259,7 @@ def _run_task_async_worker(
         except requests.RequestException as e:
             error_msg = f"n8n reachability check failed: {e}"
             logger.error(f"[n8n] {error_msg}")
-            raise ValueError(error_msg)
+            raise ValueError(error_msg) from e
 
         logger.info(f"📤 Dispatching Job result [{job_id}] to {webhook_url}")
         resp = requests.post(webhook_url, json=payload, timeout=WEBHOOK_TIMEOUT_SECONDS)
@@ -308,7 +308,7 @@ async def run_task(req: TaskRequest):
     try:
         await asyncio.to_thread(check_rate_limit, 0)  # 0 is standard for REST API access
     except RateLimitExceeded as e:
-        raise HTTPException(status_code=429, detail=str(e))
+        raise HTTPException(status_code=429, detail=str(e)) from e
 
     task = req.task
     if req.attachments:
@@ -322,7 +322,7 @@ async def run_task(req: TaskRequest):
         raise
     except Exception as e:
         logger.error(f"Endpoint Exception /run: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post(
@@ -341,13 +341,13 @@ async def run_task_async(
     try:
         await asyncio.to_thread(check_rate_limit, 0)
     except RateLimitExceeded as e:
-        raise HTTPException(status_code=429, detail=str(e))
+        raise HTTPException(status_code=429, detail=str(e)) from e
 
     # ── SSRF guard ─────────────────────────────────────────────────────────
     try:
         _validate_webhook_url(req.webhook_url)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid webhook_url: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid webhook_url: {e}") from e
 
     # ── Idempotency check ──────────────────────────────────────────────────
     if idempotency_key:

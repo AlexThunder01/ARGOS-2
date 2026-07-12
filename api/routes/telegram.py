@@ -208,7 +208,7 @@ async def telegram_attach(req: TelegramAttachRequest):
         try:
             validate_upload(req.filename, len(dl.content))
         except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc))
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         upload_id = save_upload(
             user_id=req.user_id,
@@ -219,7 +219,7 @@ async def telegram_attach(req: TelegramAttachRequest):
         raise
     except Exception as exc:
         logger.error(f"[Telegram] attach failed for file_id={req.file_id}: {exc}")
-        raise HTTPException(status_code=502, detail=f"File download error: {exc}")
+        raise HTTPException(status_code=502, detail=f"File download error: {exc}") from exc
 
     return {"upload_id": upload_id, "filename": req.filename}
 

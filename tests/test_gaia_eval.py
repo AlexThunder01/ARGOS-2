@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from eval.gaia_eval import build_prompt
+from eval.gaia_eval import build_prompt, extract_answer, score_task
 
 ANSWER_SUFFIX = "\n\nProvide ONLY the final answer, no explanation."
 
@@ -20,9 +20,6 @@ def test_build_prompt_with_attachment():
     assert "Summarize the document." in result
     assert "/tmp/report.pdf" in result
     assert ANSWER_SUFFIX in result
-
-
-from eval.gaia_eval import extract_answer, score_task
 
 
 def test_extract_answer_plain():

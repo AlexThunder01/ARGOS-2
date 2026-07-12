@@ -122,3 +122,23 @@ CREATE TABLE IF NOT EXISTS tg_rate_limits (
     hit_count     INTEGER DEFAULT 0,
     PRIMARY KEY (user_id, window_start)
 );
+
+-- ==========================================================================
+-- argos_chats / argos_chat_messages — CLI/Dashboard shared multi-chat
+-- (mirrors src/db/migrations/003_argos_chats.py + 004_chat_messages.py)
+-- ==========================================================================
+CREATE TABLE IF NOT EXISTS argos_chats (
+    id           SERIAL PRIMARY KEY,
+    title        TEXT,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS argos_chat_messages (
+    id         SERIAL PRIMARY KEY,
+    chat_id    INTEGER NOT NULL REFERENCES argos_chats(id),
+    role       TEXT NOT NULL,
+    content    TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_argos_chat_messages_chat_id ON argos_chat_messages(chat_id);

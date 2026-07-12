@@ -32,7 +32,7 @@ async def upload_file(file: UploadFile = File(...)):
     try:
         validate_upload(file.filename or "", len(content))
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     upload_id = await asyncio.to_thread(
         save_upload,
