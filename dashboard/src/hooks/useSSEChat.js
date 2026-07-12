@@ -5,14 +5,61 @@ export function useSSEChat() {
   const [messages, setMessages] = useState([]);
   const [isTyping, setIsTyping] = useState(false);
   const [error, setError] = useState(null);
+  const [chats, setChats] = useState([]);
+  const [currentChatId, setCurrentChatId] = useState(null);
 
-  // Keep a ref in sync so the callback always reads current messages
-  // without needing to re-create itself (avoids stale closure).
   const messagesRef = useRef([]);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
 
+  const refreshChats = useCallback(async () => {
+    const list = await ArgosAPI.listChats();
+    setChats(list);
+    return list;
+  }, []);
+
+  const loadChatMessages = useCallback(async (chatId) => {
+    const history = await ArgosAPI.getChatMessages(chatId);
+    setMessages(history.map((m, i) => ({ id: i, role: m.role, content: m.content })));
+  }, []);
+
+  // On mount: resume the most recently used chat, or create one if none exist
+  // yet — unlike the CLI (where chat selection is always explicit), the
+  // Dashboard must show a working chat on first load with no extra click.
+  useEffect(() => {
+    (async () => {
+      try {
+        const list = await refreshChats();
+        if (list.length > 0) {
+          setCurrentChatId(list[0].id);
+          await loadChatMessages(list[0].id);
+        } else {
+          const created = await ArgosAPI.createChat();
+          setChats([created]);
+          setCurrentChatId(created.id);
+        }
+      } catch (e) {
+        setError(e.message || "Failed to initialize chat");
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const switchChat = useCallback(async (chatId) => {
+    setError(null);
+    setCurrentChatId(chatId);
+    await loadChatMessages(chatId);
+  }, [loadChatMessages]);
+
+  const startNewChat = useCallback(async () => {
+    const created = await ArgosAPI.createChat();
+    setChats(prev => [created, ...prev]);
+    setCurrentChatId(created.id);
+    setMessages([]);
+    return created;
+  }, []);
+
   const sendMessage = useCallback(async (prompt, attachments = [], fileNames = []) => {
-    if (!prompt.trim()) return;
+    if (!prompt.trim() || !currentChatId) return;
 
     // Add user message to UI
     const userMsg = { id: Date.now(), role: 'user', content: prompt, fileNames };
@@ -24,18 +71,9 @@ export function useSSEChat() {
     const agentMsgId = Date.now() + 1;
     setMessages(prev => [...prev, { id: agentMsgId, role: 'agent', content: '' }]);
 
-    // Build history from the ref (always up-to-date, no stale closure)
-    const history = messagesRef.current.map(m => {
-      let content = m.content;
-      if (m.fileNames && m.fileNames.length > 0) {
-        content = `[Allegati: ${m.fileNames.join(', ')}]\n${content}`;
-      }
-      return { role: m.role, content };
-    });
-
     await ArgosAPI.startChatStream(
       prompt,
-      history,
+      currentChatId,
       attachments,
       (pkt) => {
         if (pkt.chunk) {
@@ -51,9 +89,12 @@ export function useSSEChat() {
       },
       () => {
         setIsTyping(false);
+        // Picks up the server-generated title (and reordering by last_used_at)
+        // after the first turn of a new chat completes.
+        refreshChats();
       }
     );
-  }, []);
+  }, [currentChatId, refreshChats]);
 
-  return { messages, isTyping, error, sendMessage };
+  return { messages, isTyping, error, sendMessage, chats, currentChatId, switchChat, startNewChat };
 }
