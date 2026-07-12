@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useSSEChat } from './hooks/useSSEChat';
 import ChatTerminal from './components/ChatTerminal/ChatTerminal';
+import ChatSwitcher from './components/ChatSwitcher/ChatSwitcher';
 import CommandMonitor from './components/CommandMonitor/CommandMonitor';
 import RateLimitWidget from './components/RateLimitWidget/RateLimitWidget';
 import ToolsPanel from './components/ToolsPanel/ToolsPanel';
@@ -8,7 +9,10 @@ import { ArgosAPI } from './api/argos';
 import styles from './App.module.css';
 
 function App() {
-  const { messages, isTyping, error, sendMessage } = useSSEChat();
+  const {
+    messages, isTyping, error, sendMessage,
+    chats, currentChatId, switchChat, startNewChat,
+  } = useSSEChat();
   const [config, setConfig] = useState({ version: 'v2.2.0', model: 'Loading...' });
 
   useEffect(() => {
@@ -22,25 +26,31 @@ function App() {
         <div className={`${styles.dot} ${styles.live}`}></div>
         <div className={styles.statusPill}>ONLINE</div>
         <div className={styles.spacer}></div>
+        <ChatSwitcher
+          chats={chats}
+          currentChatId={currentChatId}
+          onSwitchChat={switchChat}
+          onNewChat={startNewChat}
+        />
         <div className={styles.topbarMetric}>CoreAgent <span>{config.version}</span></div>
         <div className={styles.divider}></div>
         <div className={styles.topbarMetric}>Model <span>{config.model}</span></div>
       </div>
-      
+
       {/* Sidebar - Docker/Infrastructure + Tools */}
       <div className={styles.sidebarWrap}>
         <CommandMonitor />
         <ToolsPanel />
       </div>
-      
+
       {/* Center - Terminal/Chat */}
-      <ChatTerminal 
-        messages={messages} 
-        isTyping={isTyping} 
+      <ChatTerminal
+        messages={messages}
+        isTyping={isTyping}
         onSendMessage={sendMessage}
         error={error}
       />
-      
+
       {/* Right - Telemetry/Rates */}
       <RateLimitWidget />
     </div>
