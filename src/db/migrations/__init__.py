@@ -54,10 +54,13 @@ def _applied_versions(conn) -> set[int]:
     conn_type_module = type(conn).__module__
 
     if "psycopg" in conn_type_module:
-        # PostgreSQL (psycopg) connection
+        # PostgreSQL (psycopg) connection. The real pooled connections in
+        # src/db/connection.py use a dict_row factory, so rows only support
+        # key access — but a bare psycopg.connect() (e.g. in a standalone
+        # script or test) defaults to plain tuples. Handle both shapes.
         cursor = conn.cursor()
         cursor.execute("SELECT version FROM schema_migrations")
-        return {row[0] for row in cursor.fetchall()}
+        return {(row["version"] if isinstance(row, dict) else row[0]) for row in cursor.fetchall()}
     else:
         # SQLite connection
         return {row[0] for row in conn.execute("SELECT version FROM schema_migrations")}
