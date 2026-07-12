@@ -343,9 +343,12 @@ async def sse_agent_stream(task: str, chat_id: int, user_message: str):
         await asyncio.to_thread(save_message, chat_id, "agent", final_text)
         await asyncio.to_thread(generate_title_if_needed, chat_id, user_message)
 
-        # Stream the final result
-        packet = json.dumps({"chunk": final_text})
-        yield f"data: {packet}\n\n"
+        # Streammiamo il risultato finale con finto stutter per la UI se non supportiamo tokens nativi
+        words = final_text.split(" ")
+        for word in words:
+            packet = json.dumps({"chunk": word + " "})
+            yield f"data: {packet}\n\n"
+            await asyncio.sleep(0.02)
 
     except Exception as e:
         err = json.dumps({"chunk": f"\\n\\n[ERRORE]: {str(e)}"})

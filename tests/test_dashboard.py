@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import sys
@@ -218,7 +219,8 @@ class TestChatRoutes:
         ):
             chunks = [c async for c in sse_agent_stream("ciao", chat_id, "ciao")]
 
-        assert any("risposta di test" in c for c in chunks)
+        combined = "".join(json.loads(c.removeprefix("data: ").strip())["chunk"] for c in chunks if c.startswith("data: {"))
+        assert "risposta di test" in combined
 
         messages = get_messages(chat_id)
         assert [m["role"] for m in messages] == ["user", "agent"]
