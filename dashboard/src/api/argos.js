@@ -16,12 +16,6 @@ export const ArgosAPI = {
   },
 
   /**
-   * Avvia una connessione Server-Sent Events per lo streaming della Chat.
-   * L'endpoint /chat/stream non accetta headers Custom tramite EventSource standard nel browser,
-   * quindi passiamo la key in query params o cambiamo approccio (es. fetch streaming).
-   * Useremo fetch nativa asincrona così possiamo passare l'API Key negl header.
-   */
-  /**
    * Upload a single file and return { upload_id, filename }.
    * Throws on HTTP error or if the server rejects the file (422).
    */
@@ -41,16 +35,38 @@ export const ArgosAPI = {
     return res.json(); // { upload_id, filename }
   },
 
-  async startChatStream(task, history, attachments, onPkt, onError, onComplete) {
+  async listChats() {
+    const res = await fetch("/api/chats", { headers: baseHeaders });
+    if (!res.ok) throw new Error("Failed to fetch chats");
+    return res.json();
+  },
+
+  async createChat() {
+    const res = await fetch("/api/chats", { method: "POST", headers: baseHeaders });
+    if (!res.ok) throw new Error("Failed to create chat");
+    return res.json();
+  },
+
+  async getChatMessages(chatId) {
+    const res = await fetch(`/api/chats/${chatId}/messages`, { headers: baseHeaders });
+    if (!res.ok) throw new Error("Failed to fetch chat messages");
+    return res.json();
+  },
+
+  /**
+   * Avvia una connessione SSE per lo streaming della Chat all'interno di una
+   * chat specifica: lo storico si recupera lato server da chat_id, non viene
+   * più inviato dal client ad ogni richiesta.
+   */
+  async startChatStream(task, chatId, attachments, onPkt, onError, onComplete) {
     try {
         const response = await fetch("/api/chat/stream", {
             method: "POST",
             headers: baseHeaders,
             body: JSON.stringify({
                 task: task,
-                history: history,
+                chat_id: chatId,
                 attachments: attachments || [],
-                require_confirmation: false,
                 max_steps: 10
             })
         });
@@ -66,13 +82,13 @@ export const ArgosAPI = {
         while (true) {
             const { value, done } = await reader.read();
             if (done) break;
-            
+
             buffer += decoder.decode(value, { stream: true });
-            
+
             // Server-Sent events are separated by double newline
             const packets = buffer.split("\n\n");
             buffer = packets.pop(); // keep the last incomplete chunk
-            
+
             for (const packet of packets) {
                 if (packet.startsWith("data: ")) {
                     const dataStr = packet.substring(6);
