@@ -295,30 +295,37 @@ from pydantic import BaseModel
 
 class ChatRequest(BaseModel):
     task: str
+    chat_id: int
     max_steps: int = 10
-    history: list[dict] = []  # List of {role, content} from frontend
     attachments: list[str] = []  # List of upload_id UUIDs from POST /api/upload
 
 
-async def sse_agent_stream(task: str, history: list[dict], user_id: int):
+async def sse_agent_stream(task: str, chat_id: int, user_message: str):
     """
     Generatore asincrono per lo streaming Server-Sent Events e LangGraph.
     Usiamo un trucco per catturare lo stream del CoreAgent.
+
+    `task` is the text sent to the agent (may include appended attachment
+    context); `user_message` is the raw user text persisted to the transcript.
     """
     from src.core import CoreAgent
+    from src.core.chats import generate_title_if_needed, get_messages, save_message
     from src.tools import DASHBOARD_TOOLS_WHITELIST
 
     def _run_agent():
+        history = [
+            {"role": m["role"], "content": m["content"]} for m in get_messages(chat_id)
+        ]
         agent = CoreAgent(
             memory_mode="persistent",
             max_steps=10,
-            user_id=user_id,
+            user_id=chat_id,
             allowed_tools=DASHBOARD_TOOLS_WHITELIST,
         )
-
         agent._injected_history = history[-10:] if history else []
-
         return agent.run_task(task)
+
+    await asyncio.to_thread(save_message, chat_id, "user", user_message)
 
     # No "thinking" placeholder chunk here: the frontend already shows its own
     # "Processing..." indicator (ChatTerminal, driven by isTyping) while this
@@ -333,12 +340,12 @@ async def sse_agent_stream(task: str, history: list[dict], user_id: int):
         # Result is a TaskResult object, we need the response string
         final_text = getattr(result_obj, "response", str(result_obj))
 
-        # Streammiamo il risultato finale con finto stutter per la UI se non supportiamo tokens nativi
-        words = final_text.split(" ")
-        for word in words:
-            packet = json.dumps({"chunk": word + " "})
-            yield f"data: {packet}\n\n"
-            await asyncio.sleep(0.02)
+        await asyncio.to_thread(save_message, chat_id, "agent", final_text)
+        await asyncio.to_thread(generate_title_if_needed, chat_id, user_message)
+
+        # Stream the final result
+        packet = json.dumps({"chunk": final_text})
+        yield f"data: {packet}\n\n"
 
     except Exception as e:
         err = json.dumps({"chunk": f"\\n\\n[ERRORE]: {str(e)}"})
@@ -350,20 +357,20 @@ async def sse_agent_stream(task: str, history: list[dict], user_id: int):
 
 @router.post("/chat/stream", dependencies=[Depends(verify_api_key)])
 async def chat_stream(req: ChatRequest):
-    import hashlib
-    import os
-
     from api.middleware.paranoid import check_paranoid
+    from src.core.chats import chat_exists, touch_chat
     from src.core.rate_limit import RateLimitExceeded, check_rate_limit
 
     # Security: run paranoid pipeline before anything else
     await check_paranoid(req.task)
 
-    linux_user = os.environ.get("USER", "argos")
-    user_id = int(hashlib.sha256(linux_user.encode()).hexdigest()[:16], 16) % (2**31)
+    if not await asyncio.to_thread(chat_exists, req.chat_id):
+        raise HTTPException(status_code=404, detail="Chat not found")
+
+    await asyncio.to_thread(touch_chat, req.chat_id)
 
     try:
-        check_rate_limit(user_id)
+        check_rate_limit(req.chat_id)
     except RateLimitExceeded as e:
         raise HTTPException(status_code=429, detail=str(e))
 
@@ -410,7 +417,7 @@ async def chat_stream(req: ChatRequest):
         try:
             from src.telegram.db import db_update_profile
 
-            db_update_profile(user_id, display_name=name_match.group(1).capitalize())
+            db_update_profile(req.chat_id, display_name=name_match.group(1).capitalize())
         except Exception:
             pass
     elif negation_match:
@@ -418,7 +425,7 @@ async def chat_stream(req: ChatRequest):
         try:
             from src.telegram.db import db_update_profile
 
-            db_update_profile(user_id, display_name="")
+            db_update_profile(req.chat_id, display_name="")
         except Exception:
             pass
 
@@ -429,5 +436,5 @@ async def chat_stream(req: ChatRequest):
         task = f"{task}\n\n{build_attachment_context(req.attachments)}"
 
     return StreamingResponse(
-        sse_agent_stream(task, req.history, user_id), media_type="text/event-stream"
+        sse_agent_stream(task, req.chat_id, req.task), media_type="text/event-stream"
     )

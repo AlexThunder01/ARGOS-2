@@ -184,3 +184,43 @@ class TestChatRoutes:
 
         r = client.get("/api/chats/999999/messages")
         assert r.status_code == 404
+
+    def test_chat_stream_404s_for_nonexistent_chat(self, patch_db):
+        from src.db.migrations import run_migrations
+
+        run_migrations(patch_db)
+
+        r = client.post("/api/chat/stream", json={"task": "ciao", "chat_id": 999999})
+        assert r.status_code == 404
+
+    async def test_sse_agent_stream_persists_transcript_and_generates_title(self, patch_db):
+        from src.db.migrations import run_migrations
+
+        run_migrations(patch_db)
+        from src.core.chats import create_chat, get_messages
+        from api.routes.dashboard import sse_agent_stream
+
+        chat_id = create_chat()
+
+        class _FakeResult:
+            response = "risposta di test"
+
+        class _FakeAgent:
+            def __init__(self, **kwargs):
+                pass
+
+            def run_task(self, task):
+                return _FakeResult()
+
+        with (
+            patch("src.core.CoreAgent", _FakeAgent),
+            patch("src.core.chats._generate_title", return_value="Titolo di test"),
+        ):
+            chunks = [c async for c in sse_agent_stream("ciao", chat_id, "ciao")]
+
+        assert any("risposta di test" in c for c in chunks)
+
+        messages = get_messages(chat_id)
+        assert [m["role"] for m in messages] == ["user", "agent"]
+        assert messages[0]["content"] == "ciao"
+        assert messages[1]["content"] == "risposta di test"
