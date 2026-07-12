@@ -69,6 +69,10 @@ def _create_api_test_db() -> sqlite3.Connection:
 # di modulo in test_api.py) venga eseguito.
 _api_conn = _create_api_test_db()
 
+from src.db.migrations import run_migrations
+
+run_migrations(_api_conn)
+
 import unittest.mock as _mock
 
 _p1 = _mock.patch("src.db.connection.get_connection", return_value=_api_conn)
@@ -85,7 +89,9 @@ def api_db(monkeypatch):
     monkeypatch.setattr("src.db.connection.get_connection", lambda: _api_conn)
     monkeypatch.setattr("src.db.repository.get_connection", lambda: _api_conn)
     monkeypatch.setattr("src.core.rate_limit.get_connection", lambda: _api_conn)
-    # Azzera i contatori rate limit prima di ogni test per evitare interferenze
+    # Azzera i contatori rate limit e le tabelle chat prima di ogni test per evitare interferenze
     _api_conn.execute("DELETE FROM tg_rate_limits")
+    _api_conn.execute("DELETE FROM argos_chat_messages")
+    _api_conn.execute("DELETE FROM argos_chats")
     _api_conn.commit()
     yield _api_conn

@@ -312,17 +312,19 @@ async def sse_agent_stream(task: str, chat_id: int, user_message: str):
     from src.core.chats import generate_title_if_needed, get_messages, save_message
     from src.tools import DASHBOARD_TOOLS_WHITELIST
 
+    prior_history = [
+        {"role": m["role"], "content": m["content"]}
+        for m in await asyncio.to_thread(get_messages, chat_id)
+    ]
+
     def _run_agent():
-        history = [
-            {"role": m["role"], "content": m["content"]} for m in get_messages(chat_id)
-        ]
         agent = CoreAgent(
             memory_mode="persistent",
             max_steps=10,
             user_id=chat_id,
             allowed_tools=DASHBOARD_TOOLS_WHITELIST,
         )
-        agent._injected_history = history[-10:] if history else []
+        agent._injected_history = prior_history[-10:] if prior_history else []
         return agent.run_task(task)
 
     await asyncio.to_thread(save_message, chat_id, "user", user_message)
