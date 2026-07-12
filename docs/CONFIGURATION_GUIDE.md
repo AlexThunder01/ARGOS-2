@@ -38,12 +38,16 @@ Environment variables control global infrastructure and security behavior.
 | `EMBEDDING_MODEL` | `nomic-embed-text-v1.5` | Embedding model name |
 | `EMBEDDING_DIM` | `768` | Embedding vector dimensions. Must match the model output. |
 
+> **Docker note**: if `EMBEDDING_BASE_URL` points at a local server (e.g. Ollama on `localhost:11434`), remember that `localhost` inside the `argos-api` container refers to the container itself, not the host. Use `http://host.docker.internal:11434/v1` instead — this requires both `extra_hosts: ["host.docker.internal:host-gateway"]` in `docker-compose.yml` (Linux doesn't auto-map this, unlike Docker Desktop) and the local server actually bound to more than `127.0.0.1` (e.g. `OLLAMA_HOST=0.0.0.0`). Same class of issue as `N8N_BASE_URL` (see the main [README](../README.md)).
+
 ### Database
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DB_BACKEND` | `postgres` | `sqlite` for local dev or `postgres` for production |
-| `DATABASE_URL` | `postgresql://argos:argos_secret@localhost:5432/argos` | PostgreSQL connection string |
+| `DATABASE_URL` | `postgresql://argos:argos_secret@argos-db:5432/argos` inside Docker; `postgresql://argos:argos_secret@localhost:5433/argos` from the host (docker-compose publishes Postgres on host port **5433**, not 5432) | PostgreSQL connection string |
+
+> **Docker note**: if you also run the CLI on the host with SQLite, leave `DB_BACKEND` unset in `.env` rather than setting it to `sqlite`. `docker-compose.yml`'s `argos-api` service only falls back to its own `DB_BACKEND=postgres` default when the variable is completely unset — Compose's `${VAR:-default}` syntax applies the default only when `VAR` is unset, not when it's set to a non-empty value like `sqlite`. An explicit `sqlite` in `.env` leaks into the container too, silently disabling persistent RAG memory there.
 
 ### Security
 

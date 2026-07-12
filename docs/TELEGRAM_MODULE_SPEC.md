@@ -20,8 +20,8 @@ The module follows a **Body-Brain** pattern using the unified `src/core/` packag
 - **Brain (FastAPI + CoreAgent):** Handles authentication, memory retrieval, and LLM reasoning.
 
 ### 2.1 The Memory Promotion
-Crucially, the RAG memory system (embeddings, sliding window, and extraction) has been promoted from the Telegram-specific module to `src/core/memory.py`. 
-- **Shared Memory**: If enabled, the Linux CLI and Telegram share the same SQLite vector store, allowing for a cross-platform memory experience.
+Crucially, the RAG memory system (embeddings, sliding window, and extraction) has been promoted from the Telegram-specific module to `src/core/memory.py`.
+- **Isolated Memory, Shared Engine**: The CLI's persistent mode (`--chat ID` / `--new-chat`, each an isolated chat — see `src/core/chats.py`) and the Telegram bot each use their own numeric identity as the `user_id` scoping RAG memory. Both go through the same storage engine, but never the same memory bucket — a CLI chat and a Telegram conversation never mix each other's facts.
 
 ---
 
@@ -35,14 +35,14 @@ Crucially, the RAG memory system (embeddings, sliding window, and extraction) ha
    - Applies token-budget trimming (`MAX_HISTORY_TOKENS`, default: 8000) to keep within LLM context limits.
    - Retrieves top-3 relevant memories from the vector store (Cosine Similarity, threshold from `config.yaml`).
    - Constructs the system prompt (Persona + Profile + Tool RAG).
-   - Executes the tool-equipped reasoning loop (32 tools).
+   - Executes the tool-equipped reasoning loop (33 tools).
 4. **Memory Extraction**: A background task analyzes the final turn to extract new facts or preferences.
 
 ---
 
 ## 4. Advanced Reasoning Tools in Chat
 
-The Telegram assistant now has access to the same 32-tool arsenal as the CLI, including:
+The Telegram assistant now has access to the same 33-tool arsenal as the CLI, including:
 - **`web_search` & `web_scrape`**: To answer real-time questions and read links.
 - **`read_pdf` & `read_csv`**: To analyze documents sent to the assistant.
 - **`python_repl`**: To perform precise mathematical and data operations.

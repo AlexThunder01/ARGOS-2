@@ -47,6 +47,7 @@ The "Nervous System" of ARGOS. n8n handles all I/O, secret management, and deter
 ### 2. The Command Center: Web Dashboard
 A **React (Vite 8)** web interface served by FastAPI, featuring:
 - **SSE Chat Terminal**: Real-time streaming responses from the CoreAgent via `EventSource`.
+- **Multi-Chat**: Topbar switcher lists, creates, and resumes chats — each an isolated persistent-memory bucket with its own auto-generated title and full transcript, shared with the CLI via the same `chat_id`-scoped storage (`src/core/chats.py`).
 - **Docker Monitor**: Live status for all running containers (polled via `asyncio.to_thread`).
 - **Resource Telemetry**: Live **CPU**, **RAM**, and **DB Pool** tracking via `psutil` integration in Python.
 - **Security Audit Logging**: Visualizes risk average scores and blocked count today by querying `tg_suspicious_memories` directly in PostgreSQL.
@@ -56,7 +57,7 @@ A **React (Vite 8)** web interface served by FastAPI, featuring:
 ### 3. The CLI Interface
 The "Local Direct Control" of ARGOS.
 - **Direct Engine Access**: Calls `CoreAgent` directly without going through n8n.
-- **Stateless vs. Persistent**: Can operate with ephemeral RAM memory or sync with the shared RAG database used by Telegram.
+- **Stateless vs. Persistent**: Can operate with ephemeral RAM memory or persistent RAG memory scoped to an isolated chat (`--chat ID` to resume, `--new-chat` to create — see `--list-chats`), so unrelated conversations never mix each other's facts.
 - **Security Gate**: Interactive `(y/N)` confirmation for dangerous tool execution.
 
 ### 4. The Brain: CoreAgent Engine
@@ -121,7 +122,7 @@ Interactive manual authorization for tools with `risk` level of `medium`, `high`
 The API container creates a restricted `argos` user (`groupadd -r argos && useradd -r -g argos`) and runs all processes as that user via `USER argos` in the Dockerfile.
 
 ### Layer 7: Circuit Breaker
-API routes use `pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)` on LLM calls. After 3 consecutive failures, the circuit opens and immediately returns an error for 60 seconds, preventing thread pool saturation.
+A custom `CircuitBreaker` (`src/resilience/circuit_breaker.py`) wraps every LLM call centrally in `src/llm/client.py`. After `CIRCUIT_BREAKER_FAILURE_THRESHOLD` (default 5) consecutive failures, the circuit opens and fails fast for `CIRCUIT_BREAKER_TIMEOUT_SECONDS` (default 60) instead of retrying a provider that's clearly down — protecting the API's single worker thread pool from saturation.
 
 ---
 

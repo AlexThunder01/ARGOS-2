@@ -147,9 +147,10 @@ npm run dev    # Starts Vite HMR on localhost:5173
 ```
 dashboard/src/
 ├── api/argos.js              ← Centralized API SDK (REST + SSE)
-├── hooks/useSSEChat.js       ← React hook for streaming LLM responses
+├── hooks/useSSEChat.js       ← React hook for streaming LLM responses + multi-chat state
 ├── components/
 │   ├── ChatTerminal/         ← Main chat interface
+│   ├── ChatSwitcher/         ← Topbar multi-chat dropdown (list / switch / create)
 │   ├── CommandMonitor/       ← Docker container stats widget
 │   └── RateLimitWidget/      ← API quota tracker
 ├── App.jsx                   ← Root layout (2-column grid)
@@ -217,7 +218,7 @@ cd tests/load && locust -f locustfile.py --host http://localhost:8000
 ```
 
 ### Non-Interactive CLI testing
-You can test the CLI engine directly using strings:
+You can test the CLI engine directly using strings. `--memory` always requires `--chat ID` (resume) or `--new-chat` (create) — see `--list-chats` for existing chats:
 ```bash
-python3 scripts/main.py --memory "What is 2+2?"
+python3 scripts/main.py --memory --new-chat "What is 2+2?"
 ```

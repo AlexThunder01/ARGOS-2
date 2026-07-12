@@ -58,7 +58,7 @@ sequenceDiagram
 
 ## 3. Data Models & payloads
 
-### 3.1 Advanced Tool Registry (32 Tools)
+### 3.1 Advanced Tool Registry (33 Tools)
 
 | Tool Name | Input Sample | Output |
 |:---|:---|:---|
@@ -89,8 +89,8 @@ Powerful tools (`bash_exec`, `python_repl`, `read_pdf`, `delete_file`) on the CL
 
 ## 5. Network and Concurrency
 
-### 5.1 SQLite WAL Mode
-All components (CLI, API, n8n) communicate via the same `argos_state.db` volume using **Write-Ahead Logging (WAL)** to prevent "database is locked" errors during high-concurrency bursts.
+### 5.1 Dual-Backend Storage: SQLite / PostgreSQL
+Selected via `DB_BACKEND` (default `postgres`). SQLite (local, CLI-only dev without Docker) uses **Write-Ahead Logging (WAL)** to reduce "database is locked" contention. Production (Docker Compose) uses PostgreSQL + pgvector through a `psycopg_pool` connection pool shared by all request handlers — any blocking DB call made directly on the event loop (not via `asyncio.to_thread`), or any code path that checks out a pooled connection without returning it, can stall or exhaust the pool under the single-worker deployment; both failure modes have occurred in practice and are worth checking first when the API becomes unresponsive.
 
 ### 5.2 LLM Circuit Breaking
-The FastAPI API routes use `pybreaker.CircuitBreaker(fail_max=3, reset_timeout=60)`. If the LLM provider fails 3 consecutive times, the "circuit opens," shielding the system's thread pools from saturation for 60 seconds. Implemented in `api/routes/agent.py` and `api/routes/telegram.py`.
+A custom `CircuitBreaker` (`src/resilience/circuit_breaker.py`) wraps every LLM call centrally in `src/llm/client.py`. If the provider fails `CIRCUIT_BREAKER_FAILURE_THRESHOLD` (default 5) consecutive times, the circuit opens and fails fast for `CIRCUIT_BREAKER_TIMEOUT_SECONDS` (default 60) instead of retrying — shielding the API's single worker thread pool from saturation.

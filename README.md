@@ -235,20 +235,26 @@ python3 scripts/main.py
 # Session memory — kept in RAM for the current session only
 python3 scripts/main.py --session
 
-# Persistent memory — uses pgvector RAG, shared with the Telegram bot
-python3 scripts/main.py --memory
+# Persistent memory — each chat is its own isolated memory bucket, so
+# separate conversations never mix each other's facts. --memory always
+# requires --chat ID (resume) or --new-chat (create):
+python3 scripts/main.py --memory --new-chat        # start a new chat
+python3 scripts/main.py --memory --chat 3          # resume chat 3
+python3 scripts/main.py --list-chats               # see all existing chats (id, title, created, last used)
 
 # One-shot mode — run a single prompt and exit
-python3 scripts/main.py "summarise today's news"
+python3 scripts/main.py --memory --chat 3 "summarise today's news"
 
 # Attach files to a prompt
 python3 scripts/main.py --attach report.pdf image.png
 
 # Additional flags
 #   --max-steps N   Max reasoning steps per task (default: 10, env: MAX_TOOL_LOOPS)
-#   --user-id N     Override the auto-generated user ID
+#   --user-id N     Override the auto-generated user ID (stateless/session modes only)
 #   --debug         Enable verbose debug logging
 ```
+
+Chats are shared between the CLI and the web Dashboard — a chat started in one resumes with its full transcript and memory in the other, since both use the same `chat_id`-scoped storage.
 
 Voice input is available when `ENABLE_VOICE=true` is set in `.env`.
 
@@ -256,7 +262,7 @@ Voice input is available when `ENABLE_VOICE=true` is set in `.env`.
 
 After deployment, the dashboard is available at [http://localhost:8000](http://localhost:8000).
 
-It includes a chat terminal (SSE streaming), live Docker container monitor, CPU/RAM telemetry, and a security audit log.
+It includes a chat terminal (SSE streaming) with multi-chat support — a topbar switcher lists all chats (auto-titled from the first message), lets you resume any of them with its full transcript, or start a new isolated one — plus a live Docker container monitor, CPU/RAM telemetry, and a security audit log.
 
 For local frontend development with hot reload:
 
@@ -369,7 +375,7 @@ Security layers:
 5. **Rate Limiting** — atomic sliding-window quotas via PostgreSQL (no Redis required)
 6. **Docker Sandbox** — code execution isolated in ephemeral containers via `docker-socket-proxy` (read-only workspace, no network, 128 MB RAM)
 7. **Non-Root Container** — the API container runs as a restricted `argos` user
-8. **LLM Retry** — exponential backoff (`tenacity`) around LLM calls absorbs transient failures. (A `CircuitBreaker` class exists in `src/resilience/` but isn't wired into any route yet — treat it as available for future work, not an active protection.)
+8. **LLM Retry & Circuit Breaker** — exponential backoff (`tenacity`) around each LLM call absorbs transient failures; a `CircuitBreaker` (`src/resilience/`) sits above it and trips after repeated failures, failing fast instead of tying up the API's single worker retrying a provider that's clearly down.
 
 ---
 
