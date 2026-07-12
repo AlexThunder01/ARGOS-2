@@ -1,0 +1,63 @@
+.wrap {
+  position: relative;
+}
+
+.pill {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--purple);
+  background: var(--surface2);
+  border: 1px solid var(--purple);
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.pill:hover {
+  background: rgba(167, 139, 250, 0.1);
+}
+
+.menu {
+  position: absolute;
+  top: 28px;
+  right: 0;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px;
+  width: 180px;
+  font-size: 10px;
+  z-index: 20;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.item {
+  padding: 4px 6px;
+  border-radius: 3px;
+  color: var(--text2);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.item.active {
+  color: var(--cyan);
+  background: rgba(0, 229, 255, 0.08);
+}
+
+.newChat {
+  padding: 4px 6px;
+  margin-top: 3px;
+  border-top: 1px solid var(--border);
+  color: var(--success);
+  cursor: pointer;
+}
+
+.newChat:hover {
+  background: rgba(52, 211, 153, 0.08);
+}
