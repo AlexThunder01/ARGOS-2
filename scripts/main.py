@@ -306,9 +306,10 @@ def main():
         if not chats:
             print("Nessuna chat salvata. Usa --memory --new-chat per crearne una.")
         else:
-            print(f"{'ID':<6}{'Creata':<22}{'Ultimo uso':<22}")
+            print(f"{'ID':<6}{'Titolo':<30}{'Creata':<22}{'Ultimo uso':<22}")
             for c in chats:
-                print(f"{c['id']:<6}{str(c['created_at']):<22}{str(c['last_used_at']):<22}")
+                title = c["title"] or f"Chat #{c['id']}"
+                print(f"{c['id']:<6}{title:<30}{str(c['created_at']):<22}{str(c['last_used_at']):<22}")
         return
 
     # Determine memory mode
@@ -410,6 +411,12 @@ def main():
         print("⏳ ...", end="\r")
         result = agent.run_task(one_shot)
         print(" " * 10, end="\r")
+        if memory_mode == "persistent":
+            from src.core.chats import generate_title_if_needed, save_message
+
+            save_message(agent.user_id, "user", one_shot)
+            save_message(agent.user_id, "agent", result.response)
+            generate_title_if_needed(agent.user_id, one_shot)
         if result.history:
             for step in result.history:
                 status = "✅" if step.success else "❌"
@@ -498,6 +505,13 @@ def main():
             print("⏳ ...", end="\r")
             result = agent.run_task(task_text)
             print(" " * 10, end="\r")
+
+            if memory_mode == "persistent":
+                from src.core.chats import generate_title_if_needed, save_message
+
+                save_message(agent.user_id, "user", user_input)
+                save_message(agent.user_id, "agent", result.response)
+                generate_title_if_needed(agent.user_id, user_input)
 
             # Accumulate history for next turn (kept to last 10 messages)
             conversation_history.append({"role": "user", "content": user_input})
